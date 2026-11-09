@@ -219,3 +219,132 @@ describe("credit ledger", () => {
     expect(rows).toEqual([{ workspace_id: wsA, available: 6 }]);
   });
 });
+
+describe("ledger rules (hardening)", () => {
+  let campaign: string;
+
+  beforeAll(async () => {
+    const c = await db.query<{ id: string }>(
+      "insert into public.campaigns (workspace_id, name) values ($1, 'Rules') returning id",
+      [wsB],
+    );
+    campaign = c.rows[0].id;
+    await db.query("select public.add_purchase($1, 20, 'evt_rules')", [wsB]);
+  });
+
+  const ledgerFor = async (lead: string) =>
+    (
+      await db.query<{ type: string; amount: number }>(
+        "select type, amount from public.credit_ledger where lead_id = $1 order by id",
+        [lead],
+      )
+    ).rows;
+
+  it("double capture only charges once", async () => {
+    const lead = await addLead(wsB, campaign, "dbl@x.nl");
+    await db.query("select public.reserve_credits($1, 1)", [lead]);
+    const a = await db.query<{ n: number }>("select public.capture_credits($1, 1) as n", [lead]);
+    const b = await db.query<{ n: number }>("select public.capture_credits($1, 1) as n", [lead]);
+    expect([a.rows[0].n, b.rows[0].n]).toEqual([1, 0]);
+    expect(await ledgerFor(lead)).toEqual([
+      { type: "reserve", amount: -1 },
+      { type: "capture", amount: 1 },
+    ]);
+  });
+
+  it("release after a full capture releases nothing", async () => {
+    const lead = await addLead(wsB, campaign, "relafter@x.nl");
+    await db.query("select public.reserve_credits($1, 2)", [lead]);
+    await db.query("select public.capture_credits($1, 2)", [lead]);
+    const r = await db.query<{ n: number }>("select public.release_credits($1) as n", [lead]);
+    expect(r.rows[0].n).toBe(0);
+    expect((await ledgerFor(lead)).map((x) => x.type)).toEqual(["reserve", "capture"]);
+  });
+
+  it("a crashed job that is retried from the start charges exactly once", async () => {
+    const lead = await addLead(wsB, campaign, "crash@x.nl");
+    const before = await balance(wsB);
+    // Attempt 1: reserve, then the worker dies before settling.
+    expect((await db.query<{ ok: boolean }>("select public.reserve_credits($1, 1) as ok", [lead])).rows[0].ok).toBe(true);
+    // Attempt 2 runs the whole job again.
+    expect((await db.query<{ ok: boolean }>("select public.reserve_credits($1, 1) as ok", [lead])).rows[0].ok).toBe(true);
+    await db.query("select public.capture_credits($1, 1)", [lead]);
+    // Attempt 2 also dies after capturing; attempt 3 settles again.
+    await db.query("select public.reserve_credits($1, 1)", [lead]);
+    await db.query("select public.capture_credits($1, 1)", [lead]);
+    await db.query("select public.release_credits($1)", [lead]);
+    expect(await ledgerFor(lead)).toEqual([
+      { type: "reserve", amount: -1 },
+      { type: "capture", amount: 1 },
+    ]);
+    const after = await balance(wsB);
+    expect(after.available).toBe(before.available - 1);
+    expect(after.spent).toBe(before.spent + 1);
+    expect(after.reserved).toBe(before.reserved);
+  });
+
+  it("a lead can only ever have one reserve row", async () => {
+    const lead = await addLead(wsB, campaign, "uniq@x.nl");
+    await db.query("select public.reserve_credits($1, 1)", [lead]);
+    await expect(
+      db.query("insert into public.credit_ledger (workspace_id, type, amount, lead_id) values ($1, 'reserve', -1, $2)", [wsB, lead]),
+    ).rejects.toThrow(/credit_ledger_one_reserve_per_lead/);
+  });
+
+  it("capture and release refuse leads that were never reserved", async () => {
+    const lead = await addLead(wsB, campaign, "never@x.nl");
+    await expect(db.query("select public.capture_credits($1, 1)", [lead])).rejects.toThrow(/no reservation/);
+    await expect(db.query("select public.release_credits($1)", [lead])).rejects.toThrow(/no reservation/);
+    // Even a direct insert (buggy server code) is blocked by the table itself.
+    await expect(
+      db.query("insert into public.credit_ledger (workspace_id, type, amount, lead_id) values ($1, 'capture', 1, $2)", [wsB, lead]),
+    ).rejects.toThrow(/no reservation/);
+  });
+
+  it("capture + release can never exceed the reserve, even via direct inserts", async () => {
+    const lead = await addLead(wsB, campaign, "over@x.nl");
+    await db.query("select public.reserve_credits($1, 2)", [lead]);
+    await db.query("select public.capture_credits($1, 1)", [lead]);
+    await expect(
+      db.query("insert into public.credit_ledger (workspace_id, type, amount, lead_id) values ($1, 'release', 2, $2)", [wsB, lead]),
+    ).rejects.toThrow(/would exceed the reservation/);
+    expect((await db.query<{ n: number }>("select public.capture_credits($1, 5) as n", [lead])).rows[0].n).toBe(1);
+  });
+
+  it("settlement rows must belong to the reserve's workspace", async () => {
+    const lead = await addLead(wsB, campaign, "wrongws@x.nl");
+    await db.query("select public.reserve_credits($1, 1)", [lead]);
+    await expect(
+      db.query("insert into public.credit_ledger (workspace_id, type, amount, lead_id) values ($1, 'capture', 1, $2)", [wsA, lead]),
+    ).rejects.toThrow(/does not match/);
+  });
+
+  it("reserve, capture and release rows must name a lead", async () => {
+    await expect(
+      db.query("insert into public.credit_ledger (workspace_id, type, amount) values ($1, 'reserve', -1)", [wsB]),
+    ).rejects.toThrow(/credit_ledger_lead_required/);
+  });
+
+  it("reserve fails cleanly when credits run out, without writing anything", async () => {
+    const { available } = await balance(wsB);
+    const lead = await addLead(wsB, campaign, "broke@x.nl");
+    const r = await db.query<{ ok: boolean }>("select public.reserve_credits($1, $2) as ok", [lead, available + 1]);
+    expect(r.rows[0].ok).toBe(false);
+    expect(await ledgerFor(lead)).toEqual([]);
+  });
+
+  it("balances always satisfy the agreed formulas", async () => {
+    const raw = await db.query<{ type: string; total: number }>(
+      "select type, sum(amount)::int as total from public.credit_ledger where workspace_id = $1 group by type",
+      [wsB],
+    );
+    const t = Object.fromEntries(raw.rows.map((r) => [r.type, r.total])) as Record<string, number>;
+    const g = (k: string) => t[k] ?? 0;
+    const reserveMagnitude = -g("reserve");
+    expect(await balance(wsB)).toEqual({
+      available: g("purchase") + g("bonus") + g("refund") + g("release") - reserveMagnitude,
+      reserved: reserveMagnitude - g("release") - g("capture"),
+      spent: g("capture"),
+    });
+  });
+});
