@@ -5,8 +5,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth";
 import { applyMapping, mappingErrors, MAX_ROWS, type ColumnTarget } from "@/lib/csv";
+import { MAX_FREE_RUN } from "@/lib/credits";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
+import { serverPool } from "@/server/db";
+import { resumeSend, setCampaignSendState, startSending } from "@/sender/db";
 
 const PREVIEW_SIZE = 5;
 
@@ -126,4 +129,84 @@ export async function deleteCampaign(id: string) {
   if (error) return { error: error.message };
   revalidatePath("/campaigns");
   redirect("/campaigns");
+}
+
+/**
+ * Run the whole campaign (§10.4). The user chooses up front what happens when
+ * research finds nothing usable: send the neutral version, or skip the lead.
+ * Leads already written (e.g. in the preview) are not written again; failed ones are retried.
+ */
+export async function runCampaign(campaignId: string, sendFallbacks: boolean): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const { supabase, workspace } = await requireWorkspace();
+  const { data: campaign } = await supabase.from("campaigns").select("id, templates(subject, body)").eq("id", campaignId).maybeSingle();
+  if (!campaign) return { error: "Campaign not found." };
+  const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
+  if (!tpl) return { error: "Pick a template first." };
+  const parsed = parseTemplate(tpl);
+  if (hasErrors(parsed) || parsed.slots.length === 0) return { error: "The template has errors or no slots. Fix it first." };
+  if (!queueConfigured()) return { error: "Running needs the worker database connection (DATABASE_URL in .env.local)." };
+
+  const { data: leads, error } = await supabase.from("leads").select("id, status").eq("campaign_id", campaignId).limit(MAX_FREE_RUN + 1);
+  if (error) return { error: error.message };
+  if (!leads?.length) return { error: "This campaign has no leads." };
+  if (leads.length > MAX_FREE_RUN) return { error: `While testing, a run is limited to ${MAX_FREE_RUN} leads (credits come in a later phase).` };
+
+  await supabase.from("campaigns").update({ status: "running", send_fallbacks: sendFallbacks }).eq("id", campaignId);
+  const todo = leads.filter((l) => l.status === "queued" || l.status === "failed");
+  if (todo.length) {
+    try {
+      await enqueueLeads(
+        todo.map((l) => ({ leadId: l.id, workspaceId: workspace.id, preview: false, force: l.status === "failed" })),
+        `run-${Date.now()}`,
+      );
+    } catch (e) {
+      return { error: `Couldn't reach the job queue: ${(e as Error).message}` };
+    }
+  }
+  revalidatePath(`/campaigns/${campaignId}`);
+}
+
+const StartSending = z.object({
+  campaignId: z.uuid(),
+  inboxId: z.uuid("Pick an inbox."),
+  optOutLine: z.string().trim().max(200),
+});
+
+export async function startCampaignSending(
+  input: z.input<typeof StartSending>,
+): Promise<{ error: string } | { queued: number; suppressed: number; alreadyQueued: number; skippedFallbacks: number }> {
+  const parsed = StartSending.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  if (!queueConfigured()) return { error: "Sending needs the database connection (DATABASE_URL in .env.local)." };
+  const { supabase, workspace } = await requireWorkspace();
+  const { data: c } = await supabase.from("campaigns").select("id").eq("id", parsed.data.campaignId).maybeSingle();
+  if (!c) return { error: "Campaign not found." };
+  try {
+    const res = await startSending(serverPool(), {
+      workspaceId: workspace.id,
+      campaignId: parsed.data.campaignId,
+      inboxId: parsed.data.inboxId,
+      optOutLine: parsed.data.optOutLine || null,
+    });
+    revalidatePath(`/campaigns/${parsed.data.campaignId}`);
+    return res;
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+export async function setCampaignSending(campaignId: string, state: "sending" | "paused"): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const { workspace } = await requireWorkspace();
+  await setCampaignSendState(serverPool(), workspace.id, campaignId, state);
+  revalidatePath(`/campaigns/${campaignId}`);
+}
+
+/** Resume a lead paused because a colleague at the same company replied. */
+export async function resumeLeadSend(campaignId: string, sendId: string): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(sendId).success) return { error: "Invalid email." };
+  const { workspace } = await requireWorkspace();
+  if (!(await resumeSend(serverPool(), workspace.id, sendId))) return { error: "This email isn't paused." };
+  revalidatePath(`/campaigns/${campaignId}`);
 }

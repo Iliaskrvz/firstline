@@ -5,8 +5,10 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
 ## Status
 
 - **Phase 1** (done): auth, workspaces, schema with RLS and credit ledger, CSV upload + mapping, template editor.
-- **Phase 2** (in progress): per-lead engine (research → facts → write → validate → fallback), pg-boss worker,
-  free 5-lead preview. Writing runs on a **fake LLM** until an Anthropic key is added.
+- **Phase 2** (done, without Claude): per-lead engine (research → facts → write → validate → fallback), pg-boss
+  worker, free 5-lead preview. Writing runs on a **fake LLM** until an Anthropic key is added.
+- **Phase 3** (in progress): Gmail sender. Run campaign (free, ≤ 50 leads until credits exist), Inboxes, Sender
+  Sheet script ([apps-script/](apps-script/README.md)), `/api/sender/next` + `/report`, scheduler, stop rules.
 
 ## Setup
 
@@ -63,6 +65,23 @@ npm run worker
 - heartbeat every 15 s in `worker_heartbeats`; health check at http://127.0.0.1:8787/health
 - VPS: `pm2 start worker/ecosystem.config.cjs` (logs in `logs/`); full setup steps come with deployment
 
+## Gmail sender (Phase 3)
+
+The Sender Sheet script runs in the user's Google account and calls `GET /api/sender/next` (one email or
+"nothing now") and `POST /api/sender/report` (sent / failed / replied / bounced flags) with a per-inbox key.
+All scheduling happens on the server (`src/lib/sender/schedule.ts`, `src/sender/db.ts`): sending window, daily
+cap with warm-up (10 → 30, +2 per sending day), 6–14 min gaps, one email at a time, suppression list, stop rules
+(reply/bounce/unsubscribe stop the lead; a reply pauses other leads at the same company, resumable).
+
+Local testing needs a public address for Google to call:
+
+```bash
+npm run tunnel
+```
+
+Copy the `https://….trycloudflare.com` address into `PUBLIC_APP_URL` in `.env.local`. The address changes every
+time the tunnel restarts; then run FirstLine → Connect… in the sheet again.
+
 ## Scripts
 
 | Command | What it does |
@@ -70,6 +89,7 @@ npm run worker
 | `npm test` | Unit tests + migration/RLS/ledger tests (PGlite) + concurrency and worker-path tests on an embedded Postgres 17 |
 | `npm run typecheck` | Next route types + `tsc` |
 | `npm run worker` | Start the job worker |
+| `npm run tunnel` | Public https address for the dev server (Cloudflare quick tunnel), for the Sender Sheet |
 | `npm run engine:try -- <csv>` | Engine on a CSV without the database (max 5 leads) |
 | `npx supabase db push --remote` | Apply `supabase/migrations` to the linked project |
 

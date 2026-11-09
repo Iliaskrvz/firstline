@@ -7,6 +7,7 @@ import { cx } from "./ui";
 const LINKS = [
   { href: "/campaigns", label: "Campaigns" },
   { href: "/templates", label: "Templates" },
+  { href: "/inboxes", label: "Inboxes" },
 ] as const;
 
 export function NavLinks() {

@@ -11,12 +11,21 @@ import { formatDate, n, STATUS_TONE } from "@/lib/format";
 import { parseTemplate } from "@/lib/template";
 import type { CampaignRow, LeadRow, TemplateRow } from "@/lib/types";
 import { queueConfigured } from "@/server/queue";
+import { detectLanguage } from "@/engine/language";
+import { defaultOptOutLine } from "@/lib/sender/messages";
 import { CampaignSettings } from "./campaign-settings";
 import { PreviewButton } from "./preview-button";
+import { AutoRefresh } from "./preview/auto-refresh";
+import { ResumeButton } from "./resume-button";
+import { RunPanel } from "./run-panel";
+import { SendPanel } from "./send-panel";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status";
+const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail";
+const IN_FLIGHT = new Set(["queued", "researching", "writing"]);
+const SEND_TONE = { queued: "gray", paused: "amber", sent: "indigo", replied: "green", bounced: "red", stopped: "gray" } as const;
+type SendRow = { id: string; lead_id: string; status: keyof typeof SEND_TONE; status_detail: string | null };
 const PAGE = 50;
 
 export default function CampaignPage(props: PageProps<"/campaigns/[id]">) {
@@ -32,12 +41,24 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const { supabase } = await requireWorkspace();
 
-  const [{ data: campaign }, { data: leads, count }, { count: withSite }, { data: templates }, { count: previewCountRaw }] = await Promise.all([
+  const [
+    { data: campaign },
+    { data: leads, count },
+    { count: withSite },
+    { data: templates },
+    { count: previewCountRaw },
+    { data: allStatuses },
+    { data: sendRows },
+    { data: inboxRows },
+  ] = await Promise.all([
     supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
+    supabase.from("leads").select("id, status").eq("campaign_id", id).limit(10_000),
+    supabase.from("sends").select("id, lead_id, status, status_detail").eq("campaign_id", id).eq("step_no", 1).limit(10_000),
+    supabase.from("inboxes").select("id, email").order("created_at"),
   ]);
   const previewCount = previewCountRaw ?? 0;
   if (!campaign) notFound();
@@ -51,17 +72,32 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   const total = count ?? 0;
   const researchable = withSite ?? 0;
 
+  // Run + send state.
+  const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; opt_out_line: string | null };
+  const statuses = (allStatuses ?? []) as { id: string; status: string }[];
+  const byStatus = statuses.reduce<Record<string, number>>((m, l) => ((m[l.status] = (m[l.status] ?? 0) + 1), m), {});
+  const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
+  const remaining = (byStatus.queued ?? 0) + (byStatus.failed ?? 0);
+  const sends = (sendRows ?? []) as SendRow[];
+  const sendByLead = new Map(sends.map((x) => [x.lead_id, x]));
+  const sendCounts = sends.reduce<Record<string, number>>((m, x) => ((m[x.status] = (m[x.status] ?? 0) + 1), m), {});
+  const readyToQueue = statuses.filter((l) => !sendByLead.has(l.id) && (l.status === "done" || (l.status === "fallback" && c2.send_fallbacks))).length;
+  const inboxes = (inboxRows ?? []) as { id: string; email: string }[];
+  const shownStatus = c.status === "running" && !inFlight ? "done" : c.status;
+  const templateOk = !!parsed && parsed.slots.length > 0 && !parsed.issues.some((i) => i.level === "error");
+
   return (
     <>
       <PageHeader
         title={c.name}
         description={
           <span className="inline-flex items-center gap-2">
-            <Badge tone={STATUS_TONE[c.status]}>{c.status}</Badge> Created {formatDate(c.created_at)}
+            <Badge tone={STATUS_TONE[shownStatus]}>{shownStatus}</Badge> Created {formatDate(c.created_at)}
           </span>
         }
       />
 
+      <AutoRefresh active={inFlight || c2.send_state === "sending"} intervalMs={inFlight ? 3000 : 20_000} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Leads" value={n(total)} />
         <Stat label="With website" value={n(researchable)} tone="green" />
@@ -152,6 +188,34 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               View preview ({previewCount} leads) →
             </Link>
           )}
+          <div className="border-t border-slate-100 pt-5">
+            <RunPanel
+              campaignId={c.id}
+              total={total}
+              remaining={remaining}
+              sendFallbacks={c2.send_fallbacks}
+              running={inFlight}
+              disabledReason={!templateOk ? "Pick a template with at least one valid slot first." : !queueConfigured() ? "Add DATABASE_URL to .env.local first." : null}
+            />
+            {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
+              <p className="mt-3 text-center text-xs text-slate-600">
+                {byStatus.done ?? 0} written · {byStatus.fallback ?? 0} fallback · {byStatus.failed ?? 0} failed
+                {inFlight && ` · ${statuses.filter((l) => IN_FLIGHT.has(l.status)).length} in progress`}
+              </p>
+            )}
+          </div>
+          <div className="border-t border-slate-100 pt-5">
+            <SendPanel
+              campaignId={c.id}
+              inboxes={inboxes}
+              sendState={c2.send_state}
+              inboxEmail={inboxes.find((i) => i.id === c2.inbox_id)?.email ?? null}
+              ready={readyToQueue}
+              skippedFallbacks={c2.send_fallbacks ? 0 : (byStatus.fallback ?? 0)}
+              defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
+              counts={sendCounts}
+            />
+          </div>
           <div className="text-xs text-slate-500">
             Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
           </div>
@@ -187,7 +251,8 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                 <th className="px-6 py-2.5">Name</th>
                 <th className="px-6 py-2.5">Company</th>
                 <th className="px-6 py-2.5">Domain</th>
-                <th className="px-6 py-2.5">Status</th>
+                <th className="px-6 py-2.5">Lead</th>
+                <th className="px-6 py-2.5">Email</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -198,7 +263,23 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                   <td className="px-6 py-2.5 text-slate-600">{l.company}</td>
                   <td className="px-6 py-2.5">{l.domain ? <span className="text-slate-600">{l.domain}</span> : <Badge tone="amber">no website</Badge>}</td>
                   <td className="px-6 py-2.5">
-                    <Badge>{l.status}</Badge>
+                    <Badge tone={l.status === "done" ? "green" : l.status === "fallback" ? "amber" : l.status === "failed" ? "red" : "gray"}>
+                      {l.status === "queued" && c.status !== "running" ? "not started" : l.status}
+                    </Badge>
+                    {l.status_detail && <div className="mt-0.5 text-xs text-slate-500">{l.status_detail}</div>}
+                  </td>
+                  <td className="px-6 py-2.5">
+                    {(() => {
+                      const sd = sendByLead.get(l.id);
+                      if (!sd) return <span className="text-xs text-slate-400">–</span>;
+                      return (
+                        <div className="space-y-0.5">
+                          <Badge tone={SEND_TONE[sd.status]}>{sd.status}</Badge>
+                          {sd.status_detail && <div className="text-xs text-slate-500">{sd.status_detail}</div>}
+                          {sd.status === "paused" && <ResumeButton campaignId={c.id} sendId={sd.id} />}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               ))}

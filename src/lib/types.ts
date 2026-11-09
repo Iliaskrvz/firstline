@@ -57,4 +57,6 @@ export type LeadRow = {
   domain: string | null;
   custom: Record<string, string>;
   status: string;
+  /** Why the lead ended where it did ("Website unreachable", …). */
+  status_detail?: string | null;
 };

@@ -19,3 +19,6 @@ export function creditsPerLead(depth: Depth): number {
 export function estimateCredits(leadsWithWebsite: number, depth: Depth): number {
   return Math.max(0, leadsWithWebsite) * creditsPerLead(depth);
 }
+
+/** Until credits are wired into the pipeline (Phase 5), a full campaign run is free and capped at this many leads. */
+export const MAX_FREE_RUN = 50;
