@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { leadVars, TokenPreview } from "@/components/template-preview";
 import { requireWorkspace } from "@/lib/auth";
-import { availableVariables } from "@/lib/csv";
+import { availableVariables, FIELD_LABELS } from "@/lib/csv";
 import { estimateCredits } from "@/lib/credits";
 import { formatDate, n, STATUS_TONE } from "@/lib/format";
 import { parseTemplate } from "@/lib/template";
@@ -135,6 +135,22 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
           </div>
         </Card>
       </div>
+
+      <Card className="mt-6">
+        <details>
+          <summary className="cursor-pointer text-base font-semibold text-slate-900">
+            Column mapping <span className="text-sm font-normal text-slate-500">({Object.keys(c.column_map).length} columns, saved on import)</span>
+          </summary>
+          <dl className="mt-4 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            {Object.entries(c.column_map).map(([header, target]) => (
+              <div key={header} className="flex justify-between gap-3 border-b border-slate-100 pb-2">
+                <dt className="truncate text-slate-700">{header}</dt>
+                <dd className={target === "ignore" ? "shrink-0 text-slate-400" : "shrink-0 font-medium text-slate-900"}>{FIELD_LABELS[target]}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      </Card>
 
       <Card className="mt-6 overflow-hidden p-0">
         <div className="flex items-center justify-between px-6 py-4">
