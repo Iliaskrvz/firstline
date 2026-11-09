@@ -6,6 +6,13 @@ const PROTECTED = ["/campaigns", "/templates"];
 
 /** Refreshes the auth session on every request and guards app routes. */
 export async function updateSession(request: NextRequest) {
+  // If Supabase falls back to the Site URL, the auth code lands on "/". Forward it.
+  if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
+    const target = request.nextUrl.clone();
+    target.pathname = "/auth/callback";
+    return NextResponse.redirect(target);
+  }
+
   let response = NextResponse.next({ request });
   const { url, key } = supabaseEnv();
 
