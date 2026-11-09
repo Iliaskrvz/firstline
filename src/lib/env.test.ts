@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertEnv, missingEnv, missingEnvMessage } from "./env";
+import { assertEnv, isDatabaseUrl, missingEnv, missingEnvMessage } from "./env";
 
 describe("env checks", () => {
   const full = {
@@ -25,5 +25,16 @@ describe("env checks", () => {
   it("assertEnv throws a clear error", () => {
     expect(() => assertEnv(["anthropic", "firecrawl"], { ...full, ANTHROPIC_API_KEY: "" })).toThrow(/ANTHROPIC_API_KEY.*console\.anthropic\.com/);
     expect(() => assertEnv(["app", "anthropic", "firecrawl"], full)).not.toThrow();
+  });
+});
+
+describe("DATABASE_URL format", () => {
+  it("accepts Postgres connection strings and rejects the https project URL", () => {
+    expect(isDatabaseUrl("postgresql://postgres.ref:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres")).toBe(true);
+    expect(isDatabaseUrl("postgres://u:p@localhost/db")).toBe(true);
+    expect(isDatabaseUrl("https://abc.supabase.co")).toBe(false);
+    expect(isDatabaseUrl("")).toBe(false);
+    expect(missingEnv({ DATABASE_URL: "https://abc.supabase.co" }, ["database"])).toEqual(["DATABASE_URL"]);
+    expect(missingEnvMessage(["DATABASE_URL"])).toContain("not https://");
   });
 });

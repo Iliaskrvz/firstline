@@ -13,8 +13,16 @@ export const ENV_GROUPS = {
 
 export type EnvGroup = keyof typeof ENV_GROUPS;
 
+/** A Postgres connection string, not the https:// project URL (an easy mix-up in the Supabase dashboard). */
+export function isDatabaseUrl(value: string | undefined): boolean {
+  return /^postgres(ql)?:\/\/[^\s]+$/i.test(value?.trim() ?? "");
+}
+
+/** Variables that are empty, or (DATABASE_URL) not in the right format. */
 export function missingEnv(env: Record<string, string | undefined>, groups: EnvGroup[]): string[] {
-  return groups.flatMap((g) => ENV_GROUPS[g]).filter((k) => !env[k]?.trim());
+  return groups
+    .flatMap((g) => ENV_GROUPS[g])
+    .filter((k) => !env[k]?.trim() || (k === "DATABASE_URL" && !isDatabaseUrl(env[k])));
 }
 
 const WHERE: Record<string, string> = {
@@ -22,7 +30,8 @@ const WHERE: Record<string, string> = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "Supabase → Project Settings → API Keys → publishable key",
   ANTHROPIC_API_KEY: "console.anthropic.com → Settings → API Keys",
   FIRECRAWL_API_KEY: "firecrawl.dev → Dashboard → API Keys",
-  DATABASE_URL: "Supabase → Connect → Session pooler (port 5432), with your database password",
+  DATABASE_URL:
+    "Supabase → Connect → Session pooler (port 5432), with your database password. It starts with postgresql://, not https://",
 };
 
 export function missingEnvMessage(missing: string[]): string {

@@ -1,12 +1,13 @@
 // Enqueue lead jobs from the web app (server only). The worker consumes them.
 import "server-only";
+import { isDatabaseUrl } from "@/lib/env";
 import { PgBoss } from "pg-boss";
 import { dbConnection, LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
 
 let bossPromise: Promise<PgBoss> | null = null;
 
 export function queueConfigured(): boolean {
-  return !!process.env.DATABASE_URL?.trim();
+  return isDatabaseUrl(process.env.DATABASE_URL);
 }
 
 async function getBoss(): Promise<PgBoss> {
