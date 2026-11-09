@@ -10,8 +10,8 @@ describe("env checks", () => {
   };
 
   it("finds missing and blank keys", () => {
-    expect(missingEnv(full, ["app", "engine"])).toEqual([]);
-    expect(missingEnv({ ...full, ANTHROPIC_API_KEY: "  ", FIRECRAWL_API_KEY: undefined }, ["engine"])).toEqual([
+    expect(missingEnv(full, ["app", "anthropic", "firecrawl"])).toEqual([]);
+    expect(missingEnv({ ...full, ANTHROPIC_API_KEY: "  ", FIRECRAWL_API_KEY: undefined }, ["anthropic", "firecrawl"])).toEqual([
       "ANTHROPIC_API_KEY",
       "FIRECRAWL_API_KEY",
     ]);
@@ -23,7 +23,7 @@ describe("env checks", () => {
   });
 
   it("assertEnv throws a clear error", () => {
-    expect(() => assertEnv(["engine"], { ...full, ANTHROPIC_API_KEY: "" })).toThrow(/ANTHROPIC_API_KEY.*console\.anthropic\.com/);
-    expect(() => assertEnv(["app", "engine"], full)).not.toThrow();
+    expect(() => assertEnv(["anthropic", "firecrawl"], { ...full, ANTHROPIC_API_KEY: "" })).toThrow(/ANTHROPIC_API_KEY.*console\.anthropic\.com/);
+    expect(() => assertEnv(["app", "anthropic", "firecrawl"], full)).not.toThrow();
   });
 });

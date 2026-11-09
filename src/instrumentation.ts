@@ -6,8 +6,8 @@ export function register() {
   const app = missingEnv(process.env, ["app"]);
   if (app.length) throw new Error(missingEnvMessage(app));
 
-  // Engine keys are used by the worker (Phase 2), which refuses to start
-  // without them. The web app only warns, so Phase 1 screens keep working.
-  const engine = missingEnv(process.env, ["engine"]);
-  if (engine.length) console.warn(`\n⚠ FirstLine: ${missingEnvMessage(engine)}\n`);
+  // Everything else only limits features (preview runs, AI writing), so warn and keep running.
+  const optional = missingEnv(process.env, ["database", "firecrawl"]);
+  if (process.env.LLM_PROVIDER === "anthropic") optional.push(...missingEnv(process.env, ["anthropic"]));
+  if (optional.length) console.warn(`\n⚠ FirstLine: ${missingEnvMessage(optional)}\n`);
 }
