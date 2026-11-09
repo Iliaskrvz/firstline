@@ -56,7 +56,8 @@ npm run worker
 ```
 
 - one job per lead in the `lead-process` queue (pg-boss tables live in the `pgboss` schema)
-- concurrency: `WORKER_CONCURRENCY` per worker, `WORKSPACE_CONCURRENCY` per workspace across workers
+- concurrency: `WORKER_CONCURRENCY` per worker, `WORKSPACE_CONCURRENCY` per workspace across workers;
+  Firecrawl calls are capped at your Firecrawl plan's limit (read at startup), since extra calls get throttled
 - retries: 3 with exponential backoff; HTTP 429/5xx are also retried inside each call
 - idempotent: finished leads are skipped; the same lead can't be queued twice in one run
 - heartbeat every 15 s in `worker_heartbeats`; health check at http://127.0.0.1:8787/health

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Semaphore } from "./limiter";
+import { effectiveConcurrency, Semaphore } from "./limiter";
 import { backoffMs, HttpError, isRetryable, parseRetryAfter, TimeoutError, withRetry } from "./retry";
 
 describe("withRetry", () => {
@@ -56,5 +56,14 @@ describe("Semaphore", () => {
       ),
     );
     expect(peak).toBe(2);
+  });
+});
+
+describe("effectiveConcurrency", () => {
+  it("caps at the plan limit and keeps the setting when the limit is unknown", () => {
+    expect(effectiveConcurrency(5, 2)).toBe(2);
+    expect(effectiveConcurrency(1, 2)).toBe(1);
+    expect(effectiveConcurrency(5, null)).toBe(5);
+    expect(effectiveConcurrency(5, 0)).toBe(5);
   });
 });

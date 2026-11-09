@@ -9,6 +9,8 @@ export interface WebReader {
   scrape(url: string, timeoutMs: number): Promise<ScrapeResult>;
   /** robots.txt text, or null when the site has none (404). */
   robots(domain: string): Promise<string | null>;
+  /** How many requests the Firecrawl plan runs at once (null if unknown). */
+  planConcurrency?(): Promise<number | null>;
 }
 
 const BASE = "https://api.firecrawl.dev/v2";
@@ -84,6 +86,17 @@ export function createFirecrawl(apiKey: string, fetchImpl: typeof fetch = fetch,
         title: d.metadata?.title,
         credits: Number(d.metadata?.creditsUsed ?? 1),
       };
+    },
+    async planConcurrency() {
+      try {
+        const j = await timed(`${BASE}/team/queue-status`, { headers: { Authorization: `Bearer ${apiKey}` } }, 5_000, fetchImpl, (res) =>
+          res.ok ? res.json() : Promise.resolve(null),
+        );
+        const n = Number(j?.maxConcurrency);
+        return Number.isInteger(n) && n > 0 ? n : null;
+      } catch {
+        return null;
+      }
     },
     async robots(domain) {
       try {

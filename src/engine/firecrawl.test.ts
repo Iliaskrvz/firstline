@@ -47,4 +47,11 @@ describe("Firecrawl client timeouts", () => {
     const m = await fc.map("https://example.com");
     expect(m.links.map((l) => l.url)).toEqual(["https://example.com/about", "https://example.com/blog"]);
   });
+
+  it("reads the plan's concurrency limit, and returns null when it can't", async () => {
+    expect(await createFirecrawl("test", okFetch({ success: true, maxConcurrency: 2 })).planConcurrency!()).toBe(2);
+    expect(await createFirecrawl("test", okFetch({ success: true })).planConcurrency!()).toBeNull();
+    const failing = (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
+    expect(await createFirecrawl("test", failing).planConcurrency!()).toBeNull();
+  });
 });

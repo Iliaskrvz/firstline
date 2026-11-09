@@ -20,3 +20,8 @@ export class Semaphore {
     }
   }
 }
+
+/** Never run more requests at once than the provider's plan allows (it would throttle the extra ones). */
+export function effectiveConcurrency(configured: number, planLimit: number | null): number {
+  return planLimit && planLimit > 0 ? Math.max(1, Math.min(configured, planLimit)) : configured;
+}

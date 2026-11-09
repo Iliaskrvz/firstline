@@ -11,7 +11,7 @@ import { Pool } from "pg";
 import { PgBoss } from "pg-boss";
 import { engineConfig } from "@/engine/config";
 import { createFirecrawl } from "@/engine/firecrawl";
-import { Semaphore } from "@/engine/limiter";
+import { effectiveConcurrency, Semaphore } from "@/engine/limiter";
 import { selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { SKILL_V1_MOVES, SKILL_V1_PROMPT, SKILL_V1_RULES, SKILL_VERSION } from "@/engine/prompts/skill-v1";
@@ -39,7 +39,12 @@ async function main() {
   const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 2 });
   const store = new PgStore(pool);
   const reader = createFirecrawl(config.firecrawlApiKey!);
-  const firecrawlGate = new Semaphore(config.concurrency.firecrawl);
+  const planLimit = (await reader.planConcurrency?.()) ?? null;
+  const firecrawlSlots = effectiveConcurrency(config.concurrency.firecrawl, planLimit);
+  if (firecrawlSlots < config.concurrency.firecrawl) {
+    log(`Firecrawl plan allows ${planLimit} requests at once: using ${firecrawlSlots} (FIRECRAWL_CONCURRENCY=${config.concurrency.firecrawl}).`);
+  }
+  const firecrawlGate = new Semaphore(firecrawlSlots);
 
   const stats = { jobsDone: 0, jobsFailed: 0, lastHeartbeatAt: null as Date | null, lastHeartbeatError: null as string | null, startedAt: new Date() };
 
