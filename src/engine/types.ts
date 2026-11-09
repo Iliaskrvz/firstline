@@ -13,7 +13,8 @@ export type FactTier = "A" | "B" | "C" | "D";
 
 export type Fact = { id: string; text: string; src: string; tier: FactTier };
 
-export type ResearchStatus = "ok" | "unreachable" | "blocked" | "no_content";
+/** blocked = robots.txt says no; refused = the site answered 401/403 (bot protection). */
+export type ResearchStatus = "ok" | "unreachable" | "blocked" | "refused" | "no_content";
 
 export const MOVES = ["value_stack", "genuine_interest", "cost_of_inaction", "proof", "no_oriented_ask", "risk_reversal"] as const;
 export type Move = (typeof MOVES)[number];

@@ -52,6 +52,7 @@ export async function researchDomain(
   });
 
   let responded = false; // the site answered at least once (even with an empty page)
+  let refused = false; // the site answered "forbidden" (bot protection)
   const results = await Promise.all(
     picked.map((p) =>
       gate.run(async (): Promise<ScrapedPage | null> => {
@@ -59,6 +60,7 @@ export async function researchDomain(
           const r = await reader.scrape(p.url, config.research.pageTimeoutMs);
           costs.push(firecrawlCostEntry("scrape", r.credits, config.firecrawlUsdPerCredit));
           if (!r.statusCode || r.statusCode < 400) responded = true;
+          if (r.statusCode === 401 || r.statusCode === 403) refused = true;
           if (r.statusCode && r.statusCode >= 400) {
             notes.push(`${p.url} returned ${r.statusCode}`);
             return null;
@@ -80,6 +82,6 @@ export async function researchDomain(
   const pages = results.filter((r): r is ScrapedPage => !!r);
   // Two URLs can serve the same page (redirects); keep the first.
   const unique = pages.filter((p, i) => pages.findIndex((q) => q.md_hash === p.md_hash) === i);
-  const status: ResearchStatus = unique.length > 0 ? "ok" : responded ? "no_content" : "unreachable";
+  const status: ResearchStatus = unique.length > 0 ? "ok" : responded ? "no_content" : refused ? "refused" : "unreachable";
   return { status, picked, pages: unique, costs, notes };
 }

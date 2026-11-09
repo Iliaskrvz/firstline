@@ -19,6 +19,7 @@ export const FALLBACK_REASONS = {
   no_website: "No website in the CSV",
   unreachable: "Website unreachable",
   blocked: "Website asks robots not to read these pages",
+  refused: "Website blocks automated reading",
   no_content: "Website had no readable content",
   no_facts: "No usable facts found on the website",
   failed_checks: "Didn't pass the checks after one rewrite",

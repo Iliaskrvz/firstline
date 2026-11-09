@@ -127,6 +127,18 @@ describe("processLead (fake LLM, fake website)", () => {
     expect(store.research.get("acmestudio.nl")).toMatchObject({ status: "unreachable", expires_at: "2026-11-16T12:00:00.000Z" });
   });
 
+  it("site that answers 403 (bot protection) -> 'blocks automated reading', not 'unreachable'", async () => {
+    const reader: WebReader = {
+      ...fakeReader(),
+      map: async () => ({ links: [{ url: "https://acmestudio.nl/" }], credits: 1 }),
+      scrape: async () => ({ markdown: "", statusCode: 403, credits: 1 }),
+    };
+    const { store, deps } = setup(new FakeLLM(), job(), reader);
+    const res = await processLead("lead-1", deps);
+    expect(res).toMatchObject({ outcome: "fallback", detail: "Website blocks automated reading" });
+    expect(store.research.get("acmestudio.nl")).toMatchObject({ status: "refused", expires_at: "2026-11-16T12:00:00.000Z" });
+  });
+
   it("robots.txt that blocks everything -> fallback without scraping", async () => {
     const calls: string[] = [];
     const reader = { ...fakeReader(SITE, calls), robots: async () => "User-agent: *\nDisallow: /" };

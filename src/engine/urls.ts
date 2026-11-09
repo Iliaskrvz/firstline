@@ -14,7 +14,10 @@ const DROP_SEGMENTS = new Set([
   "login", "inloggen", "signin", "sign-in", "register", "account", "mijn-account", "cart", "winkelwagen", "checkout",
   "tag", "tags", "category", "categorie", "categories", "author", "wp-admin", "wp-login.php", "wp-json", "wp-content",
   "feed", "rss", "search", "zoeken", "terms", "voorwaarden", "algemene-voorwaarden", "disclaimer", "sitemap", "impressum", "page",
+  "legal", "juridisch", "policies", "policy", "gdpr", "compliance", "rechtliches", "agb",
 ]);
+/** Legal pages hide inside longer slugs too ("sales-day-payout-terms-of-service"). */
+const DROP_PARTS = ["terms-of", "terms-and", "privacy", "cookie-policy", "cookie-statement", "voorwaarden", "disclaimer", "datenschutz"];
 const DROP_EXT = /\.(pdf|jpe?g|png|gif|svg|webp|zip|docx?|xlsx?|pptx?|mp4|mp3|xml|json|css|js|ico|txt)$/i;
 const LANG_ROOT = /^(nl|en|de|fr|nl-nl|en-gb|en-us|de-de|be|fr-be|nl-be)$/;
 
@@ -75,7 +78,7 @@ export function classifyUrl(raw: string, domain: string): Classified {
   const lang = segs.length && LANG_ROOT.test(segs[0]) ? segs[0].slice(0, 2) : null;
   const content = lang ? segs.slice(1) : segs;
   if (content.length === 0) return { url: norm, type: "home", depth: 0, date: null, lang };
-  if (content.some((s) => DROP_SEGMENTS.has(s))) return null;
+  if (content.some((s) => DROP_SEGMENTS.has(s) || DROP_PARTS.some((p) => s.includes(p)))) return null;
 
   for (const type of ["careers", "news", "about", "services"] as const) {
     const at = content.findIndex((s) => KEYWORDS[type].some((k) => segMatches(s, k)));

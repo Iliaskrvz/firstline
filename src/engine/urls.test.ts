@@ -41,6 +41,14 @@ describe("classifyUrl", () => {
     expect(classifyUrl(url, D)).toBeNull();
   });
 
+  it("drops legal pages, also inside longer slugs, but keeps real content", () => {
+    expect(classifyUrl("https://www.adyen.com/legal/sales-day-payout-terms-of-service", "adyen.com")).toBeNull();
+    expect(classifyUrl("https://x.nl/services/terms-and-conditions", "x.nl")).toBeNull();
+    expect(classifyUrl("https://x.nl/diensten/algemene-voorwaarden-2024", "x.nl")).toBeNull();
+    expect(classifyUrl("https://x.nl/over-ons/privacyverklaring", "x.nl")).toBeNull();
+    expect(classifyUrl("https://x.nl/producten/chocolate-cookie-box", "x.nl")?.type).toBe("services");
+  });
+
   it("strips query and fragment", () => {
     expect(classifyUrl("https://bakkerij.nl/over-ons/?utm=x#team", D)?.url).toBe("https://bakkerij.nl/over-ons");
   });

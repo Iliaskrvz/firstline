@@ -109,7 +109,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   if (cacheUsable(cached, llm.extractorId, now())) {
     facts = cached!.facts;
     research = { status: cached!.status, cached: true, researched_at: cached!.researched_at, pages: cached!.pages, facts };
-    if (cached!.status !== "ok") return fallback(cached!.status === "blocked" ? "blocked" : cached!.status === "unreachable" ? "unreachable" : "no_content", research);
+    if (cached!.status !== "ok") return fallback(cached!.status, research);
   } else {
     const r = await researchDomain(lead.domain, { reader: deps.reader, config, lite: job.campaign.writer === "lite", gate: deps.firecrawlGate, website: lead.website });
     await log(r.costs);
@@ -120,7 +120,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
         domain: lead.domain, pages: pagesMeta, facts: [], status: r.status, extractor: llm.extractorId,
         researched_at: now().toISOString(), expires_at: days(now(), config.research.negativeCacheDays),
       });
-      return fallback(r.status === "blocked" ? "blocked" : r.status === "unreachable" ? "unreachable" : "no_content", research);
+      return fallback(r.status, research);
     }
     try {
       const ex = await llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages });
