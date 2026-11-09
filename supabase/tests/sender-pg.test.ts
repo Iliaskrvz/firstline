@@ -105,6 +105,16 @@ describe("Gmail sender API", () => {
     await setCampaignSendState(pool, ws, noFallbacks.id, "paused");
   });
 
+  it("peek (Connect / paused sheet) records the heartbeat but hands nothing out", async () => {
+    const p = await senderNext(pool, key, { scriptVersion: V, now: MON_10, peek: true });
+    expect(p.email).toBeNull();
+    expect(p.wait?.label).toBe("Connected");
+    expect((await pool.query("select last_heartbeat_at, script_version from public.inboxes where id = $1", [inbox])).rows[0]).toMatchObject({
+      last_heartbeat_at: MON_10,
+      script_version: V,
+    });
+  });
+
   it("hands out one email, waits for its report, then keeps a random 6–14 min gap", async () => {
     const n1 = await senderNext(pool, key, { scriptVersion: V, now: MON_10 });
     expect(n1.email).toMatchObject({ to: "anna@acme.nl", subject: "Idea for anna@acme.nl" });

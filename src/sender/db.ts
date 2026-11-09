@@ -97,7 +97,11 @@ export type NextResponse = {
 };
 
 /** GET /api/sender/next: heartbeat, warm-up bookkeeping, and at most one email (§8, §11). */
-export async function senderNext(pool: pg.Pool, key: string, opts: { scriptVersion: string | null; now?: Date }): Promise<NextResponse> {
+export async function senderNext(
+  pool: pg.Pool,
+  key: string,
+  opts: { scriptVersion: string | null; now?: Date; /** heartbeat + status only: hand nothing out (Connect, paused sheet) */ peek?: boolean },
+): Promise<NextResponse> {
   const now = opts.now ?? new Date();
   return tx(pool, async (c) => {
     const inbox = await lockInbox(c, key);
@@ -156,7 +160,7 @@ export async function senderNext(pool: pg.Pool, key: string, opts: { scriptVersi
     );
 
     let email: NextResponse["email"] = null;
-    let reason: WaitReason | null = outdated ? "paused" : decision.ok ? null : decision.reason;
+    let reason: WaitReason | null = outdated || opts.peek ? "paused" : decision.ok ? null : decision.reason;
     if (!reason) {
       // One email at a time: wait while a handed-out email hasn't been reported (until its lease runs out).
       const { rows: out } = await c.query(
@@ -204,7 +208,18 @@ export async function senderNext(pool: pg.Pool, key: string, opts: { scriptVersi
 
     return {
       email,
-      wait: reason ? { reason, label: outdated ? "Please update the FirstLine script (see the Log)" : WAIT_LABEL[reason] } : null,
+      wait: reason
+        ? {
+            reason: opts.peek && !outdated && !decision.ok ? decision.reason : reason,
+            label: outdated
+              ? "Please update the FirstLine script (see the Log)"
+              : opts.peek
+                ? decision.ok
+                  ? "Connected"
+                  : WAIT_LABEL[decision.reason]
+                : WAIT_LABEL[reason],
+          }
+        : null,
       watch: watch.map((w) => ({ send_id: w.id, thread_id: w.gmail_thread_id })),
       rules: { unsubscribe: UNSUBSCRIBE_PATTERN, reply_cut: REPLY_CUT_PATTERN, bounce_from: BOUNCE_SENDER_PATTERN },
       script: { latest: SENDER_SCRIPT_VERSION, update_required: outdated },
