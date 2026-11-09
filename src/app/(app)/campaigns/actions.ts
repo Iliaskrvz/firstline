@@ -5,6 +5,53 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth";
 import { applyMapping, mappingErrors, MAX_ROWS, type ColumnTarget } from "@/lib/csv";
+import { hasErrors, parseTemplate } from "@/lib/template";
+import { enqueueLeads, queueConfigured } from "@/server/queue";
+
+const PREVIEW_SIZE = 5;
+
+/** Free preview (§1): research + write the first 5 leads (those with a website first). */
+export async function runPreview(campaignId: string): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const { supabase, workspace } = await requireWorkspace();
+
+  const { data: campaign } = await supabase.from("campaigns").select("id, template_id, templates(subject, body)").eq("id", campaignId).maybeSingle();
+  if (!campaign) return { error: "Campaign not found." };
+  const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
+  if (!tpl) return { error: "Pick a template first." };
+  const parsed = parseTemplate(tpl);
+  if (hasErrors(parsed) || parsed.slots.length === 0) return { error: "The template has errors or no slots. Fix it first." };
+  if (!queueConfigured()) return { error: "The preview needs the worker database connection (DATABASE_URL in .env.local). See the README." };
+
+  const { data: leads, error } = await supabase
+    .from("leads")
+    .select("id, domain")
+    .eq("campaign_id", campaignId)
+    .order("created_at")
+    .limit(200);
+  if (error) return { error: error.message };
+  const withSite = (leads ?? []).filter((l) => l.domain);
+  const chosen = [...withSite, ...(leads ?? []).filter((l) => !l.domain)].slice(0, PREVIEW_SIZE);
+  if (chosen.length === 0) return { error: "This campaign has no leads." };
+
+  await supabase.from("leads").update({ preview_rank: null }).eq("campaign_id", campaignId).not("preview_rank", "is", null);
+  for (const [i, l] of chosen.entries()) {
+    const { error: e } = await supabase.from("leads").update({ preview_rank: i + 1, status: "queued", status_detail: null, confidence: null }).eq("id", l.id);
+    if (e) return { error: e.message };
+  }
+  await supabase.from("campaigns").update({ status: "preview" }).eq("id", campaignId);
+
+  try {
+    await enqueueLeads(
+      chosen.map((l) => ({ leadId: l.id, workspaceId: workspace.id, preview: true, force: true })),
+      `preview-${Date.now()}`,
+    );
+  } catch (e) {
+    return { error: `Couldn't reach the job queue: ${(e as Error).message}` };
+  }
+  revalidatePath(`/campaigns/${campaignId}`);
+  redirect(`/campaigns/${campaignId}/preview`);
+}
 
 const TARGETS = ["email", "first_name", "last_name", "full_name", "company", "title", "linkedin_headline", "website", "custom", "ignore"] as const satisfies readonly ColumnTarget[];
 

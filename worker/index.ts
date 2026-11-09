@@ -1,0 +1,161 @@
+// FirstLine worker: pulls one job per lead from pg-boss (Supabase Postgres) and
+// runs the engine. Run locally with `npm run worker`; on the VPS with pm2
+// (see worker/ecosystem.config.cjs). All job logic lives in src/engine/.
+import { config as loadEnv } from "dotenv";
+// .env.local wins over the shell, so a stale exported key can't shadow it.
+loadEnv({ path: ".env.local", override: true, quiet: true });
+
+import { createServer } from "node:http";
+import { hostname } from "node:os";
+import { Pool } from "pg";
+import { PgBoss } from "pg-boss";
+import { engineConfig } from "@/engine/config";
+import { createFirecrawl } from "@/engine/firecrawl";
+import { Semaphore } from "@/engine/limiter";
+import { selectLLM } from "@/engine/llm";
+import { processLead } from "@/engine/pipeline";
+import { SKILL_V1_MOVES, SKILL_V1_PROMPT, SKILL_V1_RULES, SKILL_VERSION } from "@/engine/prompts/skill-v1";
+import { PgStore } from "@/engine/store-pg";
+import { missingEnv, missingEnvMessage } from "@/lib/env";
+import { dbConnection, LEAD_QUEUE, type LeadJobData } from "@/lib/queue";
+
+const VERSION = process.env.npm_package_version ?? "dev";
+const WORKER_ID = `${hostname()}-${process.pid}`;
+const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
+
+async function main() {
+  const missing = missingEnv(process.env, ["database", "firecrawl"]);
+  if (missing.length) {
+    console.error(`\nFirstLine worker can't start.\n${missingEnvMessage(missing)}\n`);
+    process.exit(1);
+  }
+  const config = engineConfig();
+  const llm = await selectLLM(config);
+  if (config.llmProvider === "anthropic" && !config.anthropicApiKey) {
+    log("⚠ LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing: research runs, AI steps will show 'Anthropic key missing'.");
+  }
+
+  const conn = dbConnection(process.env.DATABASE_URL!);
+  const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 2 });
+  const store = new PgStore(pool);
+  const reader = createFirecrawl(config.firecrawlApiKey!);
+  const firecrawlGate = new Semaphore(config.concurrency.firecrawl);
+
+  const stats = { jobsDone: 0, jobsFailed: 0, lastHeartbeatAt: null as Date | null, lastHeartbeatError: null as string | null, startedAt: new Date() };
+
+  // Store Sales Skill v1 (§6: versioned in skill_versions).
+  await pool.query(
+    `insert into public.skill_versions (version, prompt, rules, moves, status, traffic_share, changelog)
+     values ($1, $2, $3, $4, 'live', 100, 'Initial version')
+     on conflict (version) do update set prompt = excluded.prompt, rules = excluded.rules, moves = excluded.moves`,
+    [SKILL_VERSION, SKILL_V1_PROMPT, JSON.stringify(SKILL_V1_RULES), JSON.stringify(SKILL_V1_MOVES)],
+  );
+
+  const boss = new PgBoss({ ...conn, max: 4, schema: "pgboss" });
+  boss.on("error", (e) => log("pg-boss error:", e.message));
+  await boss.start();
+  if (!(await boss.getQueue(LEAD_QUEUE))) {
+    await boss.createQueue(LEAD_QUEUE, {
+      retryLimit: config.retries.jobRetryLimit,
+      retryDelay: config.retries.jobRetryDelaySec,
+      retryBackoff: true,
+      expireInSeconds: 600,
+    });
+  }
+
+  const heartbeat = async () => {
+    try {
+      await pool.query(
+        `insert into public.worker_heartbeats (worker_id, host, version, llm_provider, started_at, last_seen_at, jobs_done, jobs_failed)
+         values ($1, $2, $3, $4, $5, now(), $6, $7)
+         on conflict (worker_id) do update set last_seen_at = now(), jobs_done = excluded.jobs_done,
+           jobs_failed = excluded.jobs_failed, llm_provider = excluded.llm_provider`,
+        [WORKER_ID, hostname(), VERSION, llm.provider, stats.startedAt, stats.jobsDone, stats.jobsFailed],
+      );
+      stats.lastHeartbeatAt = new Date();
+      stats.lastHeartbeatError = null;
+    } catch (e) {
+      stats.lastHeartbeatError = (e as Error).message;
+      log("heartbeat failed:", stats.lastHeartbeatError);
+    }
+  };
+  await heartbeat();
+  const beat = setInterval(heartbeat, 15_000);
+
+  await boss.work<LeadJobData>(
+    LEAD_QUEUE,
+    {
+      localConcurrency: config.concurrency.perWorker, // jobs at once on this worker
+      groupConcurrency: config.concurrency.perWorkspace, // per workspace, across all workers
+      includeMetadata: true,
+      pollingIntervalSeconds: 2,
+    },
+    async ([job]) => {
+      const { leadId, preview, force } = job.data;
+      const t0 = Date.now();
+      try {
+        const res = await processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force });
+        stats.jobsDone++;
+        log(`lead ${leadId}: ${res.outcome}${res.detail ? ` (${res.detail})` : ""} · $${res.costUsd.toFixed(5)} · ${Date.now() - t0}ms`);
+        return res;
+      } catch (e) {
+        const msg = (e as Error).message;
+        const finalAttempt = job.retryCount >= config.retries.jobRetryLimit;
+        log(`lead ${leadId}: error (attempt ${job.retryCount + 1}${finalAttempt ? ", giving up" : ", will retry"}): ${msg}`);
+        if (finalAttempt) {
+          stats.jobsFailed++;
+          await store.setLeadStatus(leadId, "failed", { detail: `Error after retries: ${msg.slice(0, 200)}`, confidence: null }).catch(() => {});
+        }
+        throw e; // pg-boss retries with backoff
+      }
+    },
+  );
+
+  // /health for uptime checks (and the VPS later).
+  const port = Number(process.env.WORKER_HEALTH_PORT ?? 8787);
+  const server = createServer(async (req, res) => {
+    if (req.url !== "/health") {
+      res.writeHead(404).end();
+      return;
+    }
+    const stale = !stats.lastHeartbeatAt || Date.now() - stats.lastHeartbeatAt.getTime() > 60_000;
+    let queue: unknown = null;
+    try {
+      queue = await boss.getQueue(LEAD_QUEUE);
+    } catch {
+      /* report without queue stats */
+    }
+    const body = {
+      ok: !stale,
+      worker_id: WORKER_ID,
+      version: VERSION,
+      llm_provider: llm.provider,
+      uptime_s: Math.round((Date.now() - stats.startedAt.getTime()) / 1000),
+      last_heartbeat_at: stats.lastHeartbeatAt,
+      last_heartbeat_error: stats.lastHeartbeatError,
+      jobs_done: stats.jobsDone,
+      jobs_failed: stats.jobsFailed,
+      queue,
+    };
+    res.writeHead(stale ? 503 : 200, { "Content-Type": "application/json" }).end(JSON.stringify(body, null, 2));
+  });
+  server.listen(port, "127.0.0.1", () => log(`health: http://127.0.0.1:${port}/health`));
+
+  log(`FirstLine worker ${WORKER_ID} started · LLM: ${llm.provider}${llm.provider === "fake" ? " (test output, no AI used)" : ""} · concurrency ${config.concurrency.perWorker}/worker, ${config.concurrency.perWorkspace}/workspace`);
+
+  const shutdown = async (signal: string) => {
+    log(`${signal}: finishing running jobs…`);
+    clearInterval(beat);
+    server.close();
+    await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
+    await pool.end().catch(() => {});
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+main().catch((e) => {
+  console.error("Worker crashed:", e);
+  process.exit(1); // pm2 restarts it
+});

@@ -1,7 +1,7 @@
 // Fake LLM for building and testing without Claude. Output is realistic and
 // grounded in the real page text, but it is NOT AI writing: the UI labels it
 // "Test output, no AI used". Costs $0.
-import type { ExtractInput, JudgeInput, LLM, LLMResult, WriteInput } from "./llm";
+import type { ExtractInput, LLM, LLMResult, WriteInput } from "./llm";
 import type { Fact, JudgeScores, Language, WriterOutput } from "./types";
 import { countWords } from "@/lib/template";
 
@@ -81,7 +81,7 @@ export class FakeLLM implements LLM {
     };
   }
 
-  async judge(_input: JudgeInput): Promise<LLMResult<JudgeScores>> {
+  async judge(): Promise<LLMResult<JudgeScores>> {
     return {
       output: { relevance: 4, specificity: 4, value_clarity: 4, cta_effort: 4, sounds_human: 4, would_reply: 4, claims_supported: true, unsupported_claims: [] },
       costs: [],

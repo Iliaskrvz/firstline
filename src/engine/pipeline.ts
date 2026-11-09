@@ -39,8 +39,8 @@ export function roleFacts(lead: LeadJob["lead"]): Fact[] {
 }
 
 export function leadVars(lead: LeadJob["lead"]): Record<string, string | null> {
-  const { custom, id: _id, workspace_id: _w, campaign_id: _c, status: _s, ...rest } = lead;
-  return { ...(custom ?? {}), ...rest };
+  const { email, first_name, last_name, company, title, linkedin_headline, website, domain } = lead;
+  return { ...(lead.custom ?? {}), email, first_name, last_name, company, title, linkedin_headline, website, domain };
 }
 
 /** Is a cache row usable for this extractor? Failed sites are reused by anyone. */

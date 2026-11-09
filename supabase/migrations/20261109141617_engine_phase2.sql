@@ -34,13 +34,16 @@ create table public.worker_heartbeats (
 alter table public.worker_heartbeats enable row level security;
 
 create or replace function public.worker_status()
-returns table (last_seen_at timestamptz, workers int, llm_provider text)
+returns table (last_seen_at timestamptz, seconds_ago int, workers int, llm_provider text)
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select max(h.last_seen_at), count(*)::int, max(h.llm_provider)
+  select max(h.last_seen_at),
+         extract(epoch from now() - max(h.last_seen_at))::int,
+         count(*)::int,
+         max(h.llm_provider)
     from public.worker_heartbeats h
    where h.last_seen_at > now() - interval '1 hour';
 $$;

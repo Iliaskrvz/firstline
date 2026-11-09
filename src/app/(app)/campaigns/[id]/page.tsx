@@ -10,7 +10,9 @@ import { estimateCredits } from "@/lib/credits";
 import { formatDate, n, STATUS_TONE } from "@/lib/format";
 import { parseTemplate } from "@/lib/template";
 import type { CampaignRow, LeadRow, TemplateRow } from "@/lib/types";
+import { queueConfigured } from "@/server/queue";
 import { CampaignSettings } from "./campaign-settings";
+import { PreviewButton } from "./preview-button";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -30,12 +32,14 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const { supabase } = await requireWorkspace();
 
-  const [{ data: campaign }, { data: leads, count }, { count: withSite }, { data: templates }] = await Promise.all([
+  const [{ data: campaign }, { data: leads, count }, { count: withSite }, { data: templates }, { count: previewCountRaw }] = await Promise.all([
     supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
+    supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
   ]);
+  const previewCount = previewCountRaw ?? 0;
   if (!campaign) notFound();
   const c = campaign as CampaignRow;
   const rows = (leads ?? []) as LeadRow[];
@@ -130,6 +134,24 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(estimateCredits(researchable, c.depth))} credits</div>
             <div className="mt-1 text-xs text-indigo-800/80">The first 5 leads are a free preview.</div>
           </div>
+          <PreviewButton
+            campaignId={c.id}
+            label={previewCount ? "Run the free preview again" : "Run free preview (5 leads)"}
+            disabledReason={
+              !template
+                ? "Pick a template first."
+                : !parsed || parsed.slots.length === 0 || parsed.issues.some((i) => i.level === "error")
+                  ? "Fix the template first (it needs at least one valid slot)."
+                  : !queueConfigured()
+                    ? "Add DATABASE_URL to .env.local to run previews (see README)."
+                    : null
+            }
+          />
+          {previewCount > 0 && (
+            <Link href={`/campaigns/${c.id}/preview`} className="block text-center text-sm font-medium text-indigo-700 hover:underline">
+              View preview ({previewCount} leads) →
+            </Link>
+          )}
           <div className="text-xs text-slate-500">
             Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
           </div>
