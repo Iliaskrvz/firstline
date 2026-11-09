@@ -3,13 +3,17 @@
 import { useMemo, useState, useTransition } from "react";
 import { Badge, Button, Card, cx, Field, inputClass, Stat } from "@/components/ui";
 import {
+  analyseColumns,
   applyMapping,
-  autoMapColumns,
+  decodeCsvBytes,
   FIELD_LABELS,
-  mappingErrors,
+  groupIssues,
+  importBlocker,
   parseCsv,
+  uploadView,
   type ColumnMap,
   type ColumnTarget,
+  type EmailSuggestion,
   type ParsedCsv,
 } from "@/lib/csv";
 import { estimateCredits } from "@/lib/credits";
@@ -18,39 +22,79 @@ import { importLeads } from "../actions";
 
 const TARGET_OPTIONS: ColumnTarget[] = ["email", "first_name", "last_name", "full_name", "company", "title", "linkedin_headline", "website", "custom", "ignore"];
 const MAX_BYTES = 8 * 1024 * 1024;
+const SHOW_PER_GROUP = 100;
 
-const ISSUE_LABEL = {
-  missing_email: "No email",
-  invalid_email: "Invalid email",
-  duplicate: "Duplicate",
-  no_website: "No website",
-} as const;
+type Loaded = {
+  name: string;
+  csv: ParsedCsv;
+  encoding: string;
+  suggestion: EmailSuggestion | null;
+  looksLikeLeadList: boolean;
+};
+
+function SuggestionBanner({ s, onAccept, onDismiss }: { s: EmailSuggestion; onAccept: () => void; onDismiss?: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900 ring-1 ring-indigo-100">
+      <p className="min-w-0 flex-1">
+        Column <strong>‘{s.header}’</strong> contains email addresses ({n(s.valid)} of {n(s.filled)} filled rows). Use it as Email?
+      </p>
+      <Button className="py-1.5" onClick={onAccept}>
+        Use as Email
+      </Button>
+      {onDismiss && (
+        <Button variant="ghost" className="py-1.5" onClick={onDismiss}>
+          No
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function UploadWizard() {
-  const [file, setFile] = useState<{ name: string; csv: ParsedCsv } | null>(null);
+  const [file, setFile] = useState<Loaded | null>(null);
   const [map, setMap] = useState<ColumnMap>({});
+  const [pickManually, setPickManually] = useState(false);
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const [name, setName] = useState("");
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  function reset() {
+    setFile(null);
+    setMap({});
+    setPickManually(false);
+    setSuggestionDismissed(false);
+    setError(null);
+  }
+
   async function load(f: File) {
     setError(null);
     if (!/\.(csv|txt|tsv)$/i.test(f.name)) return setError("Please upload a .csv file. In Excel or Google Sheets: File → Download → CSV.");
     if (f.size > MAX_BYTES) return setError("That file is larger than 8 MB. Split it into smaller lists.");
-    const csv = parseCsv(await f.text());
+    const { text, encoding } = decodeCsvBytes(new Uint8Array(await f.arrayBuffer()));
+    const csv = parseCsv(text);
     if (csv.headers.length === 0 || csv.rows.length === 0) return setError("We couldn't find any rows in that file.");
-    setFile({ name: f.name, csv });
-    setMap(autoMapColumns(csv.headers));
+    const analysis = analyseColumns(csv.headers, csv.rows);
+    setFile({ name: f.name, csv, encoding, suggestion: analysis.emailSuggestion, looksLikeLeadList: analysis.looksLikeLeadList });
+    setMap(analysis.map);
+    setPickManually(false);
+    setSuggestionDismissed(false);
     setName(f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "));
   }
 
-  const result = useMemo(() => (file ? applyMapping(file.csv.rows, map) : null), [file, map]);
-  const errors = useMemo(() => (file ? mappingErrors(map) : []), [file, map]);
+  const result = useMemo(() => (file ? applyMapping(file.csv.rows, map, file.csv.rowNumbers) : null), [file, map]);
+  const blocker = result ? importBlocker(map, result.stats) ?? (!name.trim() ? "Give the campaign a name." : null) : null;
   const withWebsite = result ? result.stats.imported - result.stats.no_website : 0;
+  const hasEmailColumn = Object.values(map).includes("email");
+
+  function acceptSuggestion(header: string) {
+    setMap((m) => ({ ...m, [header]: "email" }));
+    setPickManually(true);
+  }
 
   function submit() {
-    if (!file) return;
+    if (!file || blocker) return;
     setError(null);
     startTransition(async () => {
       const res = await importLeads({ name, rows: file.csv.rows, map });
@@ -89,11 +133,39 @@ export function UploadWizard() {
             className="sr-only"
             onChange={(e) => {
               const f = e.target.files?.[0];
+              e.target.value = "";
               if (f) void load(f);
             }}
           />
         </label>
         {error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
+      </Card>
+    );
+  }
+
+  if (uploadView(file, pickManually) === "wrong_file") {
+    return (
+      <Card className="mx-auto max-w-2xl py-10 text-center">
+        <div className="mx-auto grid size-12 place-items-center rounded-full bg-amber-50 text-xl text-amber-600" aria-hidden>
+          ?
+        </div>
+        <h2 className="mt-4 text-lg font-semibold text-slate-900">This doesn&apos;t look like a lead list</h2>
+        <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+          We couldn&apos;t find an email or website column in <strong>{file.name}</strong> ({file.csv.headers.join(", ")}).
+        </p>
+        {file.suggestion && (
+          <div className="mx-auto mt-6 max-w-lg text-left">
+            <SuggestionBanner s={file.suggestion} onAccept={() => acceptSuggestion(file.suggestion!.header)} />
+          </div>
+        )}
+        <div className="mt-6 flex items-center justify-center gap-4">
+          <Button variant="secondary" onClick={reset}>
+            Choose another file
+          </Button>
+          <button className="text-sm font-medium text-indigo-700 hover:underline" onClick={() => setPickManually(true)}>
+            Pick columns manually
+          </button>
+        </div>
       </Card>
     );
   }
@@ -104,18 +176,28 @@ export function UploadWizard() {
       .filter(Boolean)
       .slice(0, 2);
 
+  const groups = result ? groupIssues(result.issues) : [];
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="space-y-6">
+        {file.suggestion && !hasEmailColumn && !suggestionDismissed && (
+          <SuggestionBanner
+            s={file.suggestion}
+            onAccept={() => acceptSuggestion(file.suggestion!.header)}
+            onDismiss={() => setSuggestionDismissed(true)}
+          />
+        )}
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-semibold text-slate-900">Map your columns</h2>
               <p className="text-sm text-slate-500">
                 {file.name} · {n(file.csv.rows.length)} rows · {file.csv.headers.length} columns
+                {file.encoding === "windows-1252" && " · read as Excel (Windows-1252) text"}
               </p>
             </div>
-            <Button variant="ghost" onClick={() => setFile(null)}>
+            <Button variant="ghost" onClick={reset}>
               Choose another file
             </Button>
           </div>
@@ -154,25 +236,34 @@ export function UploadWizard() {
           </p>
         </Card>
 
-        {result && result.issues.length > 0 && (
+        {groups.length > 0 && (
           <Card>
             <h2 className="text-base font-semibold text-slate-900">Rows that need attention</h2>
-            <p className="text-sm text-slate-500">Leads without a website are imported, but they&apos;ll get the neutral fallback line (free).</p>
-            <div className="mt-4 max-h-72 overflow-y-auto">
-              <table className="w-full text-sm">
-                <tbody className="divide-y divide-slate-100">
-                  {result.issues.slice(0, 200).map((i) => (
-                    <tr key={`${i.row}-${i.reason}`}>
-                      <td className="w-16 py-2 text-slate-500 tabular-nums">Row {i.row}</td>
-                      <td className="w-32 py-2">
-                        <Badge tone={i.reason === "no_website" ? "amber" : "red"}>{ISSUE_LABEL[i.reason]}</Badge>
-                      </td>
-                      <td className="truncate py-2 text-slate-600">{i.detail}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {result.issues.length > 200 && <p className="py-2 text-xs text-slate-500">…and {n(result.issues.length - 200)} more</p>}
+            <p className="text-sm text-slate-500">Row numbers match your spreadsheet (the header is row 1).</p>
+            <div className="mt-4 space-y-5">
+              {groups.map((g) => (
+                <section key={g.reason}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={g.tone}>
+                      {g.title} · {n(g.rows.length)}
+                    </Badge>
+                    <span className="text-sm text-slate-600">{g.intro}</span>
+                  </div>
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-lg ring-1 ring-slate-100">
+                    <table className="w-full text-sm">
+                      <tbody className="divide-y divide-slate-100">
+                        {g.rows.slice(0, SHOW_PER_GROUP).map((i) => (
+                          <tr key={i.row}>
+                            <td className="w-20 px-3 py-1.5 text-slate-500 tabular-nums">Row {i.row}</td>
+                            <td className="truncate px-3 py-1.5 text-slate-600">{i.detail ?? <em className="text-slate-400">empty</em>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {g.rows.length > SHOW_PER_GROUP && <p className="mt-1 text-xs text-slate-500">…and {n(g.rows.length - SHOW_PER_GROUP)} more</p>}
+                </section>
+              ))}
             </div>
           </Card>
         )}
@@ -188,7 +279,7 @@ export function UploadWizard() {
               <Stat label="Will import" value={n(result.stats.imported)} tone="green" />
               <Stat label="With website" value={n(withWebsite)} />
               <Stat label="Duplicates removed" value={n(result.stats.duplicates)} />
-              <Stat label="Skipped (email)" value={n(result.stats.missing_email + result.stats.invalid_email)} />
+              <Stat label="Skipped: no email" value={n(result.stats.missing_email + result.stats.invalid_email)} />
             </div>
           )}
           <div className="rounded-xl bg-indigo-50 p-4">
@@ -202,15 +293,17 @@ export function UploadWizard() {
               is restricted in the EU. Make sure you have a lawful basis.
             </p>
           )}
-          {errors.map((e) => (
-            <p key={e} className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">
-              {e}
-            </p>
-          ))}
           {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
-          <Button className="w-full" onClick={submit} disabled={pending || errors.length > 0 || !result?.stats.imported || !name.trim()}>
-            {pending ? "Importing…" : `Import ${n(result?.stats.imported)} leads`}
-          </Button>
+          <div className="space-y-2">
+            <Button className="w-full" onClick={submit} disabled={pending || !!blocker} aria-describedby="import-blocker">
+              {pending ? "Importing…" : blocker ? "Import leads" : `Import ${n(result?.stats.imported)} leads`}
+            </Button>
+            {blocker && (
+              <p id="import-blocker" className="text-center text-sm text-rose-700">
+                {blocker}
+              </p>
+            )}
+          </div>
         </Card>
       </div>
     </div>

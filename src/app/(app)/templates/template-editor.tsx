@@ -6,7 +6,6 @@ import { TokenPreview } from "@/components/template-preview";
 import {
   DEFAULT_MAX_WORDS,
   formatSlot,
-  hasErrors,
   MAX_MAX_WORDS,
   MIN_MAX_WORDS,
   parseTemplate,
