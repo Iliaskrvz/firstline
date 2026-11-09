@@ -66,3 +66,9 @@ export function isUnsubscribeReply(plainBody: string): boolean {
 
 /** Bounce notices come from these senders (they usually land in the original thread). */
 export const BOUNCE_SENDER_PATTERN = "mailer-daemon|postmaster|mail delivery (subsystem|system)";
+
+/** The Sender Sheet script with this FirstLine's address filled in, so Connect only asks for the key. */
+export function personaliseScript(script: string, appUrl: string | null): string {
+  if (!appUrl || !/^https:\/\/[^\s'\\]+$/.test(appUrl)) return script;
+  return script.replace("var FL_DEFAULT_BASE = '';", `var FL_DEFAULT_BASE = '${appUrl}';`);
+}

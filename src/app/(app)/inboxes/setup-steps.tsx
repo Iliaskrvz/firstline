@@ -1,6 +1,7 @@
 "use client";
 
 import { CopyButton } from "@/components/copy-button";
+import { personaliseScript } from "@/lib/sender/messages";
 
 /** The 4 setup steps (§10.6), shown right after a key is created. The key is shown only here, once. */
 export function SetupSteps({ email, senderKey, appUrl, script }: { email: string; senderKey: string; appUrl: string | null; script: string }) {
@@ -21,14 +22,14 @@ export function SetupSteps({ email, senderKey, appUrl, script }: { email: string
           <div>
             <b>2.</b> Replace everything in <code>Code.gs</code> with this script, click <b>Save</b>, close the tab and reload the sheet.
           </div>
-          <CopyButton text={script} label="Copy the script" className="px-3 py-1.5 text-xs" />
+          <CopyButton text={personaliseScript(script, appUrl)} label="Copy the script" className="px-3 py-1.5 text-xs" />
         </li>
         <li className="space-y-1.5">
           <div>
-            <b>3.</b> In the sheet: <b>FirstLine → Connect…</b> and paste these two:
+            <b>3.</b> In the sheet: <b>FirstLine → Connect…</b> and paste the sender key{appUrl ? "" : " (and the FirstLine address)"}:
           </div>
-          <Row label="FirstLine address" value={appUrl} missing="Not set: start the tunnel and set PUBLIC_APP_URL (Google can't reach localhost)." />
           <Row label="Sender key" value={senderKey} />
+          <Row label="FirstLine address" value={appUrl} missing="Not set: start the tunnel and set PUBLIC_APP_URL (Google can't reach localhost)." />
         </li>
         <li>
           <b>4.</b> Allow the permissions Google asks for (<b>Advanced → Go to … (unsafe) → Allow</b>; it&apos;s your own script). The

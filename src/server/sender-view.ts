@@ -56,9 +56,7 @@ export function publicAppUrl(): string | null {
   return v && /^https:\/\//.test(v) ? v : null;
 }
 
-let script: string | null = null;
-/** The current Sender Sheet script, for the "Copy script" button. */
+/** The current Sender Sheet script, for the "Copy script" button (read fresh, so an update shows at once). */
 export function senderScript(): string {
-  script ??= readFileSync(path.join(process.cwd(), "apps-script", "Code.gs"), "utf8");
-  return script;
+  return readFileSync(path.join(process.cwd(), "apps-script", "Code.gs"), "utf8");
 }

@@ -13,6 +13,8 @@
  */
 
 var FL_VERSION = '1.0.0';
+// Filled in by FirstLine's "Copy the script" button, so Connect only asks for the key.
+var FL_DEFAULT_BASE = '';
 var CONTROL_SHEET = 'FirstLine';
 var LOG_SHEET = 'Log';
 var PAUSE_CELL = 'B4';
@@ -31,15 +33,19 @@ function onOpen() {
 
 function flConnect() {
   var ui = SpreadsheetApp.getUi();
-  var urlAnswer = ui.prompt('Connect to FirstLine (1 of 2)', 'Paste the FirstLine address from the Inboxes page (it starts with https://).', ui.ButtonSet.OK_CANCEL);
-  if (urlAnswer.getSelectedButton() !== ui.Button.OK) return;
-  var base = urlAnswer.getResponseText().trim().replace(/\/+$/, '');
+  var base = FL_DEFAULT_BASE;
+  if (!base) {
+    var urlAnswer = ui.prompt('Connect to FirstLine (1 of 2)', 'Paste the FirstLine address from the Inboxes page (it starts with https://).', ui.ButtonSet.OK_CANCEL);
+    if (urlAnswer.getSelectedButton() !== ui.Button.OK) return;
+    base = urlAnswer.getResponseText();
+  }
+  base = base.trim().replace(/\/+$/, '');
   if (!/^https:\/\/[^\s]+$/.test(base)) {
     ui.alert('That doesn\'t look like an https:// address. Copy it from FirstLine → Inboxes and try again.');
     return;
   }
 
-  var keyAnswer = ui.prompt('Connect to FirstLine (2 of 2)', 'Paste the sender key for this inbox (it starts with fl_).', ui.ButtonSet.OK_CANCEL);
+  var keyAnswer = ui.prompt(FL_DEFAULT_BASE ? 'Connect to FirstLine' : 'Connect to FirstLine (2 of 2)', 'Paste the sender key for this inbox (it starts with fl_).', ui.ButtonSet.OK_CANCEL);
   if (keyAnswer.getSelectedButton() !== ui.Button.OK) return;
   var key = keyAnswer.getResponseText().trim();
   if (!/^fl_[A-Za-z0-9_-]{40,}$/.test(key)) {

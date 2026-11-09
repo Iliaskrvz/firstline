@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { BOUNCE_SENDER_PATTERN, isUnsubscribeReply, REPLY_CUT_PATTERN, UNSUBSCRIBE_PATTERN } from "@/lib/sender/messages";
+import { BOUNCE_SENDER_PATTERN, isUnsubscribeReply, personaliseScript, REPLY_CUT_PATTERN, UNSUBSCRIBE_PATTERN } from "@/lib/sender/messages";
 import { SENDER_SCRIPT_VERSION } from "@/sender/db";
 
 const CODE = readFileSync(path.join(__dirname, "Code.gs"), "utf8");
@@ -71,6 +71,12 @@ function sandbox(opts: { threads?: Record<string, Msg[]>; paused?: boolean; next
 describe("Code.gs", () => {
   it("has the version the server expects", () => {
     expect(CODE).toContain(`var FL_VERSION = '${SENDER_SCRIPT_VERSION}';`);
+  });
+
+  it("'Copy the script' fills in the FirstLine address, and only a safe https address", () => {
+    expect(personaliseScript(CODE, "https://x.trycloudflare.com")).toContain("var FL_DEFAULT_BASE = 'https://x.trycloudflare.com';");
+    expect(personaliseScript(CODE, "https://x.com'; evil();//")).toBe(CODE);
+    expect(personaliseScript(CODE, null)).toBe(CODE);
   });
 
   it("strips quoted text the same way as the server", () => {
