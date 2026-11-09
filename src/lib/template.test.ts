@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { countWords, hasErrors, parseTemplate, render } from "./template";
+import {
+  countWords,
+  formatSlot,
+  hasErrors,
+  parseTemplate,
+  render,
+  suggestSlotName,
+  validateSlotDraft,
+} from "./template";
 
 const body = `Hi {{first_name}},
 
@@ -9,37 +17,43 @@ We help agencies like {{company}} automate client reporting. [[bridge | one sent
 
 Worth a quick look?`;
 
+const errorsFor = (b: string, s = "subj") =>
+  parseTemplate({ subject: s, body: b }).issues.filter((i) => i.level === "error").map((i) => i.message);
+
 describe("parseTemplate", () => {
-  it("finds variables and slots with instructions and word limits", () => {
+  it("finds variables and slots; max words defaults to 25", () => {
     const p = parseTemplate({ subject: "Quick idea for {{company}}", body });
     expect(p.variables).toEqual(["company", "first_name"]);
     expect(p.slots).toEqual([
       { key: "opener", instruction: "a specific observation about their company from the website", max_words: 25 },
-      { key: "bridge", instruction: "one sentence linking their situation to reporting", max_words: null },
+      { key: "bridge", instruction: "one sentence linking their situation to reporting", max_words: 25 },
     ]);
     expect(p.issues).toEqual([]);
     expect(hasErrors(p)).toBe(false);
   });
 
-  it("applies default word limits and parses '20 words' / Dutch 'woorden'", () => {
-    const p = parseTemplate({ subject: "s", body: "[[opener · hi]] [[ps · short ps · 12 words]] [[close · x · 8 woorden]]" });
-    expect(p.slots.map((s) => [s.key, s.max_words])).toEqual([
-      ["opener", 25],
-      ["ps", 12],
-      ["close", 8],
+  it("accepts both separators and trims whitespace", () => {
+    const p = parseTemplate({ subject: "s", body: "[[  a1 ·x·10 ]] [[b_2|  y  |  12  ]] [[c · z | 30 words]]" });
+    expect(p.slots).toEqual([
+      { key: "a1", instruction: "x", max_words: 10 },
+      { key: "b_2", instruction: "y", max_words: 12 },
+      { key: "c", instruction: "z", max_words: 30 },
     ]);
+  });
+
+  it("parses Dutch/German word units", () => {
+    const p = parseTemplate({ subject: "s", body: "[[ps · korte ps · 12 woorden]] [[close · x · 8 Wörter]]" });
+    expect(p.slots.map((s) => s.max_words)).toEqual([12, 8]);
+  });
+
+  it("names may use letters, digits and _ (any order), and are lowercased", () => {
+    const p = parseTemplate({ subject: "s", body: "[[1st_line · x]] [[Opener · y]]" });
+    expect(p.slots.map((s) => s.key)).toEqual(["1st_line", "opener"]);
   });
 
   it("auto-names literal SLOT markers", () => {
     const p = parseTemplate({ subject: "s", body: "[[SLOT · first thing · 20]] and [[slot · second]]" });
     expect(p.slots.map((s) => s.key)).toEqual(["slot_1", "slot_2"]);
-  });
-
-  it("normalises names to lowercase and tolerates spaces", () => {
-    const p = parseTemplate({ subject: "s", body: "{{ First_Name }} [[ Opener ·  x  ]]" });
-    expect(p.variables).toEqual(["first_name"]);
-    expect(p.slots[0].key).toBe("opener");
-    expect(p.slots[0].instruction).toBe("x");
   });
 
   it("keeps extra separators inside the instruction", () => {
@@ -48,56 +62,106 @@ describe("parseTemplate", () => {
   });
 
   it("allows slots in the subject", () => {
-    const p = parseTemplate({ subject: "[[subject_hook · 4 word hook · 4]]", body: "Hi [[opener · x]]" });
-    expect(p.slots.map((s) => s.key)).toEqual(["subject_hook", "opener"]);
+    const p = parseTemplate({ subject: "[[hook · 4 word hook · 4]]", body: "Hi [[opener · x]]" });
+    expect(p.slots.map((s) => s.key)).toEqual(["hook", "opener"]);
   });
 
-  describe("errors", () => {
-    const errorsFor = (b: string, s = "subj") =>
-      parseTemplate({ subject: s, body: b }).issues.filter((i) => i.level === "error").map((i) => i.message);
+  describe("errors (shown inline, never thrown)", () => {
+    it("missing closer, with line number and part", () => {
+      const p = parseTemplate({ subject: "s", body: "Hi,\n\n[[opener · x" });
+      expect(p.issues).toEqual([
+        { level: "error", part: "body", line: 3, message: 'Body, line 3: "[[opener · x…" is missing its closing "]]".' },
+      ]);
+    });
 
-    it("unclosed markers", () => {
-      expect(errorsFor("Hi [[opener · x")).toEqual([`Body: "[[" at position 4 is never closed with "]]".`]);
-      expect(errorsFor("Hi {{first_name [[opener · x]]")).toEqual([`Body: "{{" at position 4 is never closed with "}}".`]);
+    it("missing closer when another marker starts first", () => {
+      expect(errorsFor("Hi {{first_name [[opener · x]]")[0]).toMatch(/line 1: "\{\{first_name.*missing its closing "\}\}"/);
     });
 
     it("stray closers", () => {
-      expect(errorsFor("oops ]] there")).toEqual([`Body: stray "]]" at position 6.`]);
+      expect(errorsFor("ok\noops ]] there")).toEqual(['Body, line 2: "]]" without a matching "[[".']);
     });
 
-    it("duplicate slot names", () => {
-      expect(errorsFor("[[opener · a]] [[opener · b]]")).toEqual([`Slot "opener" is used twice. Each slot needs its own name.`]);
+    it("name is required and must be valid", () => {
+      expect(errorsFor("[[]]")[0]).toMatch(/has no name/);
+      expect(errorsFor("[[ · x · 10]]")[0]).toMatch(/has no name/);
+      expect(errorsFor("[[my opener · x]]")[0]).toMatch(/letters, digits and _/);
+      expect(errorsFor("[[café · x]]")[0]).toMatch(/letters, digits and _/);
     });
 
-    it("empty or invalid names", () => {
-      expect(errorsFor("[[]]")).toHaveLength(1);
-      expect(errorsFor("[[ · x · 10]]")).toHaveLength(1);
-      expect(errorsFor("[[1st · x]]")[0]).toMatch(/must start with a letter/);
-      expect(errorsFor("{{first name}}")[0]).toMatch(/not a valid variable name/);
+    it("name must be unique", () => {
+      expect(errorsFor("[[opener · a]]\n[[opener · b]]")).toEqual([
+        'Body, line 2: slot name "opener" is used twice. Each slot needs its own name.',
+      ]);
     });
 
-    it("word limits out of range", () => {
-      expect(errorsFor("[[opener · x · 0]]")[0]).toMatch(/between 1 and 150/);
-      expect(errorsFor("[[opener · x · 500]]")[0]).toMatch(/between 1 and 150/);
+    it("instruction is required", () => {
+      expect(errorsFor("[[opener]]")[0]).toMatch(/slot "opener" needs an instruction/);
+      expect(errorsFor("[[opener · 20]]")[0]).toMatch(/needs an instruction/);
+    });
+
+    it("max words must be 3–80", () => {
+      expect(errorsFor("[[opener · x · 2]]")[0]).toMatch(/use 3–80/);
+      expect(errorsFor("[[opener · x · 81]]")[0]).toMatch(/use 3–80/);
+      expect(errorsFor("[[opener · x · 3]]")).toEqual([]);
+      expect(errorsFor("[[opener · x · 80]]")).toEqual([]);
+    });
+
+    it("invalid variable names", () => {
+      expect(errorsFor("{{first name}} [[opener · x]]")[0]).toMatch(/not a valid variable/);
     });
 
     it("empty body", () => {
       expect(errorsFor("   ")).toEqual(["The email body is empty."]);
     });
+
+    it("garbage input never throws", () => {
+      for (const junk of ["[[[[", "]]]]{{}}", "[[·|·]]", "{{[[}}]]", "[[x · y · 99999999999999999999]]", "\u0000[[a·b]]"]) {
+        expect(() => parseTemplate({ subject: junk, body: junk })).not.toThrow();
+      }
+    });
   });
 
-  describe("warnings", () => {
-    it("no slots, missing instruction, empty subject, unknown variables", () => {
-      const w = (subject: string, b: string, vars?: string[]) =>
-        parseTemplate({ subject, body: b }, { availableVariables: vars }).issues.filter((i) => i.level === "warning").map((i) => i.message);
+  it("warnings: no slots, empty subject, unknown variables", () => {
+    const w = (subject: string, b: string, vars?: string[]) =>
+      parseTemplate({ subject, body: b }, { availableVariables: vars }).issues.filter((i) => i.level === "warning").map((i) => i.message);
+    expect(w("s", "Plain email")[0]).toMatch(/No slots yet/);
+    expect(w("", "[[opener · x]]")).toEqual(["The subject is empty."]);
+    expect(w("s", "{{first_name}} {{city}} [[opener · x]]", ["first_name", "company"])).toEqual([
+      "Not in your lead list: {{city}}. These will be empty.",
+    ]);
+  });
+});
 
-      expect(w("s", "Plain email")[0]).toMatch(/No \[\[slots\]\] yet/);
-      expect(w("s", "[[opener]]")[0]).toMatch(/has no instruction/);
-      expect(w("", "[[opener · x]]")).toEqual(["The subject is empty."]);
-      expect(w("s", "{{first_name}} {{city}} [[opener · x]]", ["first_name", "company"])).toEqual([
-        "Not in your lead list: {{city}}. These will be empty.",
-      ]);
+describe("Add slot helpers", () => {
+  it("suggests the first free name", () => {
+    expect(suggestSlotName([])).toBe("opener");
+    expect(suggestSlotName(["opener"])).toBe("bridge");
+    expect(suggestSlotName(["opener", "bridge", "ps"])).toBe("slot_2");
+    expect(suggestSlotName(["opener", "bridge", "ps", "slot_2"])).toBe("slot_3");
+  });
+
+  it("validates the form", () => {
+    expect(validateSlotDraft({ key: "opener", instruction: "x", max_words: 25 }, [])).toEqual({});
+    expect(validateSlotDraft({ key: "", instruction: "", max_words: 2 }, [])).toEqual({
+      key: "Give the slot a name.",
+      instruction: "Say what this slot should do.",
+      max_words: "3–80",
     });
+    expect(validateSlotDraft({ key: "opener", instruction: "x", max_words: "25" }, ["opener"]).key).toMatch(/already used/);
+    expect(validateSlotDraft({ key: "my slot", instruction: "a | b", max_words: 81 }, [])).toEqual({
+      key: "Letters, digits and _ only.",
+      instruction: "Leave out [ ] { } | and ·.",
+      max_words: "3–80",
+    });
+  });
+
+  it("inserts text that parses back to the same slot", () => {
+    const text = formatSlot({ key: " Opener ", instruction: "  a line about  their work ", max_words: "20" });
+    expect(text).toBe("[[opener · a line about their work · 20]]");
+    expect(parseTemplate({ subject: "s", body: text }).slots).toEqual([
+      { key: "opener", instruction: "a line about their work", max_words: 20 },
+    ]);
   });
 });
 

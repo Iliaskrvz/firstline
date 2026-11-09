@@ -1,9 +1,20 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { Badge, Button, Card, Field, inputClass } from "@/components/ui";
+import { Badge, Button, Card, cx, Field, inputClass } from "@/components/ui";
 import { TokenPreview } from "@/components/template-preview";
-import { hasErrors, parseTemplate } from "@/lib/template";
+import {
+  DEFAULT_MAX_WORDS,
+  formatSlot,
+  hasErrors,
+  MAX_MAX_WORDS,
+  MIN_MAX_WORDS,
+  parseTemplate,
+  suggestSlotName,
+  validateSlotDraft,
+  type SlotDraft,
+  type TemplateIssue,
+} from "@/lib/template";
 import type { StyleRules, TemplateRow } from "@/lib/types";
 import { saveTemplate } from "./actions";
 
@@ -11,7 +22,7 @@ const STARTER_BODY = `Hi {{first_name}},
 
 [[opener · a specific observation about their company, from their website · 25]]
 
-We help companies like {{company}} [your offer in one line]. [[bridge · one sentence linking their situation to our offer]]
+We help companies like {{company}} [your offer in one line]. [[bridge · one sentence linking their situation to our offer · 25]]
 
 Worth a quick look?
 
@@ -41,6 +52,92 @@ const toLines = (s: string) =>
     .map((l) => l.trim())
     .filter(Boolean);
 
+function IssueList({ issues }: { issues: TemplateIssue[] }) {
+  if (issues.length === 0) return null;
+  return (
+    <ul className="mt-2 space-y-1" aria-live="polite">
+      {issues.map((i) => (
+        <li
+          key={i.message}
+          className={cx(
+            "rounded-md px-2.5 py-1.5 text-xs",
+            i.level === "error" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800",
+          )}
+        >
+          {i.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AddSlotForm({
+  existing,
+  onInsert,
+  onCancel,
+}: {
+  existing: string[];
+  onInsert: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<SlotDraft>({ key: suggestSlotName(existing), instruction: "", max_words: DEFAULT_MAX_WORDS });
+  const [touched, setTouched] = useState(false);
+  const errors = validateSlotDraft(draft, existing);
+  const ok = Object.keys(errors).length === 0;
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setTouched(true);
+    if (ok) onInsert(formatSlot(draft));
+  }
+
+  const err = (k: keyof SlotDraft) => touched && errors[k] && <span className="mt-1 block text-xs text-rose-700">{errors[k]}</span>;
+
+  return (
+    <form onSubmit={submit} className="mt-2 rounded-xl bg-indigo-50/60 p-3 ring-1 ring-indigo-100">
+      <div className="grid gap-2 sm:grid-cols-[140px_1fr_90px]">
+        <label className="block">
+          <span className="text-xs font-medium text-slate-700">Name</span>
+          <input className={cx(inputClass, "mt-1")} value={draft.key} onChange={(e) => setDraft({ ...draft, key: e.target.value })} />
+          {err("key")}
+        </label>
+        <label className="block">
+          <span className="text-xs font-medium text-slate-700">What should it say?</span>
+          <input
+            autoFocus
+            className={cx(inputClass, "mt-1")}
+            value={draft.instruction}
+            placeholder="e.g. something specific from their website"
+            onChange={(e) => setDraft({ ...draft, instruction: e.target.value })}
+          />
+          {err("instruction")}
+        </label>
+        <label className="block">
+          <span className="text-xs font-medium text-slate-700">Max words</span>
+          <input
+            type="number"
+            min={MIN_MAX_WORDS}
+            max={MAX_MAX_WORDS}
+            className={cx(inputClass, "mt-1")}
+            value={draft.max_words}
+            onChange={(e) => setDraft({ ...draft, max_words: e.target.value })}
+          />
+          {err("max_words")}
+        </label>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <Button type="submit" className="py-1.5">
+          Insert slot
+        </Button>
+        <Button type="button" variant="ghost" className="py-1.5" onClick={onCancel}>
+          Cancel
+        </Button>
+        <code className="ml-auto hidden truncate text-xs text-indigo-700 sm:block">{ok ? formatSlot(draft) : ""}</code>
+      </div>
+    </form>
+  );
+}
+
 export function TemplateEditor({
   template,
   campaignId,
@@ -63,22 +160,32 @@ export function TemplateEditor({
   const [banned, setBanned] = useState((rules.banned_phrases ?? []).join("\n"));
   const [extra, setExtra] = useState((rules.extra_rules ?? []).join("\n"));
   const [message, setMessage] = useState<{ kind: "error" | "ok"; text: string } | null>(null);
+  const [addingSlot, setAddingSlot] = useState(false);
   const [pending, startTransition] = useTransition();
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const caret = useRef<{ a: number; b: number } | null>(null);
 
   const parsed = useMemo(
     () => parseTemplate({ subject, body }, { availableVariables: variables ?? undefined }),
     [subject, body, variables],
   );
   const previewVars = sample ?? DEMO_SAMPLE;
+  const subjectIssues = parsed.issues.filter((i) => i.part === "subject");
+  const bodyIssues = parsed.issues.filter((i) => i.part !== "subject");
+  const errorCount = parsed.issues.filter((i) => i.level === "error").length;
+
+  function rememberCaret() {
+    const el = bodyRef.current;
+    if (el) caret.current = { a: el.selectionStart, b: el.selectionEnd };
+  }
 
   function insert(snippet: string) {
     const el = bodyRef.current;
-    if (!el) return setBody(body + snippet);
-    const { selectionStart: a, selectionEnd: b } = el;
-    const next = body.slice(0, a) + snippet + body.slice(b);
-    setBody(next);
+    const { a, b } = caret.current ?? (el ? { a: el.selectionStart, b: el.selectionEnd } : { a: body.length, b: body.length });
+    setBody(body.slice(0, a) + snippet + body.slice(b));
+    caret.current = null;
     requestAnimationFrame(() => {
+      if (!el) return;
       el.focus();
       el.setSelectionRange(a + snippet.length, a + snippet.length);
     });
@@ -101,8 +208,7 @@ export function TemplateEditor({
   }
 
   const quickVars = (variables ?? ["first_name", "company"]).filter((v) => v !== "email").slice(0, 6);
-  const errors = parsed.issues.filter((i) => i.level === "error");
-  const warnings = parsed.issues.filter((i) => i.level === "warning");
+  const saveBlocker = !name.trim() ? "Give the template a name." : errorCount ? `Fix ${errorCount} error${errorCount > 1 ? "s" : ""} to save.` : null;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -111,30 +217,53 @@ export function TemplateEditor({
           <Field label="Template name">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Agencies NL, v1" maxLength={120} />
           </Field>
-          <Field label="Subject">
-            <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={300} />
-          </Field>
+          <div>
+            <Field label="Subject">
+              <input className={inputClass} value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={300} />
+            </Field>
+            <IssueList issues={subjectIssues} />
+          </div>
           <div>
             <div className="flex flex-wrap items-end justify-between gap-2">
               <span className="text-sm font-medium text-slate-700">Body</span>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 {quickVars.map((v) => (
-                  <button key={v} type="button" onClick={() => insert(`{{${v}}}`)} className="tok-var text-xs hover:opacity-80">
+                  <button key={v} type="button" onMouseDown={rememberCaret} onClick={() => insert(`{{${v}}}`)} className="tok-var text-xs hover:opacity-80">
                     {`{{${v}}}`}
                   </button>
                 ))}
-                <button type="button" onClick={() => insert("[[opener · what it should say · 25]]")} className="tok-slot text-xs hover:opacity-80">
-                  + slot
-                </button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="ml-1 px-2.5 py-1 text-xs"
+                  onMouseDown={rememberCaret}
+                  onClick={() => setAddingSlot((v) => !v)}
+                  aria-expanded={addingSlot}
+                >
+                  + Add slot
+                </Button>
               </div>
             </div>
+            {addingSlot && (
+              <AddSlotForm
+                existing={parsed.slots.map((s) => s.key)}
+                onCancel={() => setAddingSlot(false)}
+                onInsert={(text) => {
+                  insert(text);
+                  setAddingSlot(false);
+                }}
+              />
+            )}
             <textarea
               ref={bodyRef}
-              className={`${inputClass} mt-1.5 min-h-80 font-mono text-[13px] leading-relaxed`}
+              className={cx(inputClass, "mt-2 min-h-80 font-mono text-[13px] leading-relaxed", errorCount > 0 && "ring-rose-300")}
               value={body}
               onChange={(e) => setBody(e.target.value)}
+              onBlur={rememberCaret}
               spellCheck
+              aria-invalid={errorCount > 0}
             />
+            <IssueList issues={bodyIssues} />
           </div>
           <details className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
             <summary className="cursor-pointer font-medium text-slate-700">How the syntax works</summary>
@@ -143,7 +272,7 @@ export function TemplateEditor({
                 <code className="tok-var">{"{{first_name}}"}</code> is a plain mail-merge field from your CSV.
               </li>
               <li>
-                <code className="tok-slot">[[opener · instruction · 25]]</code> is written by FirstLine for each lead: <em>name · what to write · max words</em>. You can use <code>|</code> instead of <code>·</code>.
+                <code className="tok-slot">[[opener · instruction · 25]]</code> is written by FirstLine for each lead: <em>name · what to write · max words</em>. Use <code>·</code> or <code>|</code>. Max words is optional (default {DEFAULT_MAX_WORDS}, {MIN_MAX_WORDS}–{MAX_MAX_WORDS}).
               </li>
               <li>Everything else is your copy and is sent word for word.</li>
               <li>Every claim in a slot must come from facts found on the lead&apos;s website. If nothing usable is found, the lead gets a neutral line and costs 0 credits.</li>
@@ -198,7 +327,7 @@ export function TemplateEditor({
 
           <h3 className="mt-6 text-sm font-semibold text-slate-900">Slots FirstLine will write</h3>
           {parsed.slots.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-500">None yet.</p>
+            <p className="mt-2 text-sm text-slate-500">None yet. Use “+ Add slot”.</p>
           ) : (
             <ul className="mt-2 divide-y divide-slate-100">
               {parsed.slots.map((s) => (
@@ -207,31 +336,17 @@ export function TemplateEditor({
                     <Badge tone="indigo">✦ {s.key}</Badge>
                     <p className="mt-1 text-slate-600">{s.instruction || <em className="text-slate-400">no instruction</em>}</p>
                   </div>
-                  <span className="shrink-0 text-xs text-slate-500">{s.max_words ? `≤ ${s.max_words} words` : "1 sentence"}</span>
+                  <span className="shrink-0 text-xs text-slate-500">≤ {s.max_words} words</span>
                 </li>
               ))}
             </ul>
           )}
 
-          {(errors.length > 0 || warnings.length > 0) && (
-            <ul className="mt-4 space-y-1.5">
-              {errors.map((i) => (
-                <li key={i.message} className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {i.message}
-                </li>
-              ))}
-              {warnings.map((i) => (
-                <li key={i.message} className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  {i.message}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-6 flex items-center gap-3">
-            <Button onClick={save} disabled={pending || hasErrors(parsed) || !name.trim()}>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button onClick={save} disabled={pending || !!saveBlocker}>
               {pending ? "Saving…" : campaignId ? "Save and use in campaign" : "Save template"}
             </Button>
+            {saveBlocker && <span className="text-sm text-slate-500">{saveBlocker}</span>}
             {message && <span className={message.kind === "error" ? "text-sm text-rose-700" : "text-sm text-emerald-700"}>{message.text}</span>}
           </div>
         </Card>
