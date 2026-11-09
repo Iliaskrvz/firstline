@@ -23,12 +23,17 @@ export function AddInbox({ appUrl, script }: { appUrl: string | null; script: st
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [cap, setCap] = useState(30);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ key: string; email: string } | null>(null);
+  const [created, setCreated] = useState<{ key: string; email: string; updated?: boolean } | null>(null);
   const [pending, start_] = useTransition();
 
   if (created) {
     return (
       <div className="space-y-3">
+        {created.updated && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {created.email} was already added: its settings are updated and it has a new key. Paste the new key in the sheet (FirstLine → Connect…).
+          </p>
+        )}
         <SetupSteps email={created.email} senderKey={created.key} appUrl={appUrl} script={script} />
         <Button variant="secondary" onClick={() => (setCreated(null), setOpen(false), setEmail(""))}>
           Done
@@ -84,7 +89,7 @@ export function AddInbox({ appUrl, script }: { appUrl: string | null; script: st
       {error && <p className="text-sm text-rose-700">{error}</p>}
       <div className="flex gap-2">
         <Button type="submit" disabled={pending}>
-          {pending ? "Adding…" : "Add inbox and create key"}
+          {pending ? "Saving…" : "Save inbox and create key"}
         </Button>
         <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
           Cancel

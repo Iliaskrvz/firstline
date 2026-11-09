@@ -19,7 +19,9 @@ const AddInbox = z.object({
   daily_cap: z.number().int().min(1, "At least 1 a day.").max(100, "Free Gmail allows 100 a day; keep it at 100 or lower."),
 });
 
-export async function addInbox(input: z.input<typeof AddInbox>): Promise<{ error: string } | { key: string; email: string }> {
+export async function addInbox(
+  input: z.input<typeof AddInbox>,
+): Promise<{ error: string } | { key: string; email: string; updated: boolean }> {
   const parsed = AddInbox.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid inbox." };
   const { email, tz, start, end, days, daily_cap } = parsed.data;
@@ -29,14 +31,9 @@ export async function addInbox(input: z.input<typeof AddInbox>): Promise<{ error
   if (!queueConfigured()) return { error: NOT_CONFIGURED };
 
   const { workspace } = await requireWorkspace();
-  try {
-    const { key } = await createInbox(serverPool(), { workspaceId: workspace.id, email, window, dailyCap: daily_cap });
-    revalidatePath("/inboxes");
-    return { key, email: email.toLowerCase() };
-  } catch (e) {
-    if ((e as { code?: string }).code === "23505") return { error: "This inbox is already added." };
-    throw e;
-  }
+  const { key, updated } = await createInbox(serverPool(), { workspaceId: workspace.id, email, window, dailyCap: daily_cap });
+  revalidatePath("/inboxes");
+  return { key, email: email.toLowerCase(), updated };
 }
 
 export async function newInboxKey(inboxId: string): Promise<{ error: string } | { key: string; email: string }> {

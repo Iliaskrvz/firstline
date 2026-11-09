@@ -312,17 +312,25 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
 
 // ---- Called from the app (after the caller checked the user's workspace) -----------------
 
+/**
+ * Add an inbox, or set up an existing one again: adding the same address updates its window and
+ * cap, unpauses it and gives it a new key (the old key stops working).
+ */
 export async function createInbox(
   pool: pg.Pool,
   input: { workspaceId: string; email: string; window: SendWindow; dailyCap: number },
-): Promise<{ id: string; key: string }> {
+): Promise<{ id: string; key: string; updated: boolean }> {
   const key = generateSenderKey();
   const { rows } = await pool.query(
     `insert into public.inboxes (workspace_id, email, daily_cap, "window", sender_key_hash, key_prefix)
-     values ($1, lower($2), $3, $4, $5, $6) returning id`,
+     values ($1, lower($2), $3, $4, $5, $6)
+     on conflict (workspace_id, email) do update
+       set daily_cap = excluded.daily_cap, "window" = excluded."window", sender_key_hash = excluded.sender_key_hash,
+           key_prefix = excluded.key_prefix, health = case when public.inboxes.health = 'paused' then 'warming' else public.inboxes.health end
+     returning id, (xmax <> 0) updated`,
     [input.workspaceId, input.email.trim(), input.dailyCap, JSON.stringify(input.window), hashSenderKey(key), keyPrefix(key)],
   );
-  return { id: rows[0].id, key };
+  return { id: rows[0].id, key, updated: rows[0].updated };
 }
 
 /** A new key; the old one stops working at once. */

@@ -219,6 +219,15 @@ describe("Gmail sender API", () => {
     expect((await pool.query("select warmup_day from public.inboxes where id = $1", [inbox])).rows[0].warmup_day).toBe(1);
   });
 
+  it("adding an existing address updates its settings, unpauses it and gives a new key", async () => {
+    await setInboxPaused(pool, ws, inbox, true);
+    const again = await createInbox(pool, { workspaceId: ws, email: "me@sender.nl", window: { ...DEFAULT_WINDOW, start: "00:00", end: "23:59" }, dailyCap: 20 });
+    expect(again).toMatchObject({ id: inbox, updated: true });
+    const row = (await pool.query(`select daily_cap, "window"->>'start' start, health from public.inboxes where id = $1`, [inbox])).rows[0];
+    expect(row).toEqual({ daily_cap: 20, start: "00:00", health: "warming" });
+    key = again.key;
+  });
+
   it("rotating the key locks out the old one", async () => {
     const fresh = await rotateInboxKey(pool, ws, inbox);
     expect(fresh).toBeTruthy();
