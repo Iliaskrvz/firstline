@@ -86,6 +86,51 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     body: render(tpl.body, vars, slots).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(),
   });
 
+  /**
+   * Personalised follow-ups (steps 2+), from the same facts as step 1, so no new research.
+   * Without usable facts (or if writing fails) a step gets the neutral fallback; it never fails the lead.
+   */
+  const writeFollowUps = async (stepFacts: Fact[] | null, firstEmail: string) => {
+    for (const step of job.followUps ?? []) {
+      const ftpl = parseTemplate({ subject: "", body: step.body });
+      if (hasErrors(ftpl) || ftpl.slots.length === 0) continue; // validated when the step was saved
+      const renderBody = (slots: Record<string, string>) =>
+        render(ftpl.body, vars, slots).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+      let result: { slots: Record<string, string>; plan: unknown; factsUsed: string[]; checks: unknown; attempts: number } | null = null;
+      if (stepFacts) {
+        const fctx: CheckContext = { slots: ftpl.slots, facts: stepFacts, language, skillVersion: SKILL_VERSION, extraBanned: rules.banned_phrases, company: lead.company };
+        let feedback: string[] | undefined;
+        let previous: WriterOutput | undefined;
+        try {
+          for (let attempt = 1; attempt <= 2 && !result; attempt++) {
+            const w = await llm.write({
+              writer: job.campaign.writer, skillVersion: SKILL_VERSION, language, template: { subject: "", body: step.body, slots: ftpl.slots },
+              styleRules: rules, facts: stepFacts, lead: { first_name: lead.first_name, company: lead.company, title: lead.title, linkedin_headline: lead.linkedin_headline },
+              examples: [], feedback, previous, followUp: { stepNo: step.step_no, firstEmail },
+            });
+            await log(w.costs);
+            const checks = [...planCheck(w.output, fctx), ...ruleChecks(w.output, fctx)];
+            if (allPass(checks)) {
+              result = { slots: w.output.slots, plan: w.output.plan, factsUsed: w.output.facts_used, checks: { status: "passed", items: checks, attempts: attempt }, attempts: attempt };
+            } else {
+              feedback = failureReasons(checks);
+              previous = w.output;
+            }
+          }
+        } catch (e) {
+          if (!(e instanceof LLMUnavailableError || e instanceof LLMRefusalError)) throw e;
+        }
+      }
+      const slots = result?.slots ?? fallbackSlots(ftpl.slots, language);
+      await store.saveGeneration({
+        lead_id: lead.id, workspace_id: lead.workspace_id, step_no: step.step_no, plan: result?.plan ?? null, slot_outputs: slots,
+        full_email: renderBody(slots), subject: "", facts_used: result?.factsUsed ?? [], skill_version: SKILL_VERSION,
+        checks: result?.checks ?? { status: "fallback", reason: stepFacts ? "failed_checks" : "no_facts" }, judge_scores: {}, research: {},
+        provider: llm.provider, is_preview: !!opts.preview, attempts: result?.attempts ?? 0,
+      });
+    }
+  };
+
   const fallback = async (reason: FallbackReason, research: unknown, extra: Record<string, unknown> = {}) => {
     const slots = fallbackSlots(tpl.slots, language);
     const email = renderEmail(slots);
@@ -94,6 +139,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       facts_used: [], skill_version: SKILL_VERSION, checks: { status: "fallback", reason, ...extra }, judge_scores: {}, research,
       provider: llm.provider, is_preview: !!opts.preview, attempts: (extra.attempts as number) ?? 0,
     });
+    await writeFollowUps(null, email.body);
     await store.setLeadStatus(lead.id, "fallback", { detail: FALLBACK_REASONS[reason], confidence: "low" });
     return { outcome: "fallback" as const, detail: FALLBACK_REASONS[reason], costUsd: totalCost(spent) };
   };
@@ -180,6 +226,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
           facts_used: out.facts_used, skill_version: out.skill_version, checks: { status: "passed", items: checks, attempts: attempt },
           judge_scores: judge ?? {}, research, provider: llm.provider, is_preview: !!opts.preview, attempts: attempt,
         });
+        await writeFollowUps(allFacts, email.body);
         const confidence = attempt === 1 && avg >= 4.2 ? "high" : "medium";
         await store.setLeadStatus(lead.id, "done", { detail: null, confidence });
         return { outcome: "done", costUsd: totalCost(spent) };

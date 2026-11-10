@@ -115,6 +115,32 @@ describe("processLead (fake LLM, fake website)", () => {
     expect(store.costs).toEqual([]);
   });
 
+  it("writes personalised follow-ups from the same facts, before marking the lead done", async () => {
+    const j = job();
+    j.followUps = [{ step_no: 2, body: "Hi {{first_name}}, one more thing: [[angle2 · a different fact from their site · 25]]" }];
+    const calls: string[] = [];
+    const { store, deps } = setup(new FakeLLM(), j, fakeReader(SITE, calls));
+    const res = await processLead("lead-1", deps);
+    expect(res.outcome).toBe("done");
+    const [first, second] = store.generations;
+    expect(first.step_no ?? 1).toBe(1);
+    expect(second).toMatchObject({ step_no: 2, subject: "", checks: { status: "passed" } });
+    expect(second.full_email).toMatch(/^Hi Anna, one more thing: /);
+    expect(second.facts_used).not.toEqual(first.facts_used); // a different angle
+    expect(calls.filter((c) => c === "map")).toHaveLength(1); // no extra research
+    // The lead is only marked done after its follow-ups exist (a retry rewrites everything).
+    expect(store.statuses.get("lead-1")!.at(-1)!.status).toBe("done");
+  });
+
+  it("a fallback lead gets neutral follow-ups, never invented claims", async () => {
+    const j = job({ domain: null, website: null });
+    j.followUps = [{ step_no: 2, body: "Hi {{first_name}}, [[angle2 · a different fact · 25]]" }];
+    const { store, deps } = setup(new FakeLLM(), j);
+    expect((await processLead("lead-1", deps)).outcome).toBe("fallback");
+    expect(store.generations[1]).toMatchObject({ step_no: 2, facts_used: [], checks: { status: "fallback", reason: "no_facts" } });
+    expect(store.generations[1].full_email).toBe("Hi Anna, I'll keep this short.");
+  });
+
   it("unreachable site -> fallback, and the failure is cached briefly", async () => {
     const dead: WebReader = {
       robots: async () => null,

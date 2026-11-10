@@ -73,7 +73,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   const researchable = withSite ?? 0;
 
   // Run + send state.
-  const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; opt_out_line: string | null };
+  const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; inbox_ids: string[] | null; opt_out_line: string | null };
   const statuses = (allStatuses ?? []) as { id: string; status: string }[];
   const byStatus = statuses.reduce<Record<string, number>>((m, l) => ((m[l.status] = (m[l.status] ?? 0) + 1), m), {});
   const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
@@ -209,7 +209,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               campaignId={c.id}
               inboxes={inboxes}
               sendState={c2.send_state}
-              inboxEmail={inboxes.find((i) => i.id === c2.inbox_id)?.email ?? null}
+              sendingInboxIds={c2.inbox_ids ?? []}
               ready={readyToQueue}
               skippedFallbacks={c2.send_fallbacks ? 0 : (byStatus.fallback ?? 0)}
               defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}

@@ -93,15 +93,15 @@ describe("Gmail sender API", () => {
       ["carl@acme.nl", "acme.nl", "done"],
       ["dave@failed.nl", "failed.nl", "failed"],
     ]);
-    const r = await startSending(pool, { workspaceId: ws, campaignId: camp.id, inboxId: inbox, optOutLine: "Not relevant? Just reply 'no'." });
-    expect(r).toEqual({ queued: 3, suppressed: 0, alreadyQueued: 0, skippedFallbacks: 0 });
+    const r = await startSending(pool, { workspaceId: ws, campaignId: camp.id, inboxIds: [inbox], optOutLine: "Not relevant? Just reply 'no'." });
+    expect(r).toMatchObject({ queued: 3, suppressed: 0, alreadyQueued: 0, skippedFallbacks: 0, followUps: 0 });
     const body = (await pool.query("select body from public.sends where lead_id = $1", [camp.leads[0]])).rows[0].body;
     expect(body).toBe("Hi X,\n\nEmail for anna@acme.nl.\n\nBest\n\nNot relevant? Just reply 'no'.");
     // Starting again doesn't double-queue.
-    expect(await startSending(pool, { workspaceId: ws, campaignId: camp.id, inboxId: inbox, optOutLine: null })).toMatchObject({ queued: 0, alreadyQueued: 3 });
+    expect(await startSending(pool, { workspaceId: ws, campaignId: camp.id, inboxIds: [inbox], optOutLine: null })).toMatchObject({ queued: 0, alreadyQueued: 3 });
 
     const noFallbacks = await campaign("B", [["eve@b.nl", "b.nl", "fallback"], ["fay@b2.nl", "b2.nl", "done"]], false);
-    expect(await startSending(pool, { workspaceId: ws, campaignId: noFallbacks.id, inboxId: inbox, optOutLine: null })).toMatchObject({ queued: 1, skippedFallbacks: 1 });
+    expect(await startSending(pool, { workspaceId: ws, campaignId: noFallbacks.id, inboxIds: [inbox], optOutLine: null })).toMatchObject({ queued: 1, skippedFallbacks: 1 });
     await setCampaignSendState(pool, ws, noFallbacks.id, "paused");
   });
 
@@ -167,12 +167,12 @@ describe("Gmail sender API", () => {
 
   it("a suppressed address is never sent, even if it was queued before", async () => {
     const c = await campaign("C", [["anna@acme.nl", "acme.nl", "done"]]); // replied earlier
-    expect(await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxId: inbox, optOutLine: null })).toMatchObject({ queued: 0, suppressed: 1 });
+    expect(await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [inbox], optOutLine: null })).toMatchObject({ queued: 0, suppressed: 1 });
   });
 
   it("a reply from a free-mail address doesn't pause other gmail.com leads", async () => {
     const c = await campaign("D", [["jan@gmail.com", null, "done"], ["piet@gmail.com", null, "done"]]);
-    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxId: inbox, optOutLine: null });
+    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [inbox], optOutLine: null });
     const n = await senderNext(pool, key, { scriptVersion: V, now: at(120) });
     expect(n.email?.to).toBe("jan@gmail.com");
     await senderReport(pool, key, { send: { send_id: n.email!.send_id, status: "sent", thread_id: "t-jan" } }, { now: at(120) });
@@ -203,7 +203,7 @@ describe("Gmail sender API", () => {
 
   it("two script runs at the same moment never get the same email", async () => {
     const c = await campaign("E", [["r1@race.nl", "race.nl", "done"], ["r2@race2.nl", "race2.nl", "done"]]);
-    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxId: inbox, optOutLine: null });
+    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [inbox], optOutLine: null });
     await pool.query("update public.inboxes set next_send_at = null where id = $1", [inbox]);
     const [a, b] = await Promise.all([
       senderNext(pool, key, { scriptVersion: V, now: at(300) }),
@@ -233,5 +233,96 @@ describe("Gmail sender API", () => {
     expect(fresh).toBeTruthy();
     await expect(senderNext(pool, key, { scriptVersion: V, now: at(400) })).rejects.toBeInstanceOf(SenderAuthError);
     await expect(senderNext(pool, fresh!, { scriptVersion: V, now: at(400) })).resolves.toBeTruthy();
+  });
+});
+
+describe("3-step sequence across 2 inboxes (Phase 4)", () => {
+  it("spreads leads over the inboxes, follows up in the same thread after the delay, and stops on a reply", async () => {
+    const a = await createInbox(pool, { workspaceId: ws, email: "a@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    const b = await createInbox(pool, { workspaceId: ws, email: "b@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    const c = await campaign("Seq", [["one@seq1.nl", "seq1.nl", "done"], ["two@seq2.nl", "seq2.nl", "done"]]);
+    await pool.query(
+      `insert into public.sequence_steps (campaign_id, workspace_id, step_no, delay_days, kind, template_body) values
+         ($1, $2, 2, 0, 'plain', 'Hi {{first_name}}, a quick follow-up.'),
+         ($1, $2, 3, 2, 'personalised', 'Hi {{first_name}}, [[angle · another fact · 20]]')`,
+      [c.id, ws],
+    );
+    // Step 3 was written for the first lead only (e.g. the second was written before the step existed).
+    await pool.query("insert into public.generations (lead_id, workspace_id, step_no, subject, full_email, slot_outputs) values ($1, $2, 3, '', 'Hi X, saw your new office.', '{}')", [
+      c.leads[0],
+      ws,
+    ]);
+
+    const r = await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [a.id, b.id], optOutLine: null });
+    expect(r).toMatchObject({ queued: 2, followUps: 3, missingFollowUps: 1 });
+    const { rows: plan } = await pool.query(
+      `select l.email, s.step_no, i.email inbox, s.subject, s.body from public.sends s join public.leads l on l.id = s.lead_id
+         join public.inboxes i on i.id = s.inbox_id where s.campaign_id = $1 order by l.email, s.step_no`,
+      [c.id],
+    );
+    expect(plan.map((p) => `${p.email} ${p.step_no} ${p.inbox}`)).toEqual([
+      "one@seq1.nl 1 a@sender.nl",
+      "one@seq1.nl 2 a@sender.nl",
+      "one@seq1.nl 3 a@sender.nl",
+      "two@seq2.nl 1 b@sender.nl",
+      "two@seq2.nl 2 b@sender.nl",
+    ]);
+    expect(plan[1]).toMatchObject({ subject: "Re: Idea for one@seq1.nl", body: "Hi X, a quick follow-up." });
+
+    // Inbox b only ever gets lead two.
+    expect((await senderNext(pool, b.key, { scriptVersion: V, now: MON_10 })).email?.to).toBe("two@seq2.nl");
+
+    // Inbox a: step 1, then (after the gap) step 2 in the same thread, then step 3 two working days later.
+    const s1 = (await senderNext(pool, a.key, { scriptVersion: V, now: MON_10 })).email!;
+    expect(s1).toMatchObject({ to: "one@seq1.nl", thread_id: null });
+    await senderReport(pool, a.key, { send: { send_id: s1.send_id, status: "sent", thread_id: "t-one" } }, { now: MON_10, random: () => 0 });
+    expect((await senderNext(pool, a.key, { scriptVersion: V, now: at(3) })).wait?.reason).toBe("too_soon");
+
+    const s2 = (await senderNext(pool, a.key, { scriptVersion: V, now: at(10) })).email!;
+    expect(s2).toMatchObject({ to: "one@seq1.nl", subject: "Re: Idea for one@seq1.nl", thread_id: "t-one" });
+    await senderReport(pool, a.key, { send: { send_id: s2.send_id, status: "sent", thread_id: "t-one" } }, { now: at(10), random: () => 0 });
+
+    const n = await senderNext(pool, a.key, { scriptVersion: V, now: at(30) });
+    expect(n.wait?.reason).toBe("nothing_queued"); // step 3 isn't due until Wednesday
+    expect(n.watch).toEqual([{ send_id: s2.send_id, thread_id: "t-one" }]); // one entry per thread: the latest step
+
+    const wed = new Date("2026-11-11T09:00:00Z");
+    const s3 = (await senderNext(pool, a.key, { scriptVersion: V, now: wed })).email!;
+    expect(s3).toMatchObject({ thread_id: "t-one", body: "Hi X, saw your new office." });
+    await senderReport(pool, a.key, { send: { send_id: s3.send_id, status: "sent", thread_id: "t-one" } }, { now: wed });
+
+    // A reply ends the lead; its thread is no longer watched.
+    await senderReport(pool, a.key, { events: [{ send_id: s3.send_id, type: "replied" }] }, { now: new Date(wed.getTime() + 3600_000) });
+    expect((await senderNext(pool, a.key, { scriptVersion: V, now: new Date(wed.getTime() + 7200_000) })).watch).toEqual([]);
+  });
+
+  it("an old 1.0.0 script (can't reply in a thread) only gets first emails", async () => {
+    const y = await createInbox(pool, { workspaceId: ws, email: "y@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    const c = await campaign("Seq-old", [["old@seq4.nl", "seq4.nl", "done"]]);
+    await pool.query("insert into public.sequence_steps (campaign_id, workspace_id, step_no, delay_days, kind, template_body) values ($1, $2, 2, 0, 'plain', 'Bump')", [c.id, ws]);
+    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [y.id], optOutLine: null });
+    const s1 = (await senderNext(pool, y.key, { scriptVersion: "1.0.0", now: MON_10 })).email!;
+    await senderReport(pool, y.key, { send: { send_id: s1.send_id, status: "sent", thread_id: "t-old" } }, { now: MON_10, random: () => 0 });
+    const old = await senderNext(pool, y.key, { scriptVersion: "1.0.0", now: at(20) });
+    expect(old.email).toBeNull();
+    expect(old.script.latest).toBe(V); // the sheet shows "newer version available"
+    expect((await senderNext(pool, y.key, { scriptVersion: V, now: at(21) })).email?.thread_id).toBe("t-old");
+  });
+
+  it("a reply to step 1 stops the follow-ups that haven't gone out", async () => {
+    const x = await createInbox(pool, { workspaceId: ws, email: "x@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    const c = await campaign("Seq2", [["stop@seq3.nl", "seq3.nl", "done"]]);
+    await pool.query("insert into public.sequence_steps (campaign_id, workspace_id, step_no, delay_days, kind, template_body) values ($1, $2, 2, 3, 'plain', 'Any thoughts?')", [c.id, ws]);
+    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [x.id], optOutLine: null });
+    const s1 = (await senderNext(pool, x.key, { scriptVersion: V, now: MON_10 })).email!;
+    await senderReport(pool, x.key, { send: { send_id: s1.send_id, status: "sent", thread_id: "t-stop" } }, { now: MON_10 });
+    expect((await pool.query("select scheduled_for from public.sends where lead_id = $1 and step_no = 2", [c.leads[0]])).rows[0].scheduled_for).toEqual(
+      new Date("2026-11-11T23:00:00Z"), // Monday + 3 working days = Thursday 00:00 Amsterdam
+    );
+    await senderReport(pool, x.key, { events: [{ send_id: s1.send_id, type: "replied" }] }, { now: at(60) });
+    expect((await pool.query("select status, status_detail from public.sends where lead_id = $1 and step_no = 2", [c.leads[0]])).rows[0]).toEqual({
+      status: "stopped",
+      status_detail: "Lead replied",
+    });
   });
 });

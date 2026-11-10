@@ -26,6 +26,8 @@ export type GenerationRecord = {
   provider: string;
   is_preview: boolean;
   attempts: number;
+  /** 1 = the first email (default); 2+ = a personalised follow-up. */
+  step_no?: number;
 };
 
 export type LeadStatus = "queued" | "researching" | "writing" | "done" | "fallback" | "failed" | "skipped";

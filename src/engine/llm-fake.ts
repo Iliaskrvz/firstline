@@ -51,7 +51,9 @@ export class FakeLLM implements LLM {
 
   async write(input: WriteInput): Promise<LLMResult<WriterOutput>> {
     const websiteFacts = input.facts.filter((f) => f.tier === "A");
-    const angle = websiteFacts[0] ?? input.facts[0];
+    // A follow-up uses a different fact than the first email, when there is one.
+    const pick = input.followUp ? input.followUp.stepNo - 1 : 0;
+    const angle = websiteFacts.length ? websiteFacts[pick % websiteFacts.length] : input.facts[0];
     const lang = input.language;
     const slots: Record<string, string> = {};
     input.template.slots.forEach((slot, i) => {

@@ -2,7 +2,9 @@
 // /api/sender routes and server actions, and tested on a real Postgres.
 // Scheduling decisions are the pure functions in src/lib/sender.
 import type pg from "pg";
+import { leadVars } from "@/engine/pipeline";
 import { isFreeMailDomain } from "@/lib/domain";
+import { addWorkingDays, followUpSubject, renderPlainStep } from "@/lib/sender/sequence";
 import {
   BOUNCE_SENDER_PATTERN,
   composeBody,
@@ -25,8 +27,10 @@ import {
 } from "@/lib/sender/schedule";
 
 /** Bump when the Apps Script changes; scripts older than MIN must update before they get work. */
-export const SENDER_SCRIPT_VERSION = "1.0.0";
+export const SENDER_SCRIPT_VERSION = "1.1.0";
 export const MIN_SCRIPT_VERSION = "1.0.0";
+/** Scripts before this can't reply in a thread: they only get first emails. */
+const FOLLOW_UP_SCRIPT_VERSION = "1.1.0";
 const WATCH_PER_RUN = 20; // Gmail read quota: 288 runs/day × 20 threads stays well under it
 const WATCH_DAYS = 30;
 
@@ -178,15 +182,18 @@ export async function senderNext(
                          and (lower(x.email) = lower(s.to_email) or x.domain = split_part(lower(s.to_email), '@', 2)))`,
         [inbox.id],
       );
+      // Due follow-ups go first (they're time-sensitive), then new first emails in import order.
       const { rows } = await c.query(
-        `select s.id, s.to_email, s.subject, s.body, s.gmail_thread_id
+        `select s.id, s.to_email, s.subject, s.body,
+                coalesce(s.gmail_thread_id, (select f.gmail_thread_id from public.sends f where f.lead_id = s.lead_id and f.step_no = 1)) gmail_thread_id
            from public.sends s join public.campaigns c on c.id = s.campaign_id
           where s.inbox_id = $1 and s.status = 'queued' and c.send_state = 'sending'
+            and (s.step_no = 1 or (s.scheduled_for <= $2::timestamptz and $4::boolean))
             and (s.handed_out_at is null or s.handed_out_at < $2::timestamptz - make_interval(secs => $3))
-          order by s.step_no, s.created_at
+          order by (s.step_no > 1) desc, s.scheduled_for, s.created_at
           limit 1
           for update of s skip locked`,
-        [inbox.id, now, LEASE_MS / 1000],
+        [inbox.id, now, LEASE_MS / 1000, compareVersions(opts.scriptVersion ?? "0", FOLLOW_UP_SCRIPT_VERSION) >= 0],
       );
       if (rows[0]) {
         await c.query("update public.sends set handed_out_at = $2 where id = $1", [rows[0].id, now]);
@@ -194,13 +201,18 @@ export async function senderNext(
       } else reason = "nothing_queued";
     }
 
-    // Threads to check for replies and bounces: a rotating slice, oldest check first.
+    // Threads to check for replies and bounces: one per lead (its latest sent step), skipping leads
+    // that already replied or bounced; a rotating slice, oldest check first.
     const { rows: watch } = await c.query(
       `update public.sends set watch_checked_at = $2
-        where id in (select id from public.sends
-                      where inbox_id = $1 and status = 'sent' and gmail_thread_id is not null
-                        and sent_at > $2::timestamptz - make_interval(days => $3)
-                      order by watch_checked_at nulls first, sent_at
+        where id in (select t.id from (
+                       select distinct on (s.gmail_thread_id) s.id, s.watch_checked_at, s.sent_at
+                         from public.sends s
+                        where s.inbox_id = $1 and s.status = 'sent' and s.gmail_thread_id is not null
+                          and s.sent_at > $2::timestamptz - make_interval(days => $3)
+                          and not exists (select 1 from public.sends x where x.lead_id = s.lead_id and x.status in ('replied', 'bounced'))
+                        order by s.gmail_thread_id, s.step_no desc) t
+                      order by t.watch_checked_at nulls first, t.sent_at
                       limit $4)
         returning id, gmail_thread_id`,
       [inbox.id, now, WATCH_DAYS, WATCH_PER_RUN],
@@ -246,12 +258,21 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
     if (body.send?.status === "sent") {
       const r = await c.query(
         `update public.sends set status = 'sent', sent_at = $3, gmail_thread_id = $4, handed_out_at = null
-          where id = $1 and inbox_id = $2 and status = 'queued'`,
+          where id = $1 and inbox_id = $2 and status = 'queued'
+          returning lead_id, step_no`,
         [body.send.send_id, inbox.id, now, body.send.thread_id ?? null],
       );
       if (r.rowCount) {
         out.sent = 1;
         await c.query("update public.inboxes set next_send_at = $2 where id = $1", [inbox.id, new Date(now.getTime() + nextGapMs(opts.random))]);
+        // The next step becomes due its delay in working days from now (inbox timezone).
+        const { rows: next } = await c.query(
+          "select id, delay_days from public.sends where lead_id = $1 and step_no = $2 and status in ('queued', 'paused')",
+          [r.rows[0].lead_id, r.rows[0].step_no + 1],
+        );
+        if (next[0]) {
+          await c.query("update public.sends set scheduled_for = $2 where id = $1", [next[0].id, addWorkingDays(now, next[0].delay_days, inbox.window.tz)]);
+        }
       }
     } else if (body.send?.status === "failed") {
       const r = await c.query("update public.sends set handed_out_at = null where id = $1 and inbox_id = $2 and status = 'queued'", [body.send.send_id, inbox.id]);
@@ -345,71 +366,107 @@ export async function rotateInboxKey(pool: pg.Pool, workspaceId: string, inboxId
   return r.rowCount ? key : null;
 }
 
-/** Queue step 1 for every finished lead (fallbacks only if the campaign sends them). Returns what happened. */
+export type StartResult = {
+  queued: number;
+  suppressed: number;
+  alreadyQueued: number;
+  skippedFallbacks: number;
+  followUps: number;
+  /** Personalised follow-ups that weren't written for a lead (e.g. the step was added after the run). */
+  missingFollowUps: number;
+};
+
+/**
+ * Queue the whole sequence for every finished lead (fallbacks only if the campaign sends them).
+ * Leads are spread over the inboxes round robin; all steps of a lead go out from the same inbox,
+ * in the same thread. Follow-ups wait until the previous step is sent (then + delay working days).
+ */
 export async function startSending(
   pool: pg.Pool,
-  input: { workspaceId: string; campaignId: string; inboxId: string; optOutLine: string | null },
-): Promise<{ queued: number; suppressed: number; alreadyQueued: number; skippedFallbacks: number }> {
+  input: { workspaceId: string; campaignId: string; inboxIds: string[]; optOutLine: string | null },
+): Promise<StartResult> {
+  const inboxIds = [...new Set(input.inboxIds)];
+  if (inboxIds.length === 0) throw new Error("Pick at least one inbox.");
   return tx(pool, async (c) => {
     const { rows: camp } = await c.query(
-      `select c.id, c.send_fallbacks from public.campaigns c
-        join public.inboxes i on i.id = $3 and i.workspace_id = c.workspace_id
-       where c.id = $1 and c.workspace_id = $2 for update of c`,
-      [input.campaignId, input.workspaceId, input.inboxId],
+      `select c.id, c.send_fallbacks from public.campaigns c where c.id = $1 and c.workspace_id = $2 for update`,
+      [input.campaignId, input.workspaceId],
     );
-    if (!camp[0]) throw new Error("Campaign or inbox not found.");
+    if (!camp[0]) throw new Error("Campaign not found.");
+    const { rows: own } = await c.query("select id from public.inboxes where workspace_id = $1 and id = any($2::uuid[])", [input.workspaceId, inboxIds]);
+    if (own.length !== inboxIds.length) throw new Error("Inbox not found.");
     const sendFallbacks: boolean = camp[0].send_fallbacks;
 
+    const { rows: steps } = await c.query(
+      "select step_no, delay_days, kind, template_body from public.sequence_steps where campaign_id = $1 and step_no > 1 order by step_no",
+      [input.campaignId],
+    );
     const { rows: leads } = await c.query(
-      `select l.id, l.email, l.status, g.subject, g.full_email,
+      `select l.id, l.email, l.first_name, l.last_name, l.company, l.title, l.linkedin_headline, l.website, l.domain, l.custom, l.status,
+              g.subject, g.full_email,
               exists (select 1 from public.sends s where s.lead_id = l.id and s.step_no = 1) already,
               exists (select 1 from public.suppression x where x.workspace_id = l.workspace_id
                        and (lower(x.email) = lower(l.email) or x.domain = split_part(lower(l.email), '@', 2))) suppressed
          from public.leads l
          join lateral (select subject, full_email from public.generations g
-                        where g.lead_id = l.id and g.full_email is not null order by g.created_at desc limit 1) g on true
+                        where g.lead_id = l.id and g.step_no = 1 and g.full_email is not null and g.full_email <> ''
+                        order by g.created_at desc limit 1) g on true
         where l.campaign_id = $1 and l.status in ('done', 'fallback')
         order by l.created_at, l.id`,
       [input.campaignId],
     );
-    let queued = 0;
-    let suppressed = 0;
-    let alreadyQueued = 0;
-    let skippedFallbacks = 0;
+    const { rows: written } = await c.query(
+      `select distinct on (lead_id, step_no) lead_id, step_no, full_email from public.generations
+        where lead_id = any($1::uuid[]) and step_no > 1 order by lead_id, step_no, created_at desc`,
+      [leads.map((l) => l.id)],
+    );
+    const followUpText = new Map(written.map((g) => [`${g.lead_id}:${g.step_no}`, g.full_email as string]));
+
+    const out: StartResult = { queued: 0, suppressed: 0, alreadyQueued: 0, skippedFallbacks: 0, followUps: 0, missingFollowUps: 0 };
+    let n = 0;
+    const insert = (lead: { id: string; email: string }, step: number, inboxId: string, subject: string, body: string, delay: number, suppressed: boolean) =>
+      // clock_timestamp(), not now(): keeps the import order inside this one transaction.
+      c.query(
+        `insert into public.sends (lead_id, workspace_id, campaign_id, step_no, inbox_id, to_email, subject, body, delay_days, status, status_detail, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, clock_timestamp())`,
+        [lead.id, input.workspaceId, input.campaignId, step, inboxId, lead.email, subject, composeBody(body, input.optOutLine), delay,
+         suppressed ? "stopped" : "queued", suppressed ? "On the suppression list" : null],
+      );
+
     for (const l of leads) {
       if (l.already) {
-        alreadyQueued++;
+        out.alreadyQueued++;
         continue;
       }
       if (l.status === "fallback" && !sendFallbacks) {
-        skippedFallbacks++;
+        out.skippedFallbacks++;
         continue;
       }
-      await c.query(
-        // clock_timestamp(), not now(): keeps the import order inside this one transaction.
-        `insert into public.sends (lead_id, workspace_id, campaign_id, step_no, inbox_id, to_email, subject, body, status, status_detail, created_at)
-         values ($1, $2, $3, 1, $4, $5, $6, $7, $8, $9, clock_timestamp())`,
-        [
-          l.id,
-          input.workspaceId,
-          input.campaignId,
-          input.inboxId,
-          l.email,
-          l.subject,
-          composeBody(l.full_email, input.optOutLine),
-          l.suppressed ? "stopped" : "queued",
-          l.suppressed ? "On the suppression list" : null,
-        ],
-      );
-      if (l.suppressed) suppressed++;
-      else queued++;
+      const inboxId = inboxIds[n++ % inboxIds.length];
+      await insert(l, 1, inboxId, l.subject, l.full_email, 0, l.suppressed);
+      if (l.suppressed) {
+        out.suppressed++;
+        continue;
+      }
+      out.queued++;
+      const vars = leadVars({ ...l, custom: l.custom ?? {} });
+      for (const st of steps) {
+        const text = st.kind === "plain" ? renderPlainStep(st.template_body, vars) : followUpText.get(`${l.id}:${st.step_no}`);
+        if (!text) {
+          out.missingFollowUps++;
+          continue;
+        }
+        await insert(l, st.step_no, inboxId, followUpSubject(l.subject), text, st.delay_days, false);
+        out.followUps++;
+      }
     }
-    await c.query("update public.campaigns set inbox_id = $2, opt_out_line = $3, send_state = 'sending' where id = $1", [
+    await c.query("update public.campaigns set inbox_id = $2, inbox_ids = $3, opt_out_line = $4, send_state = 'sending' where id = $1", [
       input.campaignId,
-      input.inboxId,
+      inboxIds[0],
+      inboxIds,
       input.optOutLine,
     ]);
-    return { queued, suppressed, alreadyQueued, skippedFallbacks };
+    return out;
   });
 }
 

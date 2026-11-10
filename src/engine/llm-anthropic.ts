@@ -68,6 +68,15 @@ export class AnthropicLLM implements LLM {
       `Language: ${input.language}`,
       `Lead: ${input.lead.first_name ?? "?"} at ${input.lead.company ?? "?"}${input.lead.title ? `, role: ${input.lead.title}` : ""}`,
       "",
+      ...(input.followUp
+        ? [
+            `This is follow-up email ${input.followUp.stepNo} in the same thread. The lead hasn't replied to the first email:`,
+            input.followUp.firstEmail,
+            "",
+            "Use a different fact or angle than the first email. Don't repeat its opener, and don't mention that they didn't reply.",
+            "",
+          ]
+        : []),
       "The sender's email (only the [[slots]] are yours to write):",
       `Subject: ${input.template.subject}`,
       input.template.body,

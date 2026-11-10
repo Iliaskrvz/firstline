@@ -22,7 +22,12 @@ export class PgStore implements EngineStore {
     );
     const r = rows[0];
     if (!r) return null;
+    const { rows: steps } = await this.pool.query(
+      `select step_no, template_body from public.sequence_steps where campaign_id = $1 and kind = 'personalised' and step_no > 1 order by step_no`,
+      [r.campaign_id],
+    );
     return {
+      followUps: steps.map((s) => ({ step_no: s.step_no, body: s.template_body })),
       lead: {
         id: r.id, workspace_id: r.workspace_id, campaign_id: r.campaign_id, email: r.email, first_name: r.first_name,
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
@@ -71,12 +76,12 @@ export class PgStore implements EngineStore {
   async saveGeneration(g: GenerationRecord) {
     await this.pool.query(
       `insert into public.generations (lead_id, workspace_id, plan, slot_outputs, full_email, subject, facts_used, skill_version,
-         checks, judge_scores, research, provider, is_preview, attempts)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         checks, judge_scores, research, provider, is_preview, attempts, step_no)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         g.lead_id, g.workspace_id, g.plan == null ? null : JSON.stringify(g.plan), JSON.stringify(g.slot_outputs), g.full_email, g.subject,
         g.facts_used, g.skill_version, JSON.stringify(g.checks), JSON.stringify(g.judge_scores), JSON.stringify(g.research), g.provider,
-        g.is_preview, g.attempts,
+        g.is_preview, g.attempts, g.step_no ?? 1,
       ],
     );
   }

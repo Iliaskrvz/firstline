@@ -11,7 +11,7 @@ export function SendPanel({
   campaignId,
   inboxes,
   sendState,
-  inboxEmail,
+  sendingInboxIds,
   ready,
   skippedFallbacks,
   defaultOptOut,
@@ -20,13 +20,15 @@ export function SendPanel({
   campaignId: string;
   inboxes: Inbox[];
   sendState: "sending" | "paused" | null;
-  inboxEmail: string | null;
+  /** The inboxes this campaign sends from (once started). */
+  sendingInboxIds: string[];
   ready: number;
   skippedFallbacks: number;
   defaultOptOut: string;
   counts: Record<string, number>;
 }) {
-  const [inboxId, setInboxId] = useState(inboxes[0]?.id ?? "");
+  const [picked, setPicked] = useState<string[]>(inboxes.slice(0, 1).map((i) => i.id));
+  const sendingFrom = inboxes.filter((i) => sendingInboxIds.includes(i.id)).map((i) => i.email);
   const [optOut, setOptOut] = useState(defaultOptOut);
   const [pending, start] = useTransition();
   const [message, setMessage] = useState<{ error?: string; info?: string } | null>(null);
@@ -35,7 +37,7 @@ export function SendPanel({
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-slate-700">Sending from {inboxEmail}</div>
+          <div className="text-sm font-medium text-slate-700">Sending from {sendingFrom.join(", ") || "–"}</div>
           <span className={sendState === "sending" ? "text-xs font-medium text-emerald-700" : "text-xs font-medium text-amber-700"}>
             {sendState === "sending" ? "On" : "Paused"}
           </span>
@@ -63,7 +65,7 @@ export function SendPanel({
             disabled={pending}
             onClick={() =>
               start(async () => {
-                const res = await startCampaignSending({ campaignId, inboxId: inboxes.find((i) => i.email === inboxEmail)?.id ?? inboxId, optOutLine: optOut });
+                const res = await startCampaignSending({ campaignId, inboxIds: sendingInboxIds, optOutLine: optOut });
                 setMessage("error" in res ? { error: res.error } : { info: `${res.queued} more queued.` });
               })
             }
@@ -88,24 +90,30 @@ export function SendPanel({
         </p>
       ) : (
         <>
-          <Field label="From">
-            <select className={inputClass} value={inboxId} onChange={(e) => setInboxId(e.target.value)}>
+          <Field label="From" hint={picked.length > 1 ? "Leads are spread over these inboxes; each lead's follow-ups come from the same inbox." : undefined}>
+            <div className="space-y-1.5">
               {inboxes.map((i) => (
-                <option key={i.id} value={i.id}>
+                <label key={i.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="accent-indigo-600"
+                    checked={picked.includes(i.id)}
+                    onChange={(e) => setPicked(e.target.checked ? [...picked, i.id] : picked.filter((x) => x !== i.id))}
+                  />
                   {i.email}
-                </option>
+                </label>
               ))}
-            </select>
+            </div>
           </Field>
           <Field label="Opt-out line" hint="Added under every email. Leave empty to leave it out.">
             <input className={inputClass} value={optOut} onChange={(e) => setOptOut(e.target.value)} maxLength={200} />
           </Field>
           <Button
             className="w-full"
-            disabled={pending || ready === 0}
+            disabled={pending || ready === 0 || picked.length === 0}
             onClick={() =>
               start(async () => {
-                const res = await startCampaignSending({ campaignId, inboxId, optOutLine: optOut });
+                const res = await startCampaignSending({ campaignId, inboxIds: picked, optOutLine: optOut });
                 if ("error" in res) setMessage({ error: res.error });
               })
             }

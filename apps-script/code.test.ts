@@ -10,7 +10,7 @@ import { SENDER_SCRIPT_VERSION } from "@/sender/db";
 const CODE = readFileSync(path.join(__dirname, "Code.gs"), "utf8");
 const RULES = { unsubscribe: UNSUBSCRIBE_PATTERN, reply_cut: REPLY_CUT_PATTERN, bounce_from: BOUNCE_SENDER_PATTERN };
 
-type Msg = { from: string; body: string };
+type Msg = { from: string; body: string; replyTo?: string };
 
 function sandbox(opts: { threads?: Record<string, Msg[]>; paused?: boolean; next?: object; me?: string } = {}) {
   const calls: { method: string; path: string; headers: Record<string, string>; payload?: unknown }[] = [];
@@ -34,9 +34,23 @@ function sandbox(opts: { threads?: Record<string, Msg[]>; paused?: boolean; next
     setFrozenRows: () => {},
   };
   const sheetRange = sheet.getRange("x");
-  const thread = (id: string) => ({
+  const deleted: string[] = [];
+  const thread = (id: string): unknown => ({
     getId: () => id,
-    getMessages: () => (opts.threads?.[id] ?? []).map((m) => ({ getFrom: () => m.from, getPlainBody: () => m.body })),
+    getMessages: () =>
+      (opts.threads?.[id] ?? []).map((m) => ({
+        getFrom: () => m.from,
+        getPlainBody: () => m.body,
+        // Reply-all on our own message: Gmail addresses it to `replyTo` (the lead, in the normal case).
+        createDraftReplyAll: (body: string) => ({
+          getMessage: () => ({ getTo: () => m.replyTo ?? "", getCc: () => "" }),
+          deleteDraft: () => deleted.push(id),
+          send: () => {
+            sent.push({ to: m.replyTo ?? "", subject: `(reply in ${id})`, body });
+            return { getThread: () => thread(id) };
+          },
+        }),
+      })),
   });
   const ctx: Record<string, unknown> = {
     console,
@@ -65,7 +79,7 @@ function sandbox(opts: { threads?: Record<string, Msg[]>; paused?: boolean; next
   };
   vm.createContext(ctx);
   vm.runInContext(CODE, ctx);
-  return { ctx: ctx as Record<string, (...a: unknown[]) => unknown>, calls, sent, logs, cells };
+  return { ctx: ctx as Record<string, (...a: unknown[]) => unknown>, calls, sent, logs, cells, deleted };
 }
 
 describe("Code.gs", () => {
@@ -132,6 +146,28 @@ describe("Code.gs", () => {
     expect(s.sent).toEqual([]);
     expect(s.calls[1].payload).toEqual({ events: [{ send_id: "a", type: "replied", unsubscribe: false }] });
     expect(String(s.cells.B3)).toMatch(/^Paused/);
+  });
+
+  it("sends a follow-up as a reply in the first email's thread", () => {
+    const s = sandbox({
+      threads: { "t-1": [{ from: "Me <me@sender.nl>", body: "first email", replyTo: "Anna <anna@acme.nl>" }] },
+      next: { email: { send_id: "f2", to: "anna@acme.nl", subject: "Re: Hi", body: "Any thoughts?", thread_id: "t-1" }, wait: null },
+    });
+    s.ctx.flRun();
+    expect(s.sent).toEqual([{ to: "Anna <anna@acme.nl>", subject: "(reply in t-1)", body: "Any thoughts?" }]);
+    expect(s.calls[1].payload).toEqual({ send: { send_id: "f2", status: "sent", thread_id: "t-1" } });
+  });
+
+  it("never sends a follow-up Gmail addressed to someone else", () => {
+    const s = sandbox({
+      threads: { "t-1": [{ from: "Me <me@sender.nl>", body: "first", replyTo: "me@sender.nl, boss@acme.nl" }] },
+      next: { email: { send_id: "f2", to: "anna@acme.nl", subject: "Re: Hi", body: "Any thoughts?", thread_id: "t-1" }, wait: null },
+    });
+    s.ctx.flRun();
+    expect(s.sent).toEqual([]);
+    expect(s.deleted).toEqual(["t-1"]);
+    expect(s.calls[1].payload).toMatchObject({ send: { send_id: "f2", status: "failed" } });
+    expect(JSON.stringify(s.calls[1].payload)).toContain("boss@acme.nl");
   });
 
   it("a failed send is reported as failed, not lost", () => {

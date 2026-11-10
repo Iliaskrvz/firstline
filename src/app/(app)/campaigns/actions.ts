@@ -9,7 +9,7 @@ import { MAX_FREE_RUN } from "@/lib/credits";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
 import { serverPool } from "@/server/db";
-import { resumeSend, setCampaignSendState, startSending } from "@/sender/db";
+import { resumeSend, setCampaignSendState, startSending, type StartResult } from "@/sender/db";
 
 const PREVIEW_SIZE = 5;
 
@@ -169,13 +169,13 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean): P
 
 const StartSending = z.object({
   campaignId: z.uuid(),
-  inboxId: z.uuid("Pick an inbox."),
+  inboxIds: z.array(z.uuid()).min(1, "Pick at least one inbox.").max(20),
   optOutLine: z.string().trim().max(200),
 });
 
 export async function startCampaignSending(
   input: z.input<typeof StartSending>,
-): Promise<{ error: string } | { queued: number; suppressed: number; alreadyQueued: number; skippedFallbacks: number }> {
+): Promise<{ error: string } | StartResult> {
   const parsed = StartSending.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   if (!queueConfigured()) return { error: "Sending needs the database connection (DATABASE_URL in .env.local)." };
@@ -186,7 +186,7 @@ export async function startCampaignSending(
     const res = await startSending(serverPool(), {
       workspaceId: workspace.id,
       campaignId: parsed.data.campaignId,
-      inboxId: parsed.data.inboxId,
+      inboxIds: parsed.data.inboxIds,
       optOutLine: parsed.data.optOutLine || null,
     });
     revalidatePath(`/campaigns/${parsed.data.campaignId}`);

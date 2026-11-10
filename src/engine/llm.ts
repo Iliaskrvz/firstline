@@ -27,6 +27,8 @@ export type WriteInput = {
   /** Set on the one rewrite: why the first attempt failed. */
   feedback?: string[];
   previous?: WriterOutput;
+  /** Set when writing a follow-up in the same thread. */
+  followUp?: { stepNo: number; firstEmail: string };
 };
 
 export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null };

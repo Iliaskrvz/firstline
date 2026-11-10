@@ -61,6 +61,8 @@ export type LeadJob = {
   };
   campaign: { id: string; writer: "pro" | "lite"; depth: { deep: boolean; local: boolean } };
   template: { id: string; subject: string; body: string; slots: Slot[]; style_rules: StyleRules; examples: unknown[] } | null;
+  /** Personalised follow-up steps (2, 3, …), written right after step 1 from the same facts. */
+  followUps?: { step_no: number; body: string }[];
 };
 
 /** One provider call, as logged to usage_costs. */

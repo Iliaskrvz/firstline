@@ -12,7 +12,7 @@
  * Setup: see apps-script/README.md in the FirstLine repository.
  */
 
-var FL_VERSION = '1.0.0';
+var FL_VERSION = '1.1.0';
 // Filled in by FirstLine's "Copy the script" button, so Connect only asks for the key.
 var FL_DEFAULT_BASE = '';
 var CONTROL_SHEET = 'FirstLine';
@@ -136,10 +136,27 @@ function flRun() {
 }
 
 function flSend_(email) {
-  if (email.thread_id) throw new Error('Follow-ups in the same thread need a newer script version.');
-  var draft = GmailApp.createDraft(email.to, email.subject, email.body);
-  var message = draft.send();
-  return message.getThread().getId();
+  if (!email.thread_id) {
+    var first = GmailApp.createDraft(email.to, email.subject, email.body);
+    return first.send().getThread().getId();
+  }
+  // Follow-up: reply in the thread of the first email, so it reads as one conversation.
+  var thread = GmailApp.getThreadById(email.thread_id);
+  if (!thread) throw new Error('The thread of the first email is gone (deleted?), so the follow-up was not sent.');
+  var messages = thread.getMessages();
+  var draft = messages[messages.length - 1].createDraftReplyAll(email.body);
+  // Safety: only ever send to the lead (and possibly a copy to ourselves), never to anyone else.
+  var me = Session.getEffectiveUser().getEmail().toLowerCase();
+  var msg = draft.getMessage();
+  var recipients = (msg.getTo() + ',' + msg.getCc()).toLowerCase().split(',').map(function (r) {
+    var m = r.match(/<([^>]+)>/);
+    return (m ? m[1] : r).trim();
+  }).filter(function (r) { return r && r !== me; });
+  if (recipients.length !== 1 || recipients[0] !== email.to.toLowerCase()) {
+    draft.deleteDraft();
+    throw new Error('Gmail addressed the follow-up to ' + (recipients.join(', ') || 'nobody') + ' instead of ' + email.to + ', so it was not sent.');
+  }
+  return draft.send().getThread().getId();
 }
 
 /** Replies and bounces in the threads FirstLine asked about. Only flags leave this function. */
