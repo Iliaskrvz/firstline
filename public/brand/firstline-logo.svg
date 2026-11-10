@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="945" height="320" viewBox="0 0 945 320">
+  <rect width="945" height="320" fill="#ffffff"/>
+  <rect x="80" y="60" width="200" height="200" rx="44" fill="#4f46e5"/>
+  <text x="180" y="160" dy="0.35em" text-anchor="middle" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="700" font-size="120" fill="#ffffff">F</text>
+  <text x="330" y="160" dy="0.35em" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="700" font-size="136" letter-spacing="-3" fill="#0f172a">FirstLine</text>
+</svg>
