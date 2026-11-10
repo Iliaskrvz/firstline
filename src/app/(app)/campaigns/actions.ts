@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth";
-import { applyMapping, mappingErrors, MAX_ROWS, type ColumnTarget } from "@/lib/csv";
+import { applyMapping, availableVariables, mappingErrors, MAX_ROWS, type ColumnMap, type ColumnTarget } from "@/lib/csv";
+import { MAX_FOLLOW_UPS, validateStep } from "@/lib/sender/sequence";
 import { MAX_FREE_RUN } from "@/lib/credits";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
@@ -209,4 +210,58 @@ export async function resumeLeadSend(campaignId: string, sendId: string): Promis
   const { workspace } = await requireWorkspace();
   if (!(await resumeSend(serverPool(), workspace.id, sendId))) return { error: "This email isn't paused." };
   revalidatePath(`/campaigns/${campaignId}`);
+}
+
+const SequenceInput = z.object({
+  campaignId: z.uuid(),
+  steps: z
+    .array(
+      z.object({
+        delay_days: z.number().int(),
+        kind: z.enum(["plain", "personalised"]),
+        template_body: z.string().max(5000),
+      }),
+    )
+    .max(MAX_FOLLOW_UPS, `At most ${MAX_FOLLOW_UPS} follow-ups.`),
+});
+
+/**
+ * Save the follow-up steps (2, 3, …). Locked once sending started. Personalised steps are written
+ * during the run, so they can't be added or changed after it; plain steps can.
+ */
+export async function saveSequence(input: z.input<typeof SequenceInput>): Promise<{ error: string } | { ok: true }> {
+  const parsed = SequenceInput.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid sequence." };
+  const { campaignId, steps } = parsed.data;
+  const { supabase, workspace } = await requireWorkspace();
+
+  const { data: campaign } = await supabase.from("campaigns").select("id, status, column_map").eq("id", campaignId).maybeSingle();
+  if (!campaign) return { error: "Campaign not found." };
+  const { count: sent } = await supabase.from("sends").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId);
+  if (sent) return { error: "The sequence is locked once sending has started." };
+
+  const vars = availableVariables(campaign.column_map as ColumnMap);
+  for (const [i, st] of steps.entries()) {
+    const problems = validateStep(st, vars);
+    if (problems.length) return { error: `Follow-up ${i + 2}: ${problems[0]}` };
+  }
+
+  const { data: existing } = await supabase.from("sequence_steps").select("step_no, kind, template_body").eq("campaign_id", campaignId).order("step_no");
+  const personalised = (list: { kind: string; template_body: string }[], offset: number) =>
+    JSON.stringify(list.map((s, i) => ({ s: i + offset, ...s })).filter((s) => s.kind === "personalised").map((s) => [s.s, s.template_body]));
+  const hasRun = campaign.status === "running" || campaign.status === "done";
+  if (hasRun && personalised(steps, 2) !== personalised((existing ?? []).map((e) => ({ kind: e.kind, template_body: e.template_body })), 2)) {
+    return { error: "Personalised follow-ups are written during the run, so they can't change after it. Plain follow-ups can still be added." };
+  }
+
+  const { error: delErr } = await supabase.from("sequence_steps").delete().eq("campaign_id", campaignId);
+  if (delErr) return { error: delErr.message };
+  if (steps.length) {
+    const { error } = await supabase.from("sequence_steps").insert(
+      steps.map((st, i) => ({ campaign_id: campaignId, workspace_id: workspace.id, step_no: i + 2, delay_days: st.delay_days, kind: st.kind, template_body: st.template_body })),
+    );
+    if (error) return { error: error.message };
+  }
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
 }

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseEnv } from "./env";
 
-const PROTECTED = ["/campaigns", "/templates", "/inboxes"];
+const PROTECTED = ["/campaigns", "/templates", "/inboxes", "/replies"];
 
 /** Refreshes the auth session on every request and guards app routes. */
 export async function updateSession(request: NextRequest) {

@@ -326,3 +326,31 @@ describe("3-step sequence across 2 inboxes (Phase 4)", () => {
     });
   });
 });
+
+describe("inbox offline alerts", () => {
+  it("emails the owner once per outage, and again after it recovers and drops again", async () => {
+    const { checkInboxHealth } = await import("@/sender/alerts");
+    const sent: { to: string; subject: string }[] = [];
+    const mailer = { send: async (m: { to: string; subject: string; text: string }) => void sent.push({ to: m.to, subject: m.subject }) };
+    const z = await createInbox(pool, { workspaceId: ws, email: "z@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    await senderNext(pool, z.key, { scriptVersion: V, now: MON_10, peek: true }); // heartbeat at 10:00
+
+    // Other inboxes from earlier tests may be offline too; look only at this one.
+    const mine = () => sent.filter((m) => m.subject.includes("z@sender.nl"));
+    await checkInboxHealth(pool, mailer, { now: at(60) }); // 1 h later: fine
+    expect(mine()).toEqual([]);
+    await checkInboxHealth(pool, mailer, { now: at(150) }); // 2.5 h: offline → one email
+    await checkInboxHealth(pool, mailer, { now: at(200) }); // still offline → no second email
+    expect(mine()).toEqual([{ to: "me@sender.nl", subject: "FirstLine: z@sender.nl is offline" }]);
+
+    await senderNext(pool, z.key, { scriptVersion: V, now: at(210), peek: true }); // back
+    expect((await checkInboxHealth(pool, mailer, { now: at(211) })).recovered).toBeGreaterThanOrEqual(1);
+    await checkInboxHealth(pool, mailer, { now: at(360) }); // offline again later → a new email
+    expect(mine()).toHaveLength(2);
+
+    // Outside the window (Saturday) a silent script is normal: no email.
+    await senderNext(pool, z.key, { scriptVersion: V, now: new Date("2026-11-14T08:00:00Z"), peek: true });
+    await checkInboxHealth(pool, mailer, { now: new Date("2026-11-14T15:00:00Z") });
+    expect(mine()).toHaveLength(2);
+  });
+});

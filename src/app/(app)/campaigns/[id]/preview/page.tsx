@@ -26,6 +26,7 @@ type Generation = {
   provider: string;
   attempts: number;
   created_at: string;
+  step_no: number;
 };
 type PreviewLead = LeadRow & { preview_rank: number; status_detail: string | null; confidence: string | null };
 
@@ -84,8 +85,18 @@ async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview"
     ids.length ? supabase.from("usage_costs").select("lead_id, model, provider_units, cost_usd, created_at").in("lead_id", ids) : Promise.resolve({ data: [] }),
     supabase.rpc("worker_status"),
   ]);
+  // Newest first: the first one per lead is its latest step-1 email; follow-ups are listed separately.
   const latest = new Map<string, Generation>();
-  for (const g of (genRows ?? []) as Generation[]) if (!latest.has(g.lead_id)) latest.set(g.lead_id, g);
+  const followUps = new Map<string, Generation[]>();
+  for (const g of (genRows ?? []) as Generation[]) {
+    if ((g.step_no ?? 1) === 1) {
+      if (!latest.has(g.lead_id)) latest.set(g.lead_id, g);
+    } else {
+      const list = followUps.get(g.lead_id) ?? [];
+      if (!list.some((x) => x.step_no === g.step_no)) list.push(g);
+      followUps.set(g.lead_id, list);
+    }
+  }
   const costs = (costRows ?? []) as { lead_id: string; model: string; provider_units: number; cost_usd: number; created_at: string }[];
   const w = (worker as { last_seen_at: string | null; seconds_ago: number | null; workers: number; llm_provider: string | null }[] | null)?.[0];
   const workerOnline = w?.seconds_ago != null && w.seconds_ago < 60;
@@ -123,7 +134,7 @@ async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview"
       ) : (
         <div className="space-y-6">
           {leads.map((l) => (
-            <LeadCard key={l.id} lead={l} gen={latest.get(l.id) ?? null} costs={costs.filter((c) => c.lead_id === l.id)} body={parsed?.body ?? null} subject={parsed?.subject ?? null} />
+            <LeadCard key={l.id} lead={l} gen={latest.get(l.id) ?? null} followUps={(followUps.get(l.id) ?? []).sort((a, b) => a.step_no - b.step_no)} costs={costs.filter((c) => c.lead_id === l.id)} body={parsed?.body ?? null} subject={parsed?.subject ?? null} />
           ))}
         </div>
       )}
@@ -155,12 +166,14 @@ function SlotEmail({ tokens, lead, slots, factsUsed }: { tokens: Token[]; lead: 
 function LeadCard({
   lead,
   gen,
+  followUps,
   costs,
   body,
   subject,
 }: {
   lead: PreviewLead;
   gen: Generation | null;
+  followUps: Generation[];
   costs: { model: string; provider_units: number; cost_usd: number; created_at: string }[];
   body: Token[] | null;
   subject: Token[] | null;
@@ -273,6 +286,17 @@ function LeadCard({
               </div>
               {gen.checks?.status === "fallback" && <p className="mt-2 text-xs text-amber-700">Neutral fallback line used. This lead costs 0 credits.</p>}
             </section>
+
+            {followUps.map((f) => (
+              <section key={f.step_no}>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Follow-up {f.step_no} <span className="font-normal normal-case text-slate-400">(personalised, same thread)</span>
+                </h3>
+                <div className="mt-2 whitespace-pre-wrap rounded-xl px-4 py-3 text-sm leading-relaxed text-slate-800 ring-1 ring-slate-200">{f.full_email}</div>
+                {f.checks?.status === "fallback" && <p className="mt-1 text-xs text-amber-700">Neutral line: nothing usable to say.</p>}
+                {f.facts_used.length > 0 && <p className="mt-1 text-xs text-slate-500">Uses {f.facts_used.join(", ")}</p>}
+              </section>
+            ))}
 
             {checks.length > 0 && (
               <section>

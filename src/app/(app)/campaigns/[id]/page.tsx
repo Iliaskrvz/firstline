@@ -19,13 +19,14 @@ import { AutoRefresh } from "./preview/auto-refresh";
 import { ResumeButton } from "./resume-button";
 import { RunPanel } from "./run-panel";
 import { SendPanel } from "./send-panel";
+import { SequenceEditor } from "./sequence-editor";
 
 export const metadata: Metadata = { title: "Campaign" };
 
 const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail";
 const IN_FLIGHT = new Set(["queued", "researching", "writing"]);
 const SEND_TONE = { queued: "gray", paused: "amber", sent: "indigo", replied: "green", bounced: "red", stopped: "gray" } as const;
-type SendRow = { id: string; lead_id: string; status: keyof typeof SEND_TONE; status_detail: string | null };
+type SendRow = { id: string; lead_id: string; step_no: number; status: keyof typeof SEND_TONE; status_detail: string | null };
 const PAGE = 50;
 
 export default function CampaignPage(props: PageProps<"/campaigns/[id]">) {
@@ -50,6 +51,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     { data: allStatuses },
     { data: sendRows },
     { data: inboxRows },
+    { data: stepRows },
   ] = await Promise.all([
     supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
@@ -57,8 +59,9 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
     supabase.from("leads").select("id, status").eq("campaign_id", id).limit(10_000),
-    supabase.from("sends").select("id, lead_id, status, status_detail").eq("campaign_id", id).eq("step_no", 1).limit(10_000),
+    supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
     supabase.from("inboxes").select("id, email").order("created_at"),
+    supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
   ]);
   const previewCount = previewCountRaw ?? 0;
   if (!campaign) notFound();
@@ -79,9 +82,24 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
   const remaining = (byStatus.queued ?? 0) + (byStatus.failed ?? 0);
   const sends = (sendRows ?? []) as SendRow[];
-  const sendByLead = new Map(sends.map((x) => [x.lead_id, x]));
-  const sendCounts = sends.reduce<Record<string, number>>((m, x) => ((m[x.status] = (m[x.status] ?? 0) + 1), m), {});
+  // Per lead: the furthest step that went somewhere (else its first email), for the leads table.
+  const sendByLead = new Map<string, SendRow>();
+  for (const x of [...sends].sort((a, b) => a.step_no - b.step_no)) {
+    const cur = sendByLead.get(x.lead_id);
+    if (!cur || x.status !== "queued") sendByLead.set(x.lead_id, x);
+  }
+  const firstSends = sends.filter((x) => x.step_no === 1);
+  const sendCounts = firstSends.reduce<Record<string, number>>((m, x) => ((m[x.status] = (m[x.status] ?? 0) + 1), m), {});
+  const stepStats: Record<number, { sent: number; replied: number; bounced: number }> = {};
+  for (const x of sends) {
+    if (x.status === "queued" || x.status === "paused" || x.status === "stopped") continue;
+    const st = (stepStats[x.step_no] ??= { sent: 0, replied: 0, bounced: 0 });
+    st.sent++;
+    if (x.status === "replied") st.replied++;
+    if (x.status === "bounced") st.bounced++;
+  }
   const readyToQueue = statuses.filter((l) => !sendByLead.has(l.id) && (l.status === "done" || (l.status === "fallback" && c2.send_fallbacks))).length;
+  const steps = (stepRows ?? []) as { step_no: number; delay_days: number; kind: "plain" | "personalised"; template_body: string }[];
   const inboxes = (inboxRows ?? []) as { id: string; email: string }[];
   const shownStatus = c.status === "running" && !inFlight ? "done" : c.status;
   const templateOk = !!parsed && parsed.slots.length > 0 && !parsed.issues.some((i) => i.level === "error");
@@ -223,6 +241,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
       </div>
 
       <Card className="mt-6">
+        <SequenceEditor
+          campaignId={c.id}
+          initial={steps.map(({ delay_days, kind, template_body }) => ({ delay_days, kind, template_body }))}
+          locked={sends.length > 0}
+          hasRun={c.status === "running" || c.status === "done"}
+          stats={stepStats}
+        />
+      </Card>
+
+      <Card className="mt-6">
         <details>
           <summary className="cursor-pointer text-base font-semibold text-slate-900">
             Column mapping <span className="text-sm font-normal text-slate-500">({Object.keys(c.column_map).length} columns, saved on import)</span>
@@ -274,7 +302,10 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                       if (!sd) return <span className="text-xs text-slate-400">–</span>;
                       return (
                         <div className="space-y-0.5">
-                          <Badge tone={SEND_TONE[sd.status]}>{sd.status}</Badge>
+                          <Badge tone={SEND_TONE[sd.status]}>
+                            {sd.step_no > 1 ? `step ${sd.step_no} ` : ""}
+                            {sd.status}
+                          </Badge>
                           {sd.status_detail && <div className="text-xs text-slate-500">{sd.status_detail}</div>}
                           {sd.status === "paused" && <ResumeButton campaignId={c.id} sendId={sd.id} />}
                         </div>

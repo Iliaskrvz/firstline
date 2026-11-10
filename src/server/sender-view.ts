@@ -19,6 +19,8 @@ export type InboxView = {
   keyPrefix: string | null;
   scriptVersion: string | null;
   lastError: string | null;
+  sent7d: number;
+  bounced7d: number;
 };
 
 export async function loadInboxes(workspaceId: string): Promise<InboxView[]> {
@@ -26,7 +28,9 @@ export async function loadInboxes(workspaceId: string): Promise<InboxView[]> {
     `select i.id, i.email, i.daily_cap, i.warmup_day, i."window", i.health, i.last_heartbeat_at, i.key_prefix, i.script_version, i.last_error,
             extract(epoch from now() - i.last_heartbeat_at)::int seconds_ago,
             (select count(*) from public.sends s where s.inbox_id = i.id
-              and s.sent_at >= (date_trunc('day', now() at time zone (i."window"->>'tz')) at time zone (i."window"->>'tz')))::int sent_today
+              and s.sent_at >= (date_trunc('day', now() at time zone (i."window"->>'tz')) at time zone (i."window"->>'tz')))::int sent_today,
+            (select count(*) from public.sends s where s.inbox_id = i.id and s.sent_at > now() - interval '7 days')::int sent_7d,
+            (select count(*) from public.sends s where s.inbox_id = i.id and s.status = 'bounced' and s.sent_at > now() - interval '7 days')::int bounced_7d
        from public.inboxes i where i.workspace_id = $1 order by i.created_at`,
     [workspaceId],
   );
@@ -47,6 +51,8 @@ export async function loadInboxes(workspaceId: string): Promise<InboxView[]> {
     keyPrefix: r.key_prefix,
     scriptVersion: r.script_version,
     lastError: r.last_error,
+    sent7d: r.sent_7d,
+    bounced7d: r.bounced_7d,
   }));
 }
 

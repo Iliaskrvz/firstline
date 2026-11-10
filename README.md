@@ -7,8 +7,11 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
 - **Phase 1** (done): auth, workspaces, schema with RLS and credit ledger, CSV upload + mapping, template editor.
 - **Phase 2** (done, without Claude): per-lead engine (research → facts → write → validate → fallback), pg-boss
   worker, free 5-lead preview. Writing runs on a **fake LLM** until an Anthropic key is added.
-- **Phase 3** (in progress): Gmail sender. Run campaign (free, ≤ 50 leads until credits exist), Inboxes, Sender
+- **Phase 3** (done): Gmail sender. Run campaign (free, ≤ 50 leads until credits exist), Inboxes, Sender
   Sheet script ([apps-script/](apps-script/README.md)), `/api/sender/next` + `/report`, scheduler, stop rules.
+- **Phase 4** (in progress): follow-up steps in the same thread (plain or personalised, delay in working days),
+  several inboxes per campaign (round robin, each lead stays in one inbox), offline alerts by email (Resend),
+  Replies page with reply/bounce rates and the do-not-contact list.
 
 ## Setup
 

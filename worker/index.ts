@@ -18,6 +18,7 @@ import { SKILL_V1_MOVES, SKILL_V1_PROMPT, SKILL_V1_RULES, SKILL_VERSION } from "
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { dbConnection, LEAD_QUEUE, type LeadJobData } from "@/lib/queue";
+import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 
 const VERSION = process.env.npm_package_version ?? "dev";
 const WORKER_ID = `${hostname()}-${process.pid}`;
@@ -87,6 +88,21 @@ async function main() {
   await heartbeat();
   const beat = setInterval(heartbeat, 15_000);
 
+  // Inbox health (§8): email the owner when a Sender Sheet goes quiet inside its window.
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  const mailer = resendKey ? resendMailer(resendKey, process.env.ALERT_FROM_EMAIL?.trim() || "FirstLine <onboarding@resend.dev>") : null;
+  if (!mailer) log("RESEND_API_KEY not set: offline inboxes show in the app, but no alert emails are sent.");
+  const inboxCheck = async () => {
+    try {
+      const r = await checkInboxHealth(pool, mailer, { appUrl: process.env.PUBLIC_APP_URL?.trim() || null, log });
+      if (r.alerted.length) log(`Offline inbox alert: ${r.alerted.join(", ")}`);
+    } catch (e) {
+      log("inbox health check failed:", (e as Error).message);
+    }
+  };
+  await inboxCheck();
+  const inboxTimer = setInterval(inboxCheck, 5 * 60_000);
+
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
@@ -151,6 +167,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     log(`${signal}: finishing running jobs…`);
     clearInterval(beat);
+    clearInterval(inboxTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

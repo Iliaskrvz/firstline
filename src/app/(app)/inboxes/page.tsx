@@ -71,6 +71,9 @@ async function InboxList() {
               <div className="text-xs text-slate-500">
                 {i.cap < i.dailyCap ? `Warm-up day ${i.warmupDay}: limit grows to ${i.dailyCap}` : `Daily limit ${i.dailyCap}`}
               </div>
+              <div className={i.sent7d >= 20 && i.bounced7d / i.sent7d > 0.03 ? "text-xs font-medium text-rose-700" : "text-xs text-slate-500"}>
+                Last 7 days: {i.sent7d} sent · {i.sent7d ? Math.round((i.bounced7d / i.sent7d) * 1000) / 10 : 0}% bounced
+              </div>
             </div>
           </div>
           {i.lastError && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{i.lastError}</p>}
