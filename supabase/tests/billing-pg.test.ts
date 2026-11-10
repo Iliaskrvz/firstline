@@ -118,3 +118,87 @@ describe("credits", () => {
     expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1 });
   });
 });
+
+describe("Stripe", () => {
+  type Call = { op: string; args: unknown[] };
+  function fakeStripe() {
+    const calls: Call[] = [];
+    const rec = (op: string, ret: unknown) => async (...args: unknown[]) => (calls.push({ op, args }), ret);
+    const stripe = {
+      customers: { create: rec("customers.create", { id: "cus_1" }) },
+      checkout: { sessions: { create: rec("checkout.create", { id: "cs_1", url: "https://checkout.stripe.test/cs_1" }) } },
+      paymentIntents: { retrieve: rec("pi.retrieve", { id: "pi_1", payment_method: "pm_card" }) },
+      invoices: {
+        create: rec("invoices.create", { id: "in_1" }),
+        finalizeInvoice: rec("invoices.finalize", { id: "in_1" }),
+        pay: rec("invoices.pay", { id: "in_1", status: "paid" }),
+      },
+      invoiceItems: { create: rec("invoiceItems.create", { id: "ii_1" }) },
+    };
+    return { stripe: stripe as unknown as import("stripe").default, calls };
+  }
+  const event = (type: string, object: Record<string, unknown>) => ({ id: `evt_${Math.random()}`, type, data: { object } }) as unknown as import("stripe").Stripe.Event;
+
+  it("Checkout: one customer per workspace, pack metadata, saves the payment method for later", async () => {
+    const { createCheckout } = await import("@/billing/stripe");
+    const { stripe, calls } = fakeStripe();
+    const ws2 = { id: ws, name: "Bos", email: "owner@bos-bill.nl" };
+    expect(await createCheckout(stripe, pool, { workspace: ws2, pack: "starter", origin: "https://app.test", tax: false })).toBe("https://checkout.stripe.test/cs_1");
+    await createCheckout(stripe, pool, { workspace: ws2, pack: "growth", origin: "https://app.test", tax: true });
+    expect(calls.filter((c) => c.op === "customers.create")).toHaveLength(1);
+    const params = calls.find((c) => c.op === "checkout.create")!.args[0] as { line_items: { price_data: unknown }[] };
+    expect(params).toMatchObject({
+      mode: "payment",
+      customer: "cus_1",
+      metadata: { workspace_id: ws, pack: "starter", credits: "500" },
+      payment_intent_data: { setup_future_usage: "off_session" },
+      success_url: "https://app.test/credits?paid={CHECKOUT_SESSION_ID}",
+      automatic_tax: { enabled: false },
+    });
+    expect(params.line_items[0].price_data).toMatchObject({ currency: "eur", unit_amount: 1900, tax_behavior: "exclusive" });
+  });
+
+  it("webhook: a paid Checkout adds the pack's credits once; an unpaid (iDEAL pending) one waits", async () => {
+    const { handleStripeEvent } = await import("@/billing/stripe");
+    const { stripe } = fakeStripe();
+    const before = (await balance(pool, ws)).available;
+    const session = { id: "cs_live_1", payment_status: "unpaid", amount_total: 1900, payment_intent: "pi_1", metadata: { workspace_id: ws, pack: "starter" } };
+    expect(await handleStripeEvent(stripe, pool, event("checkout.session.completed", session))).toEqual({ handled: true, added: 0 });
+    expect(await handleStripeEvent(stripe, pool, event("checkout.session.async_payment_succeeded", { ...session, payment_status: "paid" }))).toEqual({ handled: true, added: 500 });
+    // Stripe retries / sends it again: nothing extra.
+    expect(await handleStripeEvent(stripe, pool, event("checkout.session.async_payment_succeeded", { ...session, payment_status: "paid" }))).toEqual({ handled: true, added: 0 });
+    expect((await balance(pool, ws)).available).toBe(before + 500);
+    expect((await pool.query("select auto_topup->>'payment_method_id' pm from public.workspaces where id = $1", [ws])).rows[0].pm).toBe("pm_card");
+    const note = (await pool.query("select note from public.credit_ledger where stripe_event_id = 'checkout:cs_live_1'")).rows[0].note;
+    expect(note).toBe("Starter pack: 500 credits · Checkout · €19 paid");
+  });
+
+  it("auto top-up: charges once below the threshold (then waits 15 min); credits arrive with invoice.paid", async () => {
+    const { runAutoTopUps, handleStripeEvent } = await import("@/billing/stripe");
+    const { stripe, calls } = fakeStripe();
+    const available = (await balance(pool, ws)).available;
+    await pool.query("update public.workspaces set auto_topup = auto_topup || $2::jsonb where id = $1", [ws, JSON.stringify({ enabled: true, threshold: available + 1, pack: "starter" })]);
+    const now = new Date("2026-11-10T10:00:00Z");
+    expect(await runAutoTopUps(stripe, pool, { tax: false, now })).toEqual([ws]);
+    expect(calls.map((c) => c.op)).toEqual(["invoices.create", "invoiceItems.create", "invoices.finalize", "invoices.pay"]);
+    expect(calls[0].args[0]).toMatchObject({ customer: "cus_1", default_payment_method: "pm_card", metadata: { kind: "auto_topup", pack: "starter" } });
+    expect(calls[3].args[1]).toEqual({ off_session: true });
+
+    // Still low a minute later (the webhook hasn't arrived): no second charge.
+    expect(await runAutoTopUps(stripe, pool, { tax: false, now: new Date(now.getTime() + 60_000) })).toEqual([]);
+
+    const inv = { id: "in_1", amount_paid: 1900, metadata: { kind: "auto_topup", workspace_id: ws, pack: "starter" } };
+    expect(await handleStripeEvent(stripe, pool, event("invoice.paid", inv))).toEqual({ handled: true, added: 500 });
+    expect(await handleStripeEvent(stripe, pool, event("invoice.paid", inv))).toEqual({ handled: true, added: 0 });
+    expect((await balance(pool, ws)).available).toBe(available + 500);
+    // Checkout's own receipts (invoice_creation) carry no auto_topup marker: never counted twice.
+    expect(await handleStripeEvent(stripe, pool, event("invoice.paid", { id: "in_receipt", amount_paid: 1900, metadata: { workspace_id: ws, pack: "starter" } }))).toEqual({ handled: true, added: 0 });
+  });
+
+  it("a failed automatic payment is shown to the user", async () => {
+    const { handleStripeEvent } = await import("@/billing/stripe");
+    const { stripe } = fakeStripe();
+    await handleStripeEvent(stripe, pool, event("invoice.payment_failed", { id: "in_2", metadata: { kind: "auto_topup", workspace_id: ws, pack: "starter" } }));
+    expect((await pool.query("select auto_topup->>'last_error' e from public.workspaces where id = $1", [ws])).rows[0].e).toMatch(/failed/);
+  });
+});
