@@ -6,13 +6,12 @@ import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   BOUNCE_SENDER_PATTERN,
-  connectionCode,
   generateSenderKey,
   isUnsubscribeReply,
-  parseConnectionCode,
   REPLY_CUT_PATTERN,
   UNSUBSCRIBE_PATTERN,
 } from "@/lib/sender/messages";
+import { connectionCode, parseConnectionCode } from "@/lib/sender/connection";
 import { SENDER_SCRIPT_VERSION } from "@/sender/db";
 
 const CODE = readFileSync(path.join(__dirname, "Code.gs"), "utf8");

@@ -1,7 +1,7 @@
 "use client";
 
 import { CopyButton } from "@/components/copy-button";
-import { connectionCode } from "@/lib/sender/messages";
+import { connectionCode } from "@/lib/sender/connection";
 
 /** The 4 setup steps (§10.6), shown right after a key is created. The key is shown only here, once. */
 export function SetupSteps({ email, senderKey, appUrl, script }: { email: string; senderKey: string; appUrl: string | null; script: string }) {
