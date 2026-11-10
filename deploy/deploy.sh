@@ -2,6 +2,7 @@
 # Deploy FirstLine to the VPS from this Mac. Safe to run again for every update.
 #   bash deploy/deploy.sh                      (defaults below)
 #   bash deploy/deploy.sh root@1.2.3.4 my.domain.com
+#   SSH_KEY=~/.ssh/mykey bash deploy/deploy.sh    (use a specific SSH key)
 # 1. sets up the server (deploy/server-setup.sh), 2. copies the code (not node_modules, not .git),
 # 3. copies .env.local (never printed; only the firstline user can read it), 4. builds, starts with pm2,
 # 5. checks that the site and worker answer.
@@ -11,20 +12,24 @@ HOST="${1:-root@46.17.99.33}"
 IP="${HOST#*@}"
 DOMAIN="${2:-firstline.${IP//./-}.sslip.io}"
 APP=/opt/firstline/app
+SSH_OPTS=(-o ConnectTimeout=15)
+[ -n "${SSH_KEY:-}" ] && SSH_OPTS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+ssh() { command ssh "${SSH_OPTS[@]}" "$@"; }
+RSYNC_SSH="ssh ${SSH_OPTS[*]}"
 say() { printf '\n\033[1;34m### %s\033[0m\n' "$*"; }
 
 [ -f .env.local ] || { echo ".env.local not found in $(pwd)"; exit 1; }
 grep -q '^DATABASE_URL=postgres' .env.local || { echo ".env.local has no DATABASE_URL (run: bash scripts/set-database-url.sh)"; exit 1; }
 
 say "1/5 Server setup on $HOST (address: https://$DOMAIN)"
-ssh -o ConnectTimeout=15 "$HOST" "bash -s -- '$DOMAIN'" < deploy/server-setup.sh
+ssh "$HOST" "bash -s -- '$DOMAIN'" < deploy/server-setup.sh
 
 say "2/5 Copying the code"
-rsync -az --delete \
+rsync -az --delete -e "$RSYNC_SSH" \
   --exclude node_modules --exclude .next --exclude .git --exclude 'logs/' --exclude '.env*' --exclude .DS_Store \
   --exclude '.claude/' --exclude 'supabase/.temp/' \
   ./ "$HOST:$APP/"
-rsync -az .env.example "$HOST:$APP/.env.example"
+rsync -az -e "$RSYNC_SSH" .env.example "$HOST:$APP/.env.example"
 
 say "3/5 Copying your keys (.env.local; not shown)"
 ssh "$HOST" "umask 077; cat > $APP/.env.local.new" < .env.local
@@ -45,4 +50,4 @@ done
 echo "https://$DOMAIN/login → HTTP $code"
 echo
 echo "Done. FirstLine runs at https://$DOMAIN"
-echo "Logs:   ssh $HOST 'su - firstline -c \"pm2 logs --lines 50\"'"
+echo "Logs:   ssh ${SSH_KEY:+-i $SSH_KEY }$HOST 'su - firstline -c \"pm2 logs --lines 50\"'"
