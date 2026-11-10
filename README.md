@@ -66,7 +66,7 @@ npm run worker
 - retries: 3 with exponential backoff; HTTP 429/5xx are also retried inside each call
 - idempotent: finished leads are skipped; the same lead can't be queued twice in one run
 - heartbeat every 15 s in `worker_heartbeats`; health check at http://127.0.0.1:8787/health
-- VPS: `pm2 start worker/ecosystem.config.cjs` (logs in `logs/`); full setup steps come with deployment
+- VPS: see "Running on the VPS" below (`deploy/ecosystem.config.cjs` runs the web app and the worker)
 
 ## Gmail sender (Phase 3)
 
@@ -84,6 +84,20 @@ npm run tunnel
 
 Copy the `https://….trycloudflare.com` address into `PUBLIC_APP_URL` in `.env.local`. The address changes every
 time the tunnel restarts; then run FirstLine → Connect… in the sheet again.
+
+## Running on the VPS
+
+`bash deploy/deploy.sh` (from this Mac) sets up the server and deploys: Node 22, pm2 and Caddy (automatic HTTPS) on
+the VPS, the web app on 127.0.0.1:3100 behind Caddy, and the worker, both under pm2 as the `firstline` user (restart
+on crash and after a reboot). It copies the code with rsync and `.env.local` over SSH (never printed, mode 600), sets
+`PUBLIC_APP_URL` to the server's address, builds and reloads. Run it again for every update.
+
+- default host `root@46.17.99.33`, address `https://firstline.46-17-99-33.sslip.io` (no DNS needed); pass your
+  own: `bash deploy/deploy.sh root@HOST firstline.example.com` after pointing an A record at the server
+- it stops without changing anything if another web server already uses ports 80/443
+- after the first deploy add the address in Supabase → Authentication → URL Configuration (Site URL and
+  `https://<address>/auth/callback` as a redirect URL)
+- logs: `ssh root@HOST 'su - firstline -c "pm2 logs --lines 50"'`
 
 ## Scripts
 
