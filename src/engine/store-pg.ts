@@ -12,7 +12,7 @@ export class PgStore implements EngineStore {
     const { rows } = await this.pool.query(
       `select l.id, l.workspace_id, l.campaign_id, l.email, l.first_name, l.last_name, l.company, l.title,
               l.linkedin_headline, l.website, l.domain, l.custom, l.status,
-              c.writer, c.depth,
+              c.writer, c.depth, c.status as c_status,
               t.id as t_id, t.subject, t.body, t.slots, t.style_rules, t.examples
          from public.leads l
          join public.campaigns c on c.id = l.campaign_id
@@ -33,7 +33,7 @@ export class PgStore implements EngineStore {
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
         website: r.website, domain: r.domain, custom: r.custom ?? {}, status: r.status,
       },
-      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth },
+      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status },
       template: r.t_id
         ? { id: r.t_id, subject: r.subject, body: r.body, slots: r.slots, style_rules: r.style_rules ?? {}, examples: r.examples ?? [] }
         : null,
@@ -71,6 +71,13 @@ export class PgStore implements EngineStore {
          extractor = excluded.extractor, researched_at = excluded.researched_at, expires_at = excluded.expires_at`,
       [r.domain, JSON.stringify(r.pages), JSON.stringify(r.facts), r.status, r.extractor, r.researched_at, r.expires_at],
     );
+  }
+
+  async settleCredits(leadId: string, used: number) {
+    const { rows } = await this.pool.query("select exists (select 1 from public.credit_ledger where lead_id = $1 and type = 'reserve') reserved", [leadId]);
+    if (!rows[0].reserved) return;
+    if (used > 0) await this.pool.query("select public.capture_credits($1, $2)", [leadId, used]);
+    await this.pool.query("select public.release_credits($1)", [leadId]);
   }
 
   async saveGeneration(g: GenerationRecord) {

@@ -40,6 +40,11 @@ export interface EngineStore {
   saveResearch(r: CachedResearch): Promise<void>;
   saveGeneration(g: GenerationRecord): Promise<void>;
   logCosts(leadId: string, workspaceId: string, costs: CostEntry[]): Promise<void>;
+  /**
+   * Settle the lead's credit reservation (§3): capture `used`, release the rest.
+   * No-op when the lead holds no reservation (preview, no website).
+   */
+  settleCredits(leadId: string, used: number): Promise<void>;
 }
 
 export class MemoryStore implements EngineStore {
@@ -47,6 +52,7 @@ export class MemoryStore implements EngineStore {
   statuses = new Map<string, { status: LeadStatus; detail?: string | null; confidence?: string | null }[]>();
   research = new Map<string, CachedResearch>();
   generations: GenerationRecord[] = [];
+  settled: { leadId: string; used: number }[] = [];
   costs: (CostEntry & { lead_id: string })[] = [];
 
   async loadLeadJob(id: string) {
@@ -68,7 +74,10 @@ export class MemoryStore implements EngineStore {
   }
   async saveGeneration(g: GenerationRecord) {
     this.generations.push(g);
+  }  async settleCredits(leadId: string, used: number) {
+    this.settled.push({ leadId, used });
   }
+
   async logCosts(leadId: string, _ws: string, costs: CostEntry[]) {
     this.costs.push(...costs.map((c) => ({ ...c, lead_id: leadId })));
   }

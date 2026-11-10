@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui";
-import { runCampaign } from "../actions";
+import { runCampaign, stopCampaignRun } from "../actions";
 
 /** Run the whole campaign. The fallback choice is made here, before anything is written. */
 export function RunPanel({
@@ -12,6 +13,8 @@ export function RunPanel({
   sendFallbacks,
   running,
   disabledReason,
+  creditsNeeded,
+  available,
 }: {
   campaignId: string;
   total: number;
@@ -19,6 +22,9 @@ export function RunPanel({
   sendFallbacks: boolean;
   running: boolean;
   disabledReason: string | null;
+  /** Upper bound this run reserves (leads with a website × credits per lead). */
+  creditsNeeded: number;
+  available: number;
 }) {
   const [fallbacks, setFallbacks] = useState(sendFallbacks);
   const [pending, start] = useTransition();
@@ -53,8 +59,35 @@ export function RunPanel({
       >
         {running ? "Running…" : pending ? "Starting…" : remaining === 0 ? "All leads are written" : remaining === total ? `Run all ${total} leads` : `Run the other ${remaining} leads`}
       </Button>
+      {running && (
+        <Button
+          variant="ghost"
+          className="w-full"
+          disabled={pending}
+          onClick={() => {
+            if (!confirm("Stop this run? Leads not started yet are skipped and their reserved credits come back.")) return;
+            start(async () => {
+              const res = await stopCampaignRun(campaignId);
+              if ("error" in res) setError(res.error);
+            });
+          }}
+        >
+          Stop run
+        </Button>
+      )}
       {(error || disabledReason) && <p className="text-center text-xs text-rose-700">{error ?? disabledReason}</p>}
-      {!error && !disabledReason && remaining > 0 && <p className="text-center text-xs text-slate-500">Free while testing (up to 50 leads).</p>}
+      {!error && !disabledReason && remaining > 0 && (
+        <p className={creditsNeeded > available ? "text-center text-xs text-rose-700" : "text-center text-xs text-slate-500"}>
+          Reserves up to {creditsNeeded} credits · you have {available}.{" "}
+          {creditsNeeded > available ? (
+            <Link href="/credits" className="font-medium underline">
+              Buy credits
+            </Link>
+          ) : (
+            "Fallbacks are free; unused credits come back."
+          )}
+        </p>
+      )}
     </div>
   );
 }

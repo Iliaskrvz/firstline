@@ -3,6 +3,7 @@
 //   research (or cache) -> extract facts -> write (plan first) -> validate
 //   -> one rewrite on failure -> fallback -> save generation + costs.
 // Credits (reserve/capture/release) are wired in Phase 5; previews are free.
+import { creditsPerLead } from "@/lib/credits";
 import { hasErrors, parseTemplate, render } from "@/lib/template";
 import { allPass, failureReasons, planCheck, ruleChecks, type CheckContext } from "./checks";
 import type { EngineConfig } from "./config";
@@ -58,6 +59,13 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   if (!job) return { outcome: "missing", costUsd: 0 };
   const { lead } = job;
   if (!opts.force && SETTLED.has(lead.status)) return { outcome: "skipped", detail: `already ${lead.status}`, costUsd: 0 };
+  // Credits (§3): only a written email is paid for; previews are free and hold no reservation.
+  const settle = (used: number) => (opts.preview ? Promise.resolve() : store.settleCredits(lead.id, used));
+  if (job.campaign.status === "cancelled" && !opts.preview) {
+    await settle(0);
+    await store.setLeadStatus(lead.id, "skipped", { detail: "Run stopped" });
+    return { outcome: "skipped", detail: "Run stopped", costUsd: 0 };
+  }
 
   const log = async (costs: CostEntry[]) => {
     if (!costs.length) return;
@@ -65,6 +73,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     await store.logCosts(lead.id, lead.workspace_id, costs);
   };
   const fail = async (detail: string, research: unknown = {}) => {
+    await settle(0);
     await store.setLeadStatus(lead.id, "failed", { detail, confidence: null });
     if (research && Object.keys(research as object).length) {
       await store.saveGeneration({
@@ -90,7 +99,9 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
    * Personalised follow-ups (steps 2+), from the same facts as step 1, so no new research.
    * Without usable facts (or if writing fails) a step gets the neutral fallback; it never fails the lead.
    */
-  const writeFollowUps = async (stepFacts: Fact[] | null, firstEmail: string) => {
+  /** Returns how many follow-ups were written (not the neutral fallback): each costs 1 credit. */
+  const writeFollowUps = async (stepFacts: Fact[] | null, firstEmail: string): Promise<number> => {
+    let written = 0;
     for (const step of job.followUps ?? []) {
       const ftpl = parseTemplate({ subject: "", body: step.body });
       if (hasErrors(ftpl) || ftpl.slots.length === 0) continue; // validated when the step was saved
@@ -121,6 +132,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
           if (!(e instanceof LLMUnavailableError || e instanceof LLMRefusalError)) throw e;
         }
       }
+      if (result) written++;
       const slots = result?.slots ?? fallbackSlots(ftpl.slots, language);
       await store.saveGeneration({
         lead_id: lead.id, workspace_id: lead.workspace_id, step_no: step.step_no, plan: result?.plan ?? null, slot_outputs: slots,
@@ -129,6 +141,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
         provider: llm.provider, is_preview: !!opts.preview, attempts: result?.attempts ?? 0,
       });
     }
+    return written;
   };
 
   const fallback = async (reason: FallbackReason, research: unknown, extra: Record<string, unknown> = {}) => {
@@ -140,6 +153,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       provider: llm.provider, is_preview: !!opts.preview, attempts: (extra.attempts as number) ?? 0,
     });
     await writeFollowUps(null, email.body);
+    await settle(0); // a fallback is free (§1)
     await store.setLeadStatus(lead.id, "fallback", { detail: FALLBACK_REASONS[reason], confidence: "low" });
     return { outcome: "fallback" as const, detail: FALLBACK_REASONS[reason], costUsd: totalCost(spent) };
   };
@@ -226,7 +240,8 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
           facts_used: out.facts_used, skill_version: out.skill_version, checks: { status: "passed", items: checks, attempts: attempt },
           judge_scores: judge ?? {}, research, provider: llm.provider, is_preview: !!opts.preview, attempts: attempt,
         });
-        await writeFollowUps(allFacts, email.body);
+        const followUpsWritten = await writeFollowUps(allFacts, email.body);
+        await settle(creditsPerLead(job.campaign.depth) + followUpsWritten);
         const confidence = attempt === 1 && avg >= 4.2 ? "high" : "medium";
         await store.setLeadStatus(lead.id, "done", { detail: null, confidence });
         return { outcome: "done", costUsd: totalCost(spent) };

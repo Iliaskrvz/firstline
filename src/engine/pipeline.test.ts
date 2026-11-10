@@ -141,6 +141,40 @@ describe("processLead (fake LLM, fake website)", () => {
     expect(store.generations[1].full_email).toBe("Hi Anna, I'll keep this short.");
   });
 
+  describe("credits (§3)", () => {
+    it("a written lead pays 1 + 1 per written personalised follow-up", async () => {
+      const j = job();
+      j.followUps = [{ step_no: 2, body: "Hi {{first_name}}, [[angle2 · a different fact from their site · 25]]" }];
+      const { store, deps } = setup(new FakeLLM(), j);
+      expect((await processLead("lead-1", deps)).outcome).toBe("done");
+      expect(store.settled).toEqual([{ leadId: "lead-1", used: 2 }]);
+    });
+
+    it("fallbacks and failures are free; previews never touch credits", async () => {
+      const fb = setup(new FakeLLM(), job({ domain: null, website: null }));
+      await processLead("lead-1", fb.deps);
+      expect(fb.store.settled).toEqual([{ leadId: "lead-1", used: 0 }]);
+
+      const failed = setup(new MissingKeyLLM());
+      expect((await processLead("lead-1", failed.deps)).outcome).toBe("failed");
+      expect(failed.store.settled).toEqual([{ leadId: "lead-1", used: 0 }]);
+
+      const preview = setup();
+      await processLead("lead-1", preview.deps, { preview: true });
+      expect(preview.store.settled).toEqual([]);
+    });
+
+    it("a stopped run skips the lead and gives its credits back", async () => {
+      const j = job();
+      j.campaign.status = "cancelled";
+      const calls: string[] = [];
+      const { store, deps } = setup(new FakeLLM(), j, fakeReader(SITE, calls));
+      expect(await processLead("lead-1", deps)).toMatchObject({ outcome: "skipped", detail: "Run stopped" });
+      expect(store.settled).toEqual([{ leadId: "lead-1", used: 0 }]);
+      expect(calls).toEqual([]); // no research spent
+    });
+  });
+
   it("unreachable site -> fallback, and the failure is cached briefly", async () => {
     const dead: WebReader = {
       robots: async () => null,

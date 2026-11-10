@@ -20,5 +20,25 @@ export function estimateCredits(leadsWithWebsite: number, depth: Depth): number 
   return Math.max(0, leadsWithWebsite) * creditsPerLead(depth);
 }
 
-/** Until credits are wired into the pipeline (Phase 5), a full campaign run is free and capped at this many leads. */
-export const MAX_FREE_RUN = 50;
+/** Credit packs (§9), prices in euro cents excl. VAT. */
+export const PACKS = {
+  starter: { name: "Starter", credits: 500, priceCents: 1900 },
+  growth: { name: "Growth", credits: 2000, priceCents: 6900 },
+  agency: { name: "Agency", credits: 10000, priceCents: 29900 },
+} as const;
+export type PackId = keyof typeof PACKS;
+export const PACK_IDS = Object.keys(PACKS) as PackId[];
+
+export function isPackId(v: unknown): v is PackId {
+  return typeof v === "string" && v in PACKS;
+}
+
+/** "€19" / "€69" / "€299" (whole euros) or "€0.04" (per credit). */
+export function euro(cents: number): string {
+  return new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 3 }).format(cents / 100);
+}
+
+/** Credits a run reserves: 1 per lead with a website (+ Deep/Local) plus 1 per personalised follow-up. */
+export function runCredits(leadsWithWebsite: number, depth: Depth, personalisedFollowUps: number): number {
+  return Math.max(0, leadsWithWebsite) * (creditsPerLead(depth) + Math.max(0, personalisedFollowUps));
+}

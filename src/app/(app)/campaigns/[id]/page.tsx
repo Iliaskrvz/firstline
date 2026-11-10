@@ -6,7 +6,7 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { leadVars, TokenPreview } from "@/components/template-preview";
 import { requireWorkspace } from "@/lib/auth";
 import { availableVariables, FIELD_LABELS } from "@/lib/csv";
-import { estimateCredits } from "@/lib/credits";
+import { runCredits } from "@/lib/credits";
 import { formatDate, n, STATUS_TONE } from "@/lib/format";
 import { parseTemplate } from "@/lib/template";
 import type { CampaignRow, LeadRow, TemplateRow } from "@/lib/types";
@@ -52,16 +52,18 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     { data: sendRows },
     { data: inboxRows },
     { data: stepRows },
+    { data: balanceRow },
   ] = await Promise.all([
     supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
-    supabase.from("leads").select("id, status").eq("campaign_id", id).limit(10_000),
+    supabase.from("leads").select("id, status, domain").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
     supabase.from("inboxes").select("id, email").order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
+    supabase.from("workspace_balance").select("available").maybeSingle(),
   ]);
   const previewCount = previewCountRaw ?? 0;
   if (!campaign) notFound();
@@ -77,7 +79,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
 
   // Run + send state.
   const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; inbox_ids: string[] | null; opt_out_line: string | null };
-  const statuses = (allStatuses ?? []) as { id: string; status: string }[];
+  const statuses = (allStatuses ?? []) as { id: string; status: string; domain: string | null }[];
   const byStatus = statuses.reduce<Record<string, number>>((m, l) => ((m[l.status] = (m[l.status] ?? 0) + 1), m), {});
   const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
   const remaining = (byStatus.queued ?? 0) + (byStatus.failed ?? 0);
@@ -185,7 +187,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
           </div>
           <div className="rounded-xl bg-indigo-50 p-4">
             <div className="text-xs font-medium text-indigo-700">Estimated cost</div>
-            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(estimateCredits(researchable, c.depth))} credits</div>
+            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(runCredits(researchable, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</div>
             <div className="mt-1 text-xs text-indigo-800/80">The first 5 leads are a free preview.</div>
           </div>
           <PreviewButton
@@ -214,6 +216,12 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               sendFallbacks={c2.send_fallbacks}
               running={inFlight}
               disabledReason={!templateOk ? "Pick a template with at least one valid slot first." : !queueConfigured() ? "Add DATABASE_URL to .env.local first." : null}
+              creditsNeeded={runCredits(
+                statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length,
+                c.depth,
+                steps.filter((s) => s.kind === "personalised").length,
+              )}
+              available={(balanceRow as { available: number } | null)?.available ?? 0}
             />
             {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
               <p className="mt-3 text-center text-xs text-slate-600">

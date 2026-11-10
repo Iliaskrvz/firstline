@@ -348,3 +348,45 @@ describe("ledger rules (hardening)", () => {
     });
   });
 });
+
+describe("welcome credits (§9)", () => {
+  async function signUp(id: string, email: string, confirmed: boolean) {
+    await db.query("insert into auth.users (id, email, email_confirmed_at) values ($1, $2, $3)", [id, email, confirmed ? new Date() : null]);
+    return (await db.query<{ id: string }>("select id from public.workspaces where owner_id = $1", [id])).rows[0].id;
+  }
+  const bal = async (ws: string) => (await balance(ws)).available;
+
+  it("25 credits once the email is verified, not before", async () => {
+    const ws = await signUp("10000000-0000-0000-0000-000000000001", "anna@acme-welcome.nl", false);
+    expect(await bal(ws)).toBe(0);
+    await db.query("update auth.users set email_confirmed_at = now() where id = $1", ["10000000-0000-0000-0000-000000000001"]);
+    expect(await bal(ws)).toBe(25);
+    // Confirming again (or a later sign-in) gives nothing extra.
+    await db.query("update auth.users set email_confirmed_at = now() + interval '1 minute' where id = $1", ["10000000-0000-0000-0000-000000000001"]);
+    expect(await bal(ws)).toBe(25);
+  });
+
+  it("a company domain gets them once; a Google sign-up (already verified) gets them right away", async () => {
+    const second = await signUp("10000000-0000-0000-0000-000000000002", "bob@acme-welcome.nl", true);
+    expect(await bal(second)).toBe(0); // acme-welcome.nl already had its welcome credits
+    const other = await signUp("10000000-0000-0000-0000-000000000003", "eve@other-welcome.nl", true);
+    expect(await bal(other)).toBe(25);
+  });
+
+  it("free-mail addresses get them once per address", async () => {
+    expect(await bal(await signUp("10000000-0000-0000-0000-000000000004", "x1@gmail.com", true))).toBe(25);
+    expect(await bal(await signUp("10000000-0000-0000-0000-000000000005", "x2@gmail.com", true))).toBe(25);
+  });
+
+  it("users can't grant themselves credits", async () => {
+    await expect(asUser(USER_A, () => db.query("select public.grant_welcome_credits($1)", [USER_A]))).rejects.toThrow(/permission denied/);
+  });
+
+  it("the SQL free-mail list matches the app's list", async () => {
+    const { FREE_MAIL_DOMAINS } = await import("@/lib/domain");
+    for (const d of FREE_MAIL_DOMAINS) {
+      expect((await db.query<{ f: boolean }>("select public.is_free_mail_domain($1) f", [d])).rows[0].f, d).toBe(true);
+    }
+    expect((await db.query<{ f: boolean }>("select public.is_free_mail_domain('acme.nl') f")).rows[0].f).toBe(false);
+  });
+});

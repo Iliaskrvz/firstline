@@ -6,7 +6,9 @@ import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth";
 import { applyMapping, availableVariables, mappingErrors, MAX_ROWS, type ColumnMap, type ColumnTarget } from "@/lib/csv";
 import { MAX_FOLLOW_UPS, validateStep } from "@/lib/sender/sequence";
-import { MAX_FREE_RUN } from "@/lib/credits";
+import { creditsPerLead, type Depth } from "@/lib/credits";
+import { n } from "@/lib/format";
+import { reserveForRun, stopRun } from "@/billing/db";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
 import { serverPool } from "@/server/db";
@@ -133,14 +135,15 @@ export async function deleteCampaign(id: string) {
 }
 
 /**
- * Run the whole campaign (§10.4). The user chooses up front what happens when
- * research finds nothing usable: send the neutral version, or skip the lead.
- * Leads already written (e.g. in the preview) are not written again; failed ones are retried.
+ * Run the whole campaign (§10.4). The user chooses up front what happens when research finds
+ * nothing usable (send the neutral version, or skip the lead). Credits (§3): each lead with a
+ * website reserves 1 + 1 per personalised follow-up; leads without a website fall back for free.
+ * Leads already written (e.g. in the free preview) aren't written or charged again.
  */
 export async function runCampaign(campaignId: string, sendFallbacks: boolean): Promise<{ error: string } | undefined> {
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
   const { supabase, workspace } = await requireWorkspace();
-  const { data: campaign } = await supabase.from("campaigns").select("id, templates(subject, body)").eq("id", campaignId).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, status, depth, templates(subject, body)").eq("id", campaignId).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
   if (!tpl) return { error: "Pick a template first." };
@@ -148,24 +151,49 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean): P
   if (hasErrors(parsed) || parsed.slots.length === 0) return { error: "The template has errors or no slots. Fix it first." };
   if (!queueConfigured()) return { error: "Running needs the worker database connection (DATABASE_URL in .env.local)." };
 
-  const { data: leads, error } = await supabase.from("leads").select("id, status").eq("campaign_id", campaignId).limit(MAX_FREE_RUN + 1);
-  if (error) return { error: error.message };
-  if (!leads?.length) return { error: "This campaign has no leads." };
-  if (leads.length > MAX_FREE_RUN) return { error: `While testing, a run is limited to ${MAX_FREE_RUN} leads (credits come in a later phase).` };
+  const pool = serverPool();
+  // A stopped run can be started again: its skipped leads come back.
+  await pool.query("update public.leads set status = 'queued', status_detail = null where campaign_id = $1 and status = 'skipped' and status_detail = 'Run stopped'", [campaignId]);
+  const { rows: leads } = await pool.query<{ id: string; status: string; domain: string | null }>(
+    "select id, status, domain from public.leads where campaign_id = $1 and workspace_id = $2 order by created_at",
+    [campaignId, workspace.id],
+  );
+  if (!leads.length) return { error: "This campaign has no leads." };
+  const todo = leads.filter((l) => l.status === "queued" || l.status === "failed");
+  if (!todo.length) return { error: "Every lead is already written." };
+
+  const { count: personalised } = await supabase
+    .from("sequence_steps")
+    .select("step_no", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .eq("kind", "personalised");
+  const perLead = creditsPerLead(campaign.depth as Depth) + (personalised ?? 0);
+  const reserved = await reserveForRun(pool, { workspaceId: workspace.id, leadIds: todo.filter((l) => l.domain).map((l) => l.id), perLead });
+  if (!reserved.ok) {
+    return { error: `This run needs up to ${n(reserved.need)} credits and you have ${n(reserved.available)}. Buy credits first (Credits page).` };
+  }
 
   await supabase.from("campaigns").update({ status: "running", send_fallbacks: sendFallbacks }).eq("id", campaignId);
-  const todo = leads.filter((l) => l.status === "queued" || l.status === "failed");
-  if (todo.length) {
-    try {
-      await enqueueLeads(
-        todo.map((l) => ({ leadId: l.id, workspaceId: workspace.id, preview: false, force: l.status === "failed" })),
-        `run-${Date.now()}`,
-      );
-    } catch (e) {
-      return { error: `Couldn't reach the job queue: ${(e as Error).message}` };
-    }
+  try {
+    await enqueueLeads(
+      todo.map((l) => ({ leadId: l.id, workspaceId: workspace.id, preview: false, force: l.status === "failed" })),
+      `run-${Date.now()}`,
+    );
+  } catch (e) {
+    return { error: `Couldn't reach the job queue: ${(e as Error).message}. Your credits stay reserved; run again to retry.` };
   }
   revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath("/credits");
+}
+
+/** Stop a running campaign: leads not started are skipped and their reserved credits come back. */
+export async function stopCampaignRun(campaignId: string): Promise<{ error: string } | { released: number }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const { workspace } = await requireWorkspace();
+  const { released } = await stopRun(serverPool(), workspace.id, campaignId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath("/credits");
+  return { released };
 }
 
 const StartSending = z.object({
