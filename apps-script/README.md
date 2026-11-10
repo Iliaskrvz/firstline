@@ -7,7 +7,7 @@ tells FirstLine "sent", "replied", "bounced" or "asked to stop".
 ## One-time setup (about 5 minutes)
 
 1. **In FirstLine:** Inboxes → **Add Gmail inbox**. Enter the Gmail address you'll send from. Copy the
-   **FirstLine address** and the **sender key** it shows (the key is shown once).
+   **connection code** it shows (shown once).
 2. **In Google Sheets** (signed in as that Gmail account): create a new blank spreadsheet and name it
    "FirstLine Sender".
 3. **Extensions → Apps Script.** Delete what's in `Code.gs`, paste the whole [`Code.gs`](Code.gs) from this folder,
