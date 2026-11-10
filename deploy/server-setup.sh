@@ -19,9 +19,10 @@ for p in 80 443; do
     exit 2
   fi
 done
-owner=$(ss -ltnpH "sport = :$APP_PORT" 2>/dev/null | sed -nE 's/.*users:\(\("([^"]+)".*/\1/p' | head -1)
-if [ -n "$owner" ] && ! pgrep -u firstline -f "next start" >/dev/null; then
-  echo "Port $APP_PORT is already used by '$owner'. Stopping."; exit 2
+# Port 3100: fine if it's FirstLine itself (a process of the firstline user) from an earlier deploy.
+pid=$(ss -ltnpH "sport = :$APP_PORT" 2>/dev/null | sed -nE 's/.*pid=([0-9]+).*/\1/p' | head -1)
+if [ -n "$pid" ] && [ "$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')" != "firstline" ]; then
+  echo "Port $APP_PORT is already used by another program ($(ps -o comm= -p "$pid")). Stopping."; exit 2
 fi
 
 say "Packages"
