@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { publicOrigin } from "@/lib/public-origin";
 import { createClient } from "@/lib/supabase/server";
 
 function safeNext(next: string | null): string {
@@ -7,7 +8,8 @@ function safeNext(next: string | null): string {
 
 // Magic link and Google both land here with ?code=... (PKCE).
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  const { searchParams } = request.nextUrl;
+  const origin = publicOrigin(request.headers, request.nextUrl.origin);
   const code = searchParams.get("code");
   const next = safeNext(searchParams.get("next"));
   const providerError = searchParams.get("error_description") ?? searchParams.get("error");

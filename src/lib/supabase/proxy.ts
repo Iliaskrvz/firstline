@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { publicUrl } from "@/lib/public-origin";
 import { supabaseEnv } from "./env";
 
 const PROTECTED = ["/campaigns", "/templates", "/inboxes", "/replies"];
@@ -8,9 +9,7 @@ const PROTECTED = ["/campaigns", "/templates", "/inboxes", "/replies"];
 export async function updateSession(request: NextRequest) {
   // If Supabase falls back to the Site URL, the auth code lands on "/". Forward it.
   if (request.nextUrl.pathname === "/" && request.nextUrl.searchParams.has("code")) {
-    const target = request.nextUrl.clone();
-    target.pathname = "/auth/callback";
-    return NextResponse.redirect(target);
+    return NextResponse.redirect(publicUrl(request.headers, request.nextUrl.origin, `/auth/callback${request.nextUrl.search}`));
   }
 
   let response = NextResponse.next({ request });
@@ -36,9 +35,7 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   const redirectTo = (to: string) => {
-    const target = request.nextUrl.clone();
-    target.pathname = to;
-    target.search = "";
+    const target = publicUrl(request.headers, request.nextUrl.origin, to);
     if (to === "/login") target.searchParams.set("next", path);
     const res = NextResponse.redirect(target);
     response.cookies.getAll().forEach((c) => res.cookies.set(c));
