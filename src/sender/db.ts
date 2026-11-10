@@ -27,7 +27,7 @@ import {
 } from "@/lib/sender/schedule";
 
 /** Bump when the Apps Script changes; scripts older than MIN must update before they get work. */
-export const SENDER_SCRIPT_VERSION = "1.1.0";
+export const SENDER_SCRIPT_VERSION = "1.2.0";
 export const MIN_SCRIPT_VERSION = "1.0.0";
 /** Scripts before this can't reply in a thread: they only get first emails. */
 const FOLLOW_UP_SCRIPT_VERSION = "1.1.0";

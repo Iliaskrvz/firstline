@@ -1,7 +1,7 @@
 "use client";
 
 import { CopyButton } from "@/components/copy-button";
-import { personaliseScript } from "@/lib/sender/messages";
+import { connectionCode } from "@/lib/sender/messages";
 
 /** The 4 setup steps (§10.6), shown right after a key is created. The key is shown only here, once. */
 export function SetupSteps({ email, senderKey, appUrl, script }: { email: string; senderKey: string; appUrl: string | null; script: string }) {
@@ -10,7 +10,7 @@ export function SetupSteps({ email, senderKey, appUrl, script }: { email: string
       <div>
         <div className="text-sm font-semibold text-slate-900">Connect {email}</div>
         <p className="mt-0.5 text-xs text-slate-600">
-          Copy the key now: for your safety it is shown only once. Lost it? Create a new key; the old one stops working.
+          Copy the connection code now: for your safety it is shown only once. Lost it? Create a new key; the old one stops working.
         </p>
       </div>
 
@@ -22,14 +22,17 @@ export function SetupSteps({ email, senderKey, appUrl, script }: { email: string
           <div>
             <b>2.</b> Replace everything in <code>Code.gs</code> with this script, click <b>Save</b>, close the tab and reload the sheet.
           </div>
-          <CopyButton text={personaliseScript(script, appUrl)} label="Copy the script" className="px-3 py-1.5 text-xs" />
+          <CopyButton text={script} label="Copy the script" className="px-3 py-1.5 text-xs" />
         </li>
         <li className="space-y-1.5">
           <div>
-            <b>3.</b> In the sheet: <b>FirstLine → Connect…</b> and paste the sender key{appUrl ? "" : " (and the FirstLine address)"}:
+            <b>3.</b> In the sheet: <b>FirstLine → Connect…</b> and paste this connection code (the address and this inbox&apos;s key in one):
           </div>
-          <Row label="Sender key" value={senderKey} />
-          <Row label="FirstLine address" value={appUrl} missing="Not set: start the tunnel and set PUBLIC_APP_URL (Google can't reach localhost)." />
+          <Row
+            label="Connection code"
+            value={appUrl ? connectionCode(appUrl, senderKey) : null}
+            missing="FirstLine has no public address yet (PUBLIC_APP_URL), so Google can't reach it."
+          />
         </li>
         <li>
           <b>4.</b> Allow the permissions Google asks for (<b>Advanced → Go to … (unsafe) → Allow</b>; it&apos;s your own script). The

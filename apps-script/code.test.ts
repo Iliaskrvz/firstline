@@ -4,7 +4,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { BOUNCE_SENDER_PATTERN, isUnsubscribeReply, personaliseScript, REPLY_CUT_PATTERN, UNSUBSCRIBE_PATTERN } from "@/lib/sender/messages";
+import {
+  BOUNCE_SENDER_PATTERN,
+  connectionCode,
+  generateSenderKey,
+  isUnsubscribeReply,
+  parseConnectionCode,
+  REPLY_CUT_PATTERN,
+  UNSUBSCRIBE_PATTERN,
+} from "@/lib/sender/messages";
 import { SENDER_SCRIPT_VERSION } from "@/sender/db";
 
 const CODE = readFileSync(path.join(__dirname, "Code.gs"), "utf8");
@@ -54,6 +62,10 @@ function sandbox(opts: { threads?: Record<string, Msg[]>; paused?: boolean; next
   });
   const ctx: Record<string, unknown> = {
     console,
+    Utilities: {
+      base64DecodeWebSafe: (s: string) => [...Buffer.from(s, "base64url")],
+      newBlob: (bytes: number[]) => ({ getDataAsString: () => Buffer.from(bytes).toString("utf8") }),
+    },
     PropertiesService: { getUserProperties: () => ({ getProperty: (k: string) => ({ FL_BASE: "https://fl.test", FL_KEY: "fl_" + "a".repeat(43) })[k] ?? null }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheet, insertSheet: () => sheet }) },
@@ -87,10 +99,16 @@ describe("Code.gs", () => {
     expect(CODE).toContain(`var FL_VERSION = '${SENDER_SCRIPT_VERSION}';`);
   });
 
-  it("'Copy the script' fills in the FirstLine address, and only a safe https address", () => {
-    expect(personaliseScript(CODE, "https://x.trycloudflare.com")).toContain("var FL_DEFAULT_BASE = 'https://x.trycloudflare.com';");
-    expect(personaliseScript(CODE, "https://x.com'; evil();//")).toBe(CODE);
-    expect(personaliseScript(CODE, null)).toBe(CODE);
+  it("reads the connection code FirstLine shows (address + key in one paste)", () => {
+    const { ctx } = sandbox();
+    const key = generateSenderKey();
+    const code = connectionCode("https://firstline.46-17-99-33.sslip.io/", key);
+    expect(code).toMatch(/^FL1\.[A-Za-z0-9_-]+\.fl_/);
+    expect(parseConnectionCode(code)).toEqual({ base: "https://firstline.46-17-99-33.sslip.io", key });
+    expect(ctx.flParseCode_(code)).toEqual({ base: "https://firstline.46-17-99-33.sslip.io", key });
+    expect(ctx.flParseCode_(`  ${code}\n`)).toEqual({ base: "https://firstline.46-17-99-33.sslip.io", key });
+    expect(ctx.flParseCode_("fl_" + "a".repeat(43))).toBeNull();
+    expect(ctx.flParseCode_("FL1.garbage")).toBeNull();
   });
 
   it("strips quoted text the same way as the server", () => {

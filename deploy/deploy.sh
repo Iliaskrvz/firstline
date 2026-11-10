@@ -12,7 +12,8 @@ HOST="${1:-root@46.17.99.33}"
 IP="${HOST#*@}"
 DOMAIN="${2:-firstline.${IP//./-}.sslip.io}"
 APP=/opt/firstline/app
-SSH_OPTS=(-o ConnectTimeout=15)
+# accept-new: trust a server's key the first time (e.g. after a reinstall); a *changed* key still stops.
+SSH_OPTS=(-o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new)
 [ -n "${SSH_KEY:-}" ] && SSH_OPTS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
 ssh() { command ssh "${SSH_OPTS[@]}" "$@"; }
 RSYNC_SSH="ssh ${SSH_OPTS[*]}"

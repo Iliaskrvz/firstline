@@ -67,8 +67,16 @@ export function isUnsubscribeReply(plainBody: string): boolean {
 /** Bounce notices come from these senders (they usually land in the original thread). */
 export const BOUNCE_SENDER_PATTERN = "mailer-daemon|postmaster|mail delivery (subsystem|system)";
 
-/** The Sender Sheet script with this FirstLine's address filled in, so Connect only asks for the key. */
-export function personaliseScript(script: string, appUrl: string | null): string {
-  if (!appUrl || !/^https:\/\/[^\s'\\]+$/.test(appUrl)) return script;
-  return script.replace("var FL_DEFAULT_BASE = '';", `var FL_DEFAULT_BASE = '${appUrl}';`);
+/**
+ * One paste for the sheet: "FL1.<address, base64url>.<key>". The script stays the same for everyone;
+ * when FirstLine's address changes, only the connection code does.
+ */
+export function connectionCode(appUrl: string, key: string): string {
+  return `FL1.${Buffer.from(appUrl.trim().replace(/\/+$/, "")).toString("base64url")}.${key.trim()}`;
+}
+
+export function parseConnectionCode(code: string): { base: string; key: string } | null {
+  const m = /^FL1\.([A-Za-z0-9_-]+)\.(fl_[A-Za-z0-9_-]{40,})$/.exec(code.trim());
+  if (!m) return null;
+  return { base: Buffer.from(m[1], "base64url").toString("utf8"), key: m[2] };
 }

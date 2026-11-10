@@ -12,8 +12,8 @@
  * Setup: see apps-script/README.md in the FirstLine repository.
  */
 
-var FL_VERSION = '1.1.0';
-// Filled in by FirstLine's "Copy the script" button, so Connect only asks for the key.
+var FL_VERSION = '1.2.0';
+// Only used when someone pastes a bare key instead of a connection code.
 var FL_DEFAULT_BASE = '';
 var CONTROL_SHEET = 'FirstLine';
 var LOG_SHEET = 'Log';
@@ -33,25 +33,25 @@ function onOpen() {
 
 function flConnect() {
   var ui = SpreadsheetApp.getUi();
-  var base = FL_DEFAULT_BASE;
-  if (!base) {
-    var urlAnswer = ui.prompt('Connect to FirstLine (1 of 2)', 'Paste the FirstLine address from the Inboxes page (it starts with https://).', ui.ButtonSet.OK_CANCEL);
-    if (urlAnswer.getSelectedButton() !== ui.Button.OK) return;
-    base = urlAnswer.getResponseText();
+  var answer = ui.prompt('Connect to FirstLine', 'Paste the connection code from FirstLine → Inboxes (it starts with FL1.).', ui.ButtonSet.OK_CANCEL);
+  if (answer.getSelectedButton() !== ui.Button.OK) return;
+  var conn = flParseCode_(answer.getResponseText());
+  if (!conn && /^fl_[A-Za-z0-9_-]{40,}$/.test(answer.getResponseText().trim())) {
+    // An older setup page gave the key on its own: ask for the address too.
+    var base = FL_DEFAULT_BASE;
+    if (!base) {
+      var urlAnswer = ui.prompt('Connect to FirstLine', 'Now paste the FirstLine address (it starts with https://).', ui.ButtonSet.OK_CANCEL);
+      if (urlAnswer.getSelectedButton() !== ui.Button.OK) return;
+      base = urlAnswer.getResponseText();
+    }
+    conn = { base: base.trim().replace(/\/+$/, ''), key: answer.getResponseText().trim() };
   }
-  base = base.trim().replace(/\/+$/, '');
-  if (!/^https:\/\/[^\s]+$/.test(base)) {
-    ui.alert('That doesn\'t look like an https:// address. Copy it from FirstLine → Inboxes and try again.');
+  if (!conn || !/^https:\/\/[^\s]+$/.test(conn.base)) {
+    ui.alert('That isn\'t a FirstLine connection code. Copy it with the Copy button on FirstLine → Inboxes and try again.');
     return;
   }
-
-  var keyAnswer = ui.prompt(FL_DEFAULT_BASE ? 'Connect to FirstLine' : 'Connect to FirstLine (2 of 2)', 'Paste the sender key for this inbox (it starts with fl_).', ui.ButtonSet.OK_CANCEL);
-  if (keyAnswer.getSelectedButton() !== ui.Button.OK) return;
-  var key = keyAnswer.getResponseText().trim();
-  if (!/^fl_[A-Za-z0-9_-]{40,}$/.test(key)) {
-    ui.alert('That doesn\'t look like a FirstLine sender key. Copy it from FirstLine → Inboxes and try again.');
-    return;
-  }
+  var base = conn.base;
+  var key = conn.key;
 
   var cfg = { base: base, key: key };
   var res;
@@ -79,6 +79,20 @@ function flConnect() {
     : '';
   ui.alert('Connected', 'FirstLine will send from this Gmail account every few minutes, inside your sending window.\n\nToday: ' +
     res.inbox.sent_today + ' of ' + res.inbox.cap + ' sent. Status: ' + (res.wait ? res.wait.label : 'Ready') + '.' + warning, ui.ButtonSet.OK);
+}
+
+/** "FL1.<address, base64url>.<key>" → { base, key }, or null. The address can change; the script never does. */
+function flParseCode_(code) {
+  var m = /^FL1\.([A-Za-z0-9_-]+)\.(fl_[A-Za-z0-9_-]{40,})$/.exec(String(code || '').trim());
+  if (!m) return null;
+  var b64 = m[1];
+  while (b64.length % 4) b64 += '=';
+  try {
+    var base = Utilities.newBlob(Utilities.base64DecodeWebSafe(b64)).getDataAsString().trim().replace(/\/+$/, '');
+    return { base: base, key: m[2] };
+  } catch (e) {
+    return null;
+  }
 }
 
 function flDisconnect() {

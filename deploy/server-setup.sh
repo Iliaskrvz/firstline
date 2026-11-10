@@ -27,7 +27,7 @@ fi
 say "Packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg rsync debian-keyring debian-archive-keyring apt-transport-https >/dev/null
+apt-get install -y -qq curl ca-certificates gnupg rsync >/dev/null
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   say "Node.js 22"

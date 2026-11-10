@@ -13,7 +13,7 @@ tells FirstLine "sent", "replied", "bounced" or "asked to stop".
 3. **Extensions → Apps Script.** Delete what's in `Code.gs`, paste the whole [`Code.gs`](Code.gs) from this folder,
    and click **Save** (the disk icon).
 4. Close the Apps Script tab and **reload the spreadsheet**. A **FirstLine** menu appears (after a few seconds).
-5. **FirstLine → Connect…** Paste the FirstLine address, then the sender key.
+5. **FirstLine → Connect…** Paste the **connection code** (the FirstLine address and the inbox key in one).
 6. Google asks for permission ("Google hasn't verified this app" is normal for your own script):
    **Advanced → Go to FirstLine Sender (unsafe) → Allow.** The script needs to send email as you, read the
    threads of emails it sent (for replies and bounces), and call FirstLine.
