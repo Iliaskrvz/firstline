@@ -9,9 +9,12 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
   worker, free 5-lead preview. Writing runs on a **fake LLM** until an Anthropic key is added.
 - **Phase 3** (done): Gmail sender. Run campaign (free, ≤ 50 leads until credits exist), Inboxes, Sender
   Sheet script ([apps-script/](apps-script/README.md)), `/api/sender/next` + `/report`, scheduler, stop rules.
-- **Phase 4** (in progress): follow-up steps in the same thread (plain or personalised, delay in working days),
+- **Phase 4** (done): follow-up steps in the same thread (plain or personalised, delay in working days),
   several inboxes per campaign (round robin, each lead stays in one inbox), offline alerts by email (Resend),
   Replies page with reply/bounce rates and the do-not-contact list.
+- **Phase 5** (in progress): credits wired into runs (reserve → capture/release, fallbacks free, stop a run),
+  25 welcome credits, Stripe Checkout (packs, VAT-ready, iDEAL|Wero + card) with an idempotent webhook,
+  auto top-up, Credits page, CSV export with `fl_` columns.
 
 ## Setup
 

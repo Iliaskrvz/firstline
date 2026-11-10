@@ -230,6 +230,11 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               </p>
             )}
           </div>
+          {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
+            <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-indigo-700 hover:underline">
+              Export CSV for a sending tool (fl_ columns) ↓
+            </a>
+          )}
           <div className="border-t border-slate-100 pt-5">
             <SendPanel
               campaignId={c.id}
