@@ -4,9 +4,8 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { requireWorkspace } from "@/lib/auth";
 import { euro, PACK_IDS, PACKS } from "@/lib/credits";
 import { formatDate, n } from "@/lib/format";
-import { stripeConfigured } from "@/server/stripe";
+import { kelviqConfigured } from "@/server/kelviq";
 import { AutoRefresh } from "../campaigns/[id]/preview/auto-refresh";
-import { AutoTopUpForm } from "./auto-topup-form";
 import { BuyButton } from "./buy-button";
 
 export const metadata: Metadata = { title: "Credits" };
@@ -19,6 +18,12 @@ const TYPE: Record<string, { label: string; tone: "gray" | "indigo" | "green" | 
   release: { label: "Returned", tone: "amber" },
   refund: { label: "Refunded", tone: "amber" },
 };
+
+/** A purchase in the last 10 minutes (the webhook usually lands within seconds of paying). */
+function boughtJustNow(ledger: { type: string; created_at: string }[]): boolean {
+  const since = Date.now() - 10 * 60_000;
+  return ledger.some((r) => r.type === "purchase" && new Date(r.created_at).getTime() > since);
+}
 
 export default function CreditsPage(props: PageProps<"/credits">) {
   return (
@@ -34,18 +39,16 @@ export default function CreditsPage(props: PageProps<"/credits">) {
 async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["searchParams"] }) {
   const { paid } = await searchParams;
   const { supabase, workspace } = await requireWorkspace();
-  const [{ data: bal }, { data: rows }, { data: ws }, { data: camps }] = await Promise.all([
+  const [{ data: bal }, { data: rows }, { data: camps }] = await Promise.all([
     supabase.from("workspace_balance").select("available, reserved, spent").eq("workspace_id", workspace.id).maybeSingle(),
     supabase.from("credit_ledger").select("id, type, amount, note, campaign_id, lead_id, stripe_event_id, created_at").order("created_at", { ascending: false }).limit(300),
-    supabase.from("workspaces").select("auto_topup").eq("id", workspace.id).maybeSingle(),
     supabase.from("campaigns").select("id, name"),
   ]);
   const b = (bal ?? { available: 0, reserved: 0, spent: 0 }) as { available: number; reserved: number; spent: number };
-  const auto = (ws?.auto_topup ?? {}) as { enabled?: boolean; threshold?: number; pack?: string; payment_method_id?: string; last_error?: string | null };
   const campaigns = new Map((camps ?? []).map((c) => [c.id, c.name as string]));
   const ledger = (rows ?? []) as { id: number; type: string; amount: number; note: string | null; campaign_id: string | null; lead_id: string | null; stripe_event_id: string | null; created_at: string }[];
   const justPaid = typeof paid === "string" && paid.length > 0;
-  const arrived = justPaid && ledger.some((r) => r.stripe_event_id === `checkout:${paid}`);
+  const arrived = justPaid && boughtJustNow(ledger);
 
   // Per-lead rows (reserve / use / return) are summed per campaign so the history stays readable.
   type Row = { key: string; label: string; tone: (typeof TYPE)[string]["tone"]; amount: number; text: string; at: string };
@@ -94,26 +97,16 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
                 <div className="text-2xl font-semibold text-slate-900">{n(p.credits)} credits</div>
                 <div className="text-sm text-slate-600">{euro(p.priceCents)} excl. VAT</div>
               </div>
-              <BuyButton pack={id} label={`Buy ${p.name}`} disabled={!stripeConfigured()} />
+              <BuyButton pack={id} label={`Buy ${p.name}`} disabled={!kelviqConfigured()} />
             </Card>
           );
         })}
       </div>
-      {!stripeConfigured() && <p className="text-sm text-amber-800">Payments aren&apos;t set up on this server yet (STRIPE_SECRET_KEY).</p>}
+      {!kelviqConfigured() && <p className="text-sm text-amber-800">Payments aren&apos;t set up on this server yet (KELVIQ_API_KEY).</p>}
       <p className="text-xs text-slate-500">
-        Pay with iDEAL | Wero or card. Business customers in the EU can add a VAT number at checkout (reverse charge). Why this price? We charge about three
-        times what research and AI really cost us per email, and nothing when we can&apos;t find anything useful.
+        Pay with iDEAL | Wero or card. Payments are handled by our reseller Kelviq, which adds VAT where it applies and sends the invoice. Why this price? We
+        charge about three times what research and AI really cost us per email, and nothing when we can&apos;t find anything useful.
       </p>
-
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-slate-900">Automatic top-up</h2>
-        {auto.last_error && <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{auto.last_error}</p>}
-        <AutoTopUpForm
-          initial={{ enabled: !!auto.enabled, threshold: auto.threshold ?? 100, pack: auto.pack ?? "starter" }}
-          hasPaymentMethod={!!auto.payment_method_id}
-          packs={PACK_IDS.map((id) => ({ id, label: `${PACKS[id].name} (${n(PACKS[id].credits)} credits, ${euro(PACKS[id].priceCents)})` }))}
-        />
-      </Card>
 
       <Card className="overflow-hidden p-0">
         <h2 className="px-6 py-4 text-base font-semibold text-slate-900">History</h2>

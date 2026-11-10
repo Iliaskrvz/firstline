@@ -19,8 +19,6 @@ import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { dbConnection, LEAD_QUEUE, type LeadJobData } from "@/lib/queue";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
-import { runAutoTopUps } from "@/billing/stripe";
-import Stripe from "stripe";
 
 const VERSION = process.env.npm_package_version ?? "dev";
 const WORKER_ID = `${hostname()}-${process.pid}`;
@@ -105,20 +103,6 @@ async function main() {
   await inboxCheck();
   const inboxTimer = setInterval(inboxCheck, 5 * 60_000);
 
-  // Auto top-up (§9): charge the saved payment method when a workspace runs low.
-  const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
-  const stripe = stripeKey && /^sk_(test|live)_/.test(stripeKey) ? new Stripe(stripeKey) : null;
-  const topUps = async () => {
-    if (!stripe) return;
-    try {
-      const charged = await runAutoTopUps(stripe, pool, { tax: process.env.STRIPE_TAX?.trim() === "1", log });
-      if (charged.length) log(`Auto top-up charged for ${charged.length} workspace(s).`);
-    } catch (e) {
-      log("auto top-up check failed:", (e as Error).message);
-    }
-  };
-  await topUps();
-  const topUpTimer = setInterval(topUps, 5 * 60_000);
 
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
@@ -185,7 +169,6 @@ async function main() {
     log(`${signal}: finishing running jobs…`);
     clearInterval(beat);
     clearInterval(inboxTimer);
-    clearInterval(topUpTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

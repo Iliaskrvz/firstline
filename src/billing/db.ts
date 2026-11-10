@@ -68,7 +68,10 @@ export async function stopRun(pool: pg.Pool, workspaceId: string, campaignId: st
   }
 }
 
-/** A paid purchase. Idempotent on `key` (the Checkout session or invoice), so a repeated webhook adds nothing. */
+/**
+ * A paid purchase. Idempotent on `key` (e.g. "kelviq:<checkout session id>"), so a repeated webhook adds
+ * nothing. The key is stored in credit_ledger.stripe_event_id, the ledger's unique payment-reference column.
+ */
 export async function addPurchase(pool: pg.Pool, input: { workspaceId: string; credits: number; key: string; note: string }): Promise<boolean> {
   const { rows } = await pool.query("select public.add_purchase($1, $2, $3, $4) added", [input.workspaceId, input.credits, input.key, input.note]);
   return rows[0].added;

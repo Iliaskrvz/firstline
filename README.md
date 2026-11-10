@@ -13,8 +13,10 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
   several inboxes per campaign (round robin, each lead stays in one inbox), offline alerts by email (Resend),
   Replies page with reply/bounce rates and the do-not-contact list.
 - **Phase 5** (in progress): credits wired into runs (reserve → capture/release, fallbacks free, stop a run),
-  25 welcome credits, Stripe Checkout (packs, VAT-ready, iDEAL|Wero + card) with an idempotent webhook,
-  auto top-up, Credits page, CSV export with `fl_` columns.
+  25 welcome credits, credit packs through **Kelviq** (merchant of record: it charges VAT and sends invoices;
+  iDEAL|Wero + card) with a signature-checked, idempotent webhook, Credits page, CSV export with `fl_` columns.
+  Spec change: Kelviq instead of Stripe (the user's choice); auto top-up is off until Kelviq confirms how a
+  one-time purchase saves a payment method for later charges.
 
 ## Setup
 
