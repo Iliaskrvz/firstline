@@ -175,6 +175,56 @@ describe("processLead (fake LLM, fake website)", () => {
     });
   });
 
+  describe("Economy mode (§9)", () => {
+    const economy = () => {
+      const j = job();
+      j.campaign.mode = "economy";
+      return j;
+    };
+
+    it("defers the first write, then finishes the lead from the batch's answer", async () => {
+      const calls: string[] = [];
+      const { store, deps } = setup(new FakeLLM(), economy(), fakeReader(SITE, calls));
+      const first = await processLead("lead-1", deps);
+      expect(first.outcome).toBe("deferred");
+      expect(store.deferred.get("lead-1")).toMatchObject({ skillVersion: "1.0", lead: { first_name: "Anna" } });
+      expect(store.generations).toEqual([]); // nothing written yet
+      expect(store.settled).toEqual([]); // the credit stays reserved
+      expect(store.statuses.get("lead-1")!.at(-1)).toMatchObject({ status: "writing", detail: expect.stringContaining("Economy") });
+
+      // The batch answers (here: what the writer would have written), at the batch price.
+      const answer = await new FakeLLM().write(store.deferred.get("lead-1")!);
+      store.batchResults.set("lead-1", { output: answer.output, costs: [{ step: "write", model: "claude-sonnet-5-5 (batch)", cost_usd: 0.004 }] });
+      const second = await processLead("lead-1", deps);
+      expect(second).toMatchObject({ outcome: "done", costUsd: 0.004 });
+      expect(store.generations[0].slot_outputs).toEqual(answer.output.slots);
+      expect(store.settled).toEqual([{ leadId: "lead-1", used: 1 }]);
+      expect(store.batchResults.has("lead-1")).toBe(false); // used up
+      expect(calls.filter((c) => c === "map")).toHaveLength(1); // the second pass reads research from the cache
+    });
+
+    it("a failed batch item is written directly; previews and 'now' campaigns never wait", async () => {
+      const failed = setup(new FakeLLM(), economy());
+      failed.store.batchResults.set("lead-1", { costs: [], error: "Batch request expired" });
+      expect((await processLead("lead-1", failed.deps)).outcome).toBe("done");
+
+      const preview = setup(new FakeLLM(), economy());
+      expect((await processLead("lead-1", preview.deps, { preview: true })).outcome).toBe("done");
+
+      const now = setup();
+      expect((await processLead("lead-1", now.deps)).outcome).toBe("done");
+      expect(now.store.deferred.size).toBe(0);
+    });
+
+    it("a lead with no website doesn't wait for a batch: it falls back at once", async () => {
+      const j = economy();
+      j.lead.domain = null;
+      const { store, deps } = setup(new FakeLLM(), j);
+      expect((await processLead("lead-1", deps)).outcome).toBe("fallback");
+      expect(store.deferred.size).toBe(0);
+    });
+  });
+
   it("unreachable site -> fallback, and the failure is cached briefly", async () => {
     const dead: WebReader = {
       robots: async () => null,

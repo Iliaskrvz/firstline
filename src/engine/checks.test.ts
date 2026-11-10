@@ -92,7 +92,8 @@ describe("language, costs, fallback", () => {
   });
 
   it("prices Claude and Firecrawl calls", () => {
-    expect(anthropicCost("claude-sonnet-5-5", { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000 })).toBe(0.0074);
+    expect(anthropicCost("claude-sonnet-5-5", { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000 })).toBe(0.0072);
+    expect(anthropicCost("claude-sonnet-5-5", { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000 }, { batch: true })).toBe(0.0036);
     expect(anthropicCost("claude-haiku-5-5", { input_tokens: 10_000, output_tokens: 1000 })).toBe(0.0015);
     expect(anthropicCost("unknown", { input_tokens: 1, output_tokens: 1 })).toBe(0);
     expect(firecrawlCostEntry("scrape", 1, 0.00083)).toEqual({ step: "scrape", model: "firecrawl-scrape", provider_units: 1, cost_usd: 0.00083 });

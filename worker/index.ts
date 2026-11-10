@@ -17,7 +17,8 @@ import { processLead } from "@/engine/pipeline";
 import { SKILL_V1_MOVES, SKILL_V1_PROMPT, SKILL_V1_RULES, SKILL_VERSION } from "@/engine/prompts/skill-v1";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
-import { dbConnection, LEAD_QUEUE, type LeadJobData } from "@/lib/queue";
+import { collectFinished, submitPending } from "@/engine/economy-pg";
+import { dbConnection, LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 
 const VERSION = process.env.npm_package_version ?? "dev";
@@ -104,6 +105,29 @@ async function main() {
   const inboxTimer = setInterval(inboxCheck, 5 * 60_000);
 
 
+  // Economy mode (§9): bundle waiting writes into batches and collect finished ones.
+  const enqueueLeads = async (leads: { leadId: string; workspaceId: string }[], runId: string) => {
+    for (const l of leads) {
+      await boss
+        .send(LEAD_QUEUE, { leadId: l.leadId, workspaceId: l.workspaceId, preview: false, force: false }, { id: leadJobId(l.leadId, runId), group: { id: l.workspaceId } })
+        .catch(() => null);
+    }
+  };
+  let economyBusy = false;
+  const economyTick = async () => {
+    if (economyBusy) return;
+    economyBusy = true;
+    try {
+      await collectFinished(pool, llm, enqueueLeads, { log });
+      await submitPending(pool, llm, enqueueLeads, { log });
+    } catch (e) {
+      log("economy tick failed:", (e as Error).message);
+    } finally {
+      economyBusy = false;
+    }
+  };
+  const economyTimer = setInterval(economyTick, 30_000);
+
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
@@ -169,6 +193,7 @@ async function main() {
     log(`${signal}: finishing running jobs…`);
     clearInterval(beat);
     clearInterval(inboxTimer);
+    clearInterval(economyTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

@@ -1,5 +1,6 @@
 // Storage the engine needs. Implemented by PgStore (worker) and MemoryStore (tests, CLI).
-import type { CostEntry, Fact, LeadJob, PageType, ResearchStatus } from "./types";
+import type { WriteInput } from "./llm";
+import type { CostEntry, Fact, LeadJob, PageType, ResearchStatus, WriterOutput } from "./types";
 
 export type CachedResearch = {
   domain: string;
@@ -45,6 +46,12 @@ export interface EngineStore {
    * No-op when the lead holds no reservation (preview, no website).
    */
   settleCredits(leadId: string, used: number): Promise<void>;
+  /** Economy mode: keep this lead's first write for the next batch (no-op if it is already waiting). */
+  deferWrite(lead: { id: string; workspace_id: string; campaign_id: string }, input: WriteInput): Promise<void>;
+  /** The batch's answer for this lead, once it is in: the output, or an error (then the lead is written directly). */
+  batchResult(leadId: string): Promise<{ output?: WriterOutput; costs: CostEntry[]; error?: string } | null>;
+  /** The lead is settled: its batch item is used up. */
+  finishBatchItem(leadId: string): Promise<void>;
 }
 
 export class MemoryStore implements EngineStore {
@@ -53,6 +60,8 @@ export class MemoryStore implements EngineStore {
   research = new Map<string, CachedResearch>();
   generations: GenerationRecord[] = [];
   settled: { leadId: string; used: number }[] = [];
+  deferred = new Map<string, WriteInput>();
+  batchResults = new Map<string, { output?: WriterOutput; costs: CostEntry[]; error?: string }>();
   costs: (CostEntry & { lead_id: string })[] = [];
 
   async loadLeadJob(id: string) {
@@ -76,6 +85,16 @@ export class MemoryStore implements EngineStore {
     this.generations.push(g);
   }  async settleCredits(leadId: string, used: number) {
     this.settled.push({ leadId, used });
+  }
+  async deferWrite(lead: { id: string }, input: WriteInput) {
+    if (!this.deferred.has(lead.id)) this.deferred.set(lead.id, structuredClone(input));
+  }
+  async batchResult(leadId: string) {
+    return this.batchResults.get(leadId) ?? null;
+  }
+  async finishBatchItem(leadId: string) {
+    this.deferred.delete(leadId);
+    this.batchResults.delete(leadId);
   }
 
   async logCosts(leadId: string, _ws: string, costs: CostEntry[]) {

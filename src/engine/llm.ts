@@ -33,6 +33,21 @@ export type WriteInput = {
 
 export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null };
 
+/** Two versions of the personalised lines for the same lead, for the Quality Lab. */
+export type CompareInput = { language: Language; facts: Fact[]; role: string | null; a: string; b: string };
+export type CompareOutput = { winner: "a" | "b" | "tie"; reason: string };
+
+/** Economy mode (§9): the first write of each lead goes through a batch at half price. */
+export type BatchItem = { id: string; input: WriteInput };
+export type BatchResult = { id: string; output?: WriterOutput; costs: CostEntry[]; error?: string };
+export interface BatchWriter {
+  /** Returns the provider's batch id. */
+  submit(items: BatchItem[]): Promise<string>;
+  status(batchId: string): Promise<"in_progress" | "ended">;
+  /** One result per item that has one; items are passed again so results can be validated against their slots. */
+  results(batchId: string, items: BatchItem[]): Promise<BatchResult[]>;
+}
+
 export interface LLM {
   readonly provider: "fake" | "anthropic";
   /** Cache key part: facts from different extractors are never mixed. */
@@ -40,6 +55,10 @@ export interface LLM {
   extractFacts(input: ExtractInput): Promise<LLMResult<{ facts: Fact[] }>>;
   write(input: WriteInput): Promise<LLMResult<WriterOutput>>;
   judge(input: JudgeInput): Promise<LLMResult<JudgeScores>>;
+  /** Quality Lab: which of two versions is the better cold-email personalisation? */
+  compare?(input: CompareInput): Promise<LLMResult<CompareOutput>>;
+  /** Present when the provider can write in batches (Economy mode). */
+  readonly batch?: BatchWriter;
 }
 
 /** The AI step can't run (missing/invalid key). Not retried; shown on the lead. */

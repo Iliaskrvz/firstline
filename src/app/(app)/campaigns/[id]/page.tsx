@@ -11,6 +11,7 @@ import { formatDate, n, STATUS_TONE } from "@/lib/format";
 import { parseTemplate } from "@/lib/template";
 import type { CampaignRow, LeadRow, TemplateRow } from "@/lib/types";
 import { queueConfigured } from "@/server/queue";
+import { WAITING_FOR_BATCH } from "@/engine/economy";
 import { detectLanguage } from "@/engine/language";
 import { defaultOptOutLine } from "@/lib/sender/messages";
 import { CampaignSettings } from "./campaign-settings";
@@ -59,7 +60,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
-    supabase.from("leads").select("id, status, domain").eq("campaign_id", id).limit(10_000),
+    supabase.from("leads").select("id, status, status_detail, domain").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
     supabase.from("inboxes").select("id, email").order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
@@ -79,7 +80,8 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
 
   // Run + send state.
   const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; inbox_ids: string[] | null; opt_out_line: string | null };
-  const statuses = (allStatuses ?? []) as { id: string; status: string; domain: string | null }[];
+  const statuses = (allStatuses ?? []) as { id: string; status: string; status_detail: string | null; domain: string | null }[];
+  const waitingForBatch = statuses.filter((l) => l.status === "writing" && l.status_detail === WAITING_FOR_BATCH).length;
   const byStatus = statuses.reduce<Record<string, number>>((m, l) => ((m[l.status] = (m[l.status] ?? 0) + 1), m), {});
   const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
   const remaining = (byStatus.queued ?? 0) + (byStatus.failed ?? 0);
@@ -117,7 +119,11 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
         }
       />
 
-      <AutoRefresh active={inFlight || c2.send_state === "sending"} intervalMs={inFlight ? 3000 : 20_000} />
+      {/* Leads that only wait for the batch don't need a refresh every 3 seconds. */}
+      <AutoRefresh
+        active={inFlight || c2.send_state === "sending"}
+        intervalMs={inFlight && waitingForBatch < statuses.filter((l) => IN_FLIGHT.has(l.status)).length ? 3000 : 20_000}
+      />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Leads" value={n(total)} />
         <Stat label="With website" value={n(researchable)} tone="green" />
@@ -222,6 +228,8 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                 steps.filter((s) => s.kind === "personalised").length,
               )}
               available={(balanceRow as { available: number } | null)?.available ?? 0}
+              mode={c.mode}
+              waitingForBatch={waitingForBatch}
             />
             {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
               <p className="mt-3 text-center text-xs text-slate-600">

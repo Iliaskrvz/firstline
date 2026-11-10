@@ -1,7 +1,7 @@
 // Fake LLM for building and testing without Claude. Output is realistic and
 // grounded in the real page text, but it is NOT AI writing: the UI labels it
 // "Test output, no AI used". Costs $0.
-import type { ExtractInput, LLM, LLMResult, WriteInput } from "./llm";
+import type { BatchWriter, CompareOutput, ExtractInput, LLM, LLMResult, WriteInput } from "./llm";
 import type { Fact, JudgeScores, Language, WriterOutput } from "./types";
 import { countWords } from "@/lib/template";
 
@@ -82,6 +82,25 @@ export class FakeLLM implements LLM {
       costs: [],
     };
   }
+
+  /** Quality Lab stand-in: no opinion, so identical or different outputs both tie. */
+  async compare(): Promise<LLMResult<CompareOutput>> {
+    return { output: { winner: "tie", reason: "Test output, no AI used" }, costs: [] };
+  }
+
+  /**
+   * Economy stand-in: a "batch" that is ready after FAKE_BATCH_DELAY_S seconds (default 30) and
+   * answers with the same test output as a direct write. Stateless, so it survives a worker restart.
+   */
+  readonly batch: BatchWriter = {
+    submit: async () => `fake-${Date.now()}`,
+    status: async (batchId) => {
+      const started = Number(batchId.replace("fake-", ""));
+      const delayMs = Number(process.env.FAKE_BATCH_DELAY_S ?? 30) * 1000;
+      return Date.now() - started >= delayMs ? "ended" : "in_progress";
+    },
+    results: async (_batchId, items) => Promise.all(items.map(async (it) => ({ id: it.id, ...(await this.write(it.input)) }))),
+  };
 
   async judge(): Promise<LLMResult<JudgeScores>> {
     return {

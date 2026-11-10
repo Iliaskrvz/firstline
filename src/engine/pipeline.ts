@@ -8,12 +8,13 @@ import { hasErrors, parseTemplate, render } from "@/lib/template";
 import { allPass, failureReasons, planCheck, ruleChecks, type CheckContext } from "./checks";
 import type { EngineConfig } from "./config";
 import { totalCost } from "./costs";
+import { deferringLLM, DeferredWriteError, prewrittenLLM, WAITING_FOR_BATCH } from "./economy";
 import { fallbackSlots, FALLBACK_REASONS, type FallbackReason } from "./fallback";
 import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
 import type { Semaphore } from "./limiter";
-import { SKILL_VERSION } from "./prompts/skill-v1";
+import { LIVE_SKILL_VERSION as SKILL_VERSION } from "./skills";
 import { researchDomain } from "./research";
 import type { CachedResearch, EngineStore } from "./store";
 import type { CheckItem, CostEntry, Fact, JudgeScores, Language, LeadJob, WriterOutput } from "./types";
@@ -27,7 +28,7 @@ export type PipelineDeps = {
   now?: () => Date;
 };
 
-export type PipelineOutcome = { outcome: "done" | "fallback" | "failed" | "skipped" | "missing"; detail?: string; costUsd: number };
+export type PipelineOutcome = { outcome: "done" | "fallback" | "failed" | "skipped" | "missing" | "deferred"; detail?: string; costUsd: number };
 
 const SETTLED = new Set(["done", "fallback", "skipped"]);
 const days = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000).toISOString();
@@ -51,7 +52,8 @@ export function cacheUsable(row: CachedResearch | null, extractorId: string, now
 }
 
 export async function processLead(leadId: string, deps: PipelineDeps, opts: { preview?: boolean; force?: boolean } = {}): Promise<PipelineOutcome> {
-  const { store, llm, config } = deps;
+  const { store, config } = deps;
+  let llm = deps.llm;
   const now = deps.now ?? (() => new Date());
   const spent: CostEntry[] = [];
 
@@ -60,7 +62,12 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   const { lead } = job;
   if (!opts.force && SETTLED.has(lead.status)) return { outcome: "skipped", detail: `already ${lead.status}`, costUsd: 0 };
   // Credits (§3): only a written email is paid for; previews are free and hold no reservation.
-  const settle = (used: number) => (opts.preview ? Promise.resolve() : store.settleCredits(lead.id, used));
+  // Settling is also the end of the lead's Economy batch item, if it had one.
+  const settle = async (used: number) => {
+    if (opts.preview) return;
+    await store.settleCredits(lead.id, used);
+    await store.finishBatchItem(lead.id);
+  };
   if (job.campaign.status === "cancelled" && !opts.preview) {
     await settle(0);
     await store.setLeadStatus(lead.id, "skipped", { detail: "Run stopped" });
@@ -83,6 +90,14 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     }
     return { outcome: "failed" as const, detail, costUsd: totalCost(spent) };
   };
+
+  // Economy mode (§9): the first write comes from a batch. If the batch answered, use it;
+  // if it failed, write directly; if there's no answer yet, the write is deferred below.
+  if (!opts.preview) {
+    const ready = await store.batchResult(lead.id);
+    if (ready?.output) llm = prewrittenLLM(llm, { output: ready.output, costs: ready.costs });
+    else if (!ready && job.campaign.mode === "economy" && llm.batch) llm = deferringLLM(llm);
+  }
 
   if (!job.template) return fail("The campaign has no template");
   const tpl = parseTemplate({ subject: job.template.subject, body: job.template.body });
@@ -250,6 +265,12 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       previous = out;
     }
   } catch (e) {
+    if (e instanceof DeferredWriteError) {
+      // Research is done and cached; the lead keeps its credit reservation until the batch answers.
+      await store.deferWrite(lead, e.input);
+      await store.setLeadStatus(lead.id, "writing", { detail: WAITING_FOR_BATCH });
+      return { outcome: "deferred", detail: WAITING_FOR_BATCH, costUsd: totalCost(spent) };
+    }
     if (e instanceof LLMUnavailableError) return fail(e.reason, { ...research, ai: e.reason });
     if (e instanceof LLMRefusalError) return fallback("refusal", research);
     throw e;

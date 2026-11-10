@@ -48,3 +48,5 @@ export function sanitiseFacts(facts: { id: string; text: string; src: string; ti
     .slice(0, 6)
     .map((f, i) => ({ id: `F${i + 1}`, text: f.text.trim().replace(/\s+/g, " "), src: f.src, tier: "A" as const }));
 }
+
+export const CompareSchema = z.object({ winner: z.enum(["a", "b", "tie"]), reason: z.string() });

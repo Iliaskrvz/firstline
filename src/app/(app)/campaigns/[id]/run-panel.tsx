@@ -15,6 +15,8 @@ export function RunPanel({
   disabledReason,
   creditsNeeded,
   available,
+  mode,
+  waitingForBatch,
 }: {
   campaignId: string;
   total: number;
@@ -25,8 +27,12 @@ export function RunPanel({
   /** Upper bound this run reserves (leads with a website × credits per lead). */
   creditsNeeded: number;
   available: number;
+  mode: "now" | "economy";
+  /** Leads whose writing waits for the Economy batch. */
+  waitingForBatch: number;
 }) {
   const [fallbacks, setFallbacks] = useState(sendFallbacks);
+  const [speed, setSpeed] = useState<"now" | "economy">(mode);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -46,13 +52,33 @@ export function RunPanel({
           <span>Skip that lead</span>
         </label>
       </fieldset>
+      <fieldset className="space-y-1.5 text-sm" disabled={running || pending}>
+        <legend className="mb-1 text-xs text-slate-500">Speed:</legend>
+        <label className="flex items-start gap-2">
+          <input type="radio" className="mt-0.5 accent-indigo-600" checked={speed === "now"} onChange={() => setSpeed("now")} />
+          <span>
+            Now <span className="text-slate-500">(ready in minutes)</span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input type="radio" className="mt-0.5 accent-indigo-600" checked={speed === "economy"} onChange={() => setSpeed("economy")} />
+          <span>
+            Economy <span className="text-slate-500">(written in one batch: usually within the hour, at most a day)</span>
+          </span>
+        </label>
+      </fieldset>
+      {running && waitingForBatch > 0 && (
+        <p className="rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+          {waitingForBatch} {waitingForBatch === 1 ? "lead is" : "leads are"} researched and waiting for the Economy batch. You can close this page; they finish on their own.
+        </p>
+      )}
       <Button
         className="w-full"
         disabled={pending || running || remaining === 0 || !!disabledReason}
         onClick={() =>
           start(async () => {
             setError(null);
-            const res = await runCampaign(campaignId, fallbacks);
+            const res = await runCampaign(campaignId, fallbacks, speed);
             if (res?.error) setError(res.error);
           })
         }

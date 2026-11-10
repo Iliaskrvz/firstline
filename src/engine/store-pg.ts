@@ -3,7 +3,8 @@
 // by the lead's own ids).
 import type { Pool } from "pg";
 import type { CachedResearch, EngineStore, GenerationRecord, LeadStatus } from "./store";
-import type { CostEntry, LeadJob } from "./types";
+import type { WriteInput } from "./llm";
+import type { CostEntry, LeadJob, WriterOutput } from "./types";
 
 export class PgStore implements EngineStore {
   constructor(private pool: Pool) {}
@@ -12,7 +13,7 @@ export class PgStore implements EngineStore {
     const { rows } = await this.pool.query(
       `select l.id, l.workspace_id, l.campaign_id, l.email, l.first_name, l.last_name, l.company, l.title,
               l.linkedin_headline, l.website, l.domain, l.custom, l.status,
-              c.writer, c.depth, c.status as c_status,
+              c.writer, c.depth, c.status as c_status, c.mode as c_mode,
               t.id as t_id, t.subject, t.body, t.slots, t.style_rules, t.examples
          from public.leads l
          join public.campaigns c on c.id = l.campaign_id
@@ -33,7 +34,7 @@ export class PgStore implements EngineStore {
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
         website: r.website, domain: r.domain, custom: r.custom ?? {}, status: r.status,
       },
-      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status },
+      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode },
       template: r.t_id
         ? { id: r.t_id, subject: r.subject, body: r.body, slots: r.slots, style_rules: r.style_rules ?? {}, examples: r.examples ?? [] }
         : null,
@@ -80,6 +81,28 @@ export class PgStore implements EngineStore {
     await this.pool.query("select public.release_credits($1)", [leadId]);
   }
 
+  async deferWrite(lead: { id: string; workspace_id: string; campaign_id: string }, input: WriteInput) {
+    await this.pool.query(
+      `insert into public.batch_items (lead_id, workspace_id, campaign_id, input) values ($1, $2, $3, $4)
+       on conflict (lead_id) where status <> 'consumed' do nothing`,
+      [lead.id, lead.workspace_id, lead.campaign_id, JSON.stringify(input)],
+    );
+  }
+
+  async batchResult(leadId: string) {
+    const { rows } = await this.pool.query(
+      "select status, output, costs, error from public.batch_items where lead_id = $1 and status in ('done', 'error')",
+      [leadId],
+    );
+    const r = rows[0];
+    if (!r) return null;
+    return r.status === "done" ? { output: r.output as WriterOutput, costs: (r.costs ?? []) as CostEntry[] } : { costs: (r.costs ?? []) as CostEntry[], error: r.error ?? "Batch failed" };
+  }
+
+  async finishBatchItem(leadId: string) {
+    await this.pool.query("update public.batch_items set status = 'consumed', updated_at = now() where lead_id = $1 and status <> 'consumed'", [leadId]);
+  }
+
   async saveGeneration(g: GenerationRecord) {
     await this.pool.query(
       `insert into public.generations (lead_id, workspace_id, plan, slot_outputs, full_email, subject, facts_used, skill_version,
@@ -96,8 +119,8 @@ export class PgStore implements EngineStore {
   async logCosts(leadId: string, workspaceId: string, costs: CostEntry[]) {
     for (const c of costs) {
       await this.pool.query(
-        `insert into public.usage_costs (lead_id, workspace_id, step, model, input_tokens, output_tokens, cached_tokens, provider_units, cost_usd)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `insert into public.usage_costs (lead_id, workspace_id, step, model, input_tokens, output_tokens, cached_tokens, provider_units, cost_usd, campaign_id)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, (select campaign_id from public.leads where id = $1))`,
         [leadId, workspaceId, c.step, c.model, c.input_tokens ?? 0, c.output_tokens ?? 0, c.cached_tokens ?? 0, c.provider_units ?? 0, c.cost_usd],
       );
     }

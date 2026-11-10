@@ -140,8 +140,9 @@ export async function deleteCampaign(id: string) {
  * website reserves 1 + 1 per personalised follow-up; leads without a website fall back for free.
  * Leads already written (e.g. in the free preview) aren't written or charged again.
  */
-export async function runCampaign(campaignId: string, sendFallbacks: boolean): Promise<{ error: string } | undefined> {
+export async function runCampaign(campaignId: string, sendFallbacks: boolean, mode: "now" | "economy" = "now"): Promise<{ error: string } | undefined> {
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  if (mode !== "now" && mode !== "economy") return { error: "Invalid speed." };
   const { supabase, workspace } = await requireWorkspace();
   const { data: campaign } = await supabase.from("campaigns").select("id, status, depth, templates(subject, body)").eq("id", campaignId).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
@@ -173,7 +174,7 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean): P
     return { error: `This run needs up to ${n(reserved.need)} credits and you have ${n(reserved.available)}. Buy credits first (Credits page).` };
   }
 
-  await supabase.from("campaigns").update({ status: "running", send_fallbacks: sendFallbacks }).eq("id", campaignId);
+  await supabase.from("campaigns").update({ status: "running", send_fallbacks: sendFallbacks, mode }).eq("id", campaignId);
   try {
     await enqueueLeads(
       todo.map((l) => ({ leadId: l.id, workspaceId: workspace.id, preview: false, force: l.status === "failed" })),

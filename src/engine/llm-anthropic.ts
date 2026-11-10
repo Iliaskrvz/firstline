@@ -1,17 +1,33 @@
 // Claude implementation. Haiku extracts facts and judges; Sonnet (Pro) or Haiku
-// (Lite) writes. Static system prompts are cached. Structured outputs guarantee
-// the JSON shape; the engine still validates the content.
+// (Lite) writes. Structured outputs guarantee the JSON shape; the engine still
+// validates the content.
+// Prompt caching: the writer's skill prompt and campaign block are cached (see
+// writeRequest). The extract and judge prompts are shorter than the 512-token
+// minimum for these models, so their cache markers do nothing yet; they start
+// working by themselves if those prompts grow.
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { EngineConfig } from "./config";
 import { anthropicCostEntry } from "./costs";
 import { Semaphore } from "./limiter";
-import { LLMRefusalError, LLMUnavailableError, type ExtractInput, type JudgeInput, type LLM, type LLMResult, type WriteInput } from "./llm";
+import {
+  LLMRefusalError,
+  LLMUnavailableError,
+  type BatchResult,
+  type BatchWriter,
+  type CompareInput,
+  type CompareOutput,
+  type ExtractInput,
+  type JudgeInput,
+  type LLM,
+  type LLMResult,
+  type WriteInput,
+} from "./llm";
 import { EXTRACT_PROMPT, EXTRACT_VERSION } from "./prompts/extract";
-import { JUDGE_PROMPT } from "./prompts/judge";
-import { SKILL_V1_PROMPT } from "./prompts/skill-v1";
-import { FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
+import { COMPARE_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
+import { CompareSchema, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
+import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
 import type { Fact, JudgeScores, WriterOutput } from "./types";
 
@@ -60,23 +76,19 @@ export class AnthropicLLM implements LLM {
     return { output: { facts }, costs: [anthropicCostEntry("extract", model, res.usage)] };
   }
 
-  async write(input: WriteInput): Promise<LLMResult<WriterOutput>> {
+  /**
+   * The writer request, split for prompt caching (a prefix match, system before messages):
+   *   1. the skill prompt: the same for every email of a skill version;
+   *   2. the campaign block (template, slots, style rules, language): the same for every lead of a campaign;
+   *   3. the lead and its facts, in the user message: different every time.
+   * Both system blocks carry a cache breakpoint, so each lead after the first reads 1 and 2 at the cache price.
+   */
+  writeRequest(input: WriteInput) {
     const model = input.writer === "lite" ? this.config.models.writerLite : this.config.models.writerPro;
-    const schema = writerSchema(input.template.slots.map((s) => s.key));
     const rules = input.styleRules;
-    const user = [
+    const campaign = [
       `Language: ${input.language}`,
-      `Lead: ${input.lead.first_name ?? "?"} at ${input.lead.company ?? "?"}${input.lead.title ? `, role: ${input.lead.title}` : ""}`,
       "",
-      ...(input.followUp
-        ? [
-            `This is follow-up email ${input.followUp.stepNo} in the same thread. The lead hasn't replied to the first email:`,
-            input.followUp.firstEmail,
-            "",
-            "Use a different fact or angle than the first email. Don't repeat its opener, and don't mention that they didn't reply.",
-            "",
-          ]
-        : []),
       "The sender's email (only the [[slots]] are yours to write):",
       `Subject: ${input.template.subject}`,
       input.template.body,
@@ -88,16 +100,36 @@ export class AnthropicLLM implements LLM {
       `- tone: ${rules.tone || "not set"}`,
       ...(rules.banned_phrases ?? []).map((b) => `- never use: ${b}`),
       ...(rules.extra_rules ?? []).map((r) => `- ${r}`),
+      ...(input.examples.length ? ["", "Examples of emails that got replies:", ...input.examples] : []),
+    ].join("\n");
+    const user = [
+      `Lead: ${input.lead.first_name ?? "?"} at ${input.lead.company ?? "?"}${input.lead.title ? `, role: ${input.lead.title}` : ""}`,
       "",
+      ...(input.followUp
+        ? [
+            `This is follow-up email ${input.followUp.stepNo} in the same thread. The lead hasn't replied to the first email:`,
+            input.followUp.firstEmail,
+            "",
+            "Use a different fact or angle than the first email. Don't repeat its opener, and don't mention that they didn't reply.",
+            "",
+          ]
+        : []),
       "Facts:",
       factsBlock(input.facts),
-      ...(input.examples.length ? ["", "Examples of emails that got replies:", ...input.examples] : []),
       ...(input.feedback?.length
         ? ["", "Your previous attempt failed these checks. Fix them:", ...input.feedback.map((f) => `- ${f}`), "", `Previous attempt: ${JSON.stringify(input.previous)}`]
         : []),
     ].join("\n");
+    return {
+      model,
+      schema: writerSchema(input.template.slots.map((s) => s.key)),
+      system: [...cachedSystem(skillPrompt(input.skillVersion)), ...cachedSystem(campaign)],
+      messages: [{ role: "user" as const, content: user }] satisfies Anthropic.MessageParam[],
+    };
+  }
 
-    const messages: Anthropic.MessageParam[] = [{ role: "user", content: user }];
+  async write(input: WriteInput): Promise<LLMResult<WriterOutput>> {
+    const { model, schema, system, messages } = this.writeRequest(input);
     let output: WriterOutput | null;
     let stop: string | null;
     let usage;
@@ -109,7 +141,7 @@ export class AnthropicLLM implements LLM {
           max_tokens: 8000,
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
-          system: cachedSystem(SKILL_V1_PROMPT),
+          system,
           output_config: { format: betaZodOutputFormat(schema), effort: "medium" },
           messages,
         }),
@@ -122,7 +154,7 @@ export class AnthropicLLM implements LLM {
         this.client.messages.parse({
           model,
           max_tokens: 8000,
-          system: cachedSystem(SKILL_V1_PROMPT),
+          system,
           output_config: { format: zodOutputFormat(schema), effort: "medium" },
           messages,
         }),
@@ -134,6 +166,78 @@ export class AnthropicLLM implements LLM {
     if (stop === "refusal") throw new LLMRefusalError();
     if (!output) throw new Error(`Writer returned no valid JSON (stop_reason: ${stop})`);
     return { output, costs: [anthropicCostEntry("write", model, usage)] };
+  }
+
+  /**
+   * Economy mode: the same writer requests through the Message Batches API (50% off, results
+   * usually within the hour, at most 24 h). Batches can't use the server-side refusal fallback,
+   * so a declined request comes back as an error and that lead is written directly instead.
+   */
+  readonly batch: BatchWriter = {
+    submit: async (items) => {
+      const batch = await this.call(() =>
+        this.client.messages.batches.create({
+          requests: items.map((it) => {
+            const { model, schema, system, messages } = this.writeRequest(it.input);
+            return {
+              custom_id: it.id,
+              params: { model, max_tokens: 8000, system, output_config: { format: zodOutputFormat(schema), effort: "medium" as const }, messages },
+            };
+          }),
+        }),
+      );
+      return batch.id;
+    },
+    status: async (batchId) => {
+      const b = await this.call(() => this.client.messages.batches.retrieve(batchId));
+      return b.processing_status === "ended" ? "ended" : "in_progress";
+    },
+    results: async (batchId, items) => {
+      const byId = new Map(items.map((i) => [i.id, i.input]));
+      const out: BatchResult[] = [];
+      for await (const r of await this.call(() => this.client.messages.batches.results(batchId))) {
+        const input = byId.get(r.custom_id);
+        if (!input) continue;
+        if (r.result.type !== "succeeded") {
+          out.push({ id: r.custom_id, costs: [], error: `Batch request ${r.result.type}` });
+          continue;
+        }
+        const msg = r.result.message;
+        const { model, schema } = this.writeRequest(input);
+        const costs = [anthropicCostEntry("write", model, msg.usage, { batch: true })];
+        const text = msg.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text;
+        let parsed: WriterOutput | null = null;
+        try {
+          parsed = text ? (schema.parse(JSON.parse(text)) as WriterOutput) : null;
+        } catch {
+          parsed = null;
+        }
+        if (msg.stop_reason === "refusal" || !parsed) out.push({ id: r.custom_id, costs, error: msg.stop_reason === "refusal" ? "The model declined" : "No valid JSON" });
+        else out.push({ id: r.custom_id, costs, output: parsed });
+      }
+      return out;
+    },
+  };
+
+  async compare(input: CompareInput): Promise<LLMResult<CompareOutput>> {
+    const model = this.config.models.judge;
+    const res = await this.call(() =>
+      this.client.messages.parse({
+        model,
+        max_tokens: 2000,
+        system: cachedSystem(COMPARE_PROMPT),
+        output_config: { format: zodOutputFormat(CompareSchema), effort: "low" },
+        messages: [
+          {
+            role: "user",
+            content: `Language: ${input.language}\nReader's role: ${input.role ?? "unknown"}\n\nFacts:\n${factsBlock(input.facts)}\n\nVersion A:\n${input.a}\n\nVersion B:\n${input.b}`,
+          },
+        ],
+      }),
+    );
+    if (res.stop_reason === "refusal") throw new LLMRefusalError();
+    if (!res.parsed_output) throw new Error("Compare returned no valid JSON");
+    return { output: res.parsed_output, costs: [anthropicCostEntry("judge", model, res.usage)] };
   }
 
   async judge(input: JudgeInput): Promise<LLMResult<JudgeScores>> {
