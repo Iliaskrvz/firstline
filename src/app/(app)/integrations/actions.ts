@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createTool } from "@/integrations/registry";
-import { disconnectIntegration, integrationSecret, saveIntegration, setCapabilities } from "@/integrations/push-pg";
+import { connectTool } from "@/integrations/connect";
+import { disconnectIntegration, integrationSecret } from "@/integrations/push-pg";
 import { LIVE_PROVIDERS, PROVIDER_NAMES, type Provider } from "@/integrations/types";
 import { requireWorkspace } from "@/lib/auth";
-import { encryptionKey, keyHint, randomToken } from "@/lib/secret-box";
+import { encryptionKey } from "@/lib/secret-box";
 import { serverPool } from "@/server/db";
-import { encryptionConfigured, webhookUrl } from "@/server/integrations";
+import { encryptionConfigured } from "@/server/integrations";
+import { publicAppUrl } from "@/server/sender-view";
 import { queueConfigured } from "@/server/queue";
 
 const NOT_READY = "Integrations need DATABASE_URL and INTEGRATIONS_ENCRYPTION_KEY in .env.local (see the README).";
@@ -28,45 +30,10 @@ export async function connectIntegration(input: z.input<typeof Connect>): Promis
   const pool = serverPool();
   const key = encryptionKey();
 
-  let tool;
-  try {
-    tool = createTool(provider, apiKey);
-  } catch (e) {
-    return { error: (e as Error).message };
-  }
-  const test = await tool.testConnection();
-  if (!test.ok) return { error: test.reason };
-
-  // Replace an earlier connection: remove its webhooks in the tool first (best effort).
-  const { rows: old } = await pool.query<{ id: string }>("select id from public.integrations where workspace_id = $1 and provider = $2 and status <> 'disconnected'", [workspace.id, provider]);
-  if (old[0]) {
-    const prev = await integrationSecret(pool, key, old[0].id).catch(() => null);
-    if (prev?.row.tool_webhook_ids.length) await createTool(provider, prev.apiKey).removeWebhooks(prev.row.tool_webhook_ids).catch(() => {});
-  }
-
-  const token = randomToken();
-  const id = await saveIntegration(pool, key, { workspaceId: workspace.id, provider, apiKey, keyHint: keyHint(apiKey), accountName: test.accountName, webhookToken: token });
-  let note: string | null = null;
-  let webhooks = false;
-  if (!test.webhooks) {
-    note = `${test.webhooksReason ?? "Webhooks are not available."} FirstLine checks reply and bounce status every 15 minutes instead.`;
-  } else {
-    const url = webhookUrl(id, token);
-    if (!url) {
-      note = "This app has no public https address yet (PUBLIC_APP_URL), so the tool can't call it. FirstLine checks statuses every 15 minutes instead.";
-    } else {
-      const hooks = await tool.setupWebhooks(url);
-      if (hooks.ok) {
-        webhooks = true;
-        await setCapabilities(pool, id, { webhooks: true }, hooks.ids);
-      } else {
-        note = `Couldn't set up webhooks (${hooks.reason}). FirstLine checks statuses every 15 minutes instead.`;
-      }
-    }
-  }
-  if (!webhooks) await setCapabilities(pool, id, { webhooks: false, reason: note ?? undefined }, []);
+  const r = await connectTool(pool, key, { workspaceId: workspace.id, provider, apiKey, publicUrl: publicAppUrl(), toolFor: (p, k) => createTool(p, k) });
+  if ("error" in r) return r;
   revalidatePath("/integrations");
-  return { ok: true, webhooks, note };
+  return { ok: true, webhooks: r.webhooks, note: r.note };
 }
 
 export async function disconnect(integrationId: string): Promise<{ error: string } | { ok: true }> {

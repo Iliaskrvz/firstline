@@ -19,6 +19,7 @@ export function instantlySim(opts: InstantlySimOptions = {}) {
     idem: new Map<string, unknown>(),
     requests: [] as { method: string; path: string; body: unknown; auth: string | undefined }[],
     rateLimitTimes: opts.rateLimitTimes ?? 0,
+    nextWebhook: 1,
   };
   const json = (status: number, body: unknown, headers: Record<string, string> = {}) => ({
     status,
@@ -43,7 +44,7 @@ export function instantlySim(opts: InstantlySimOptions = {}) {
     if (path.startsWith("/webhooks") && opts.plan === "no-webhooks") return json(402, { statusCode: 402, error: "Payment Required", message: "Upgrade to use webhooks" });
     if (method === "GET" && path === "/webhooks") return json(200, { items: state.webhooks.slice(0, Number(u.searchParams.get("limit") ?? 100)), next_starting_after: null });
     if (method === "POST" && path === "/webhooks") {
-      const w = { id: `wh_${state.webhooks.length + 1}`, target_hook_url: body.target_hook_url, event_type: body.event_type };
+      const w = { id: `wh_${state.nextWebhook++}`, target_hook_url: body.target_hook_url, event_type: body.event_type };
       state.webhooks.push(w);
       return json(200, { ...w, campaign: body.campaign, name: body.name });
     }

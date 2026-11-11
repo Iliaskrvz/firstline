@@ -242,7 +242,7 @@ async function pendingItems(pool: pg.Pool, pushId: string, limit: number): Promi
        left join lateral (select g.subject, g.slot_outputs, g.full_email from public.generations g
                            where g.lead_id = i.lead_id and g.step_no = 1 order by g.created_at desc limit 1) g1 on true
       where i.push_id = $1 and i.status = 'pending'
-      order by i.id
+      order by l.created_at, l.id
       limit $2`,
     [pushId, limit],
   );
@@ -321,7 +321,15 @@ export async function runPush(pool: pg.Pool, pushId: string, deps: PushDeps): Pr
     await finishPush(pool, push.id, "The integration was disconnected.");
     return loadPush(pool, push.workspace_id, push.id);
   }
-  const tool = deps.toolFor(push.provider, secret.apiKey);
+  let tool: SendingTool;
+  try {
+    tool = deps.toolFor(push.provider, secret.apiKey);
+  } catch (e) {
+    // E.g. a test key ("fake-…") on a production server: stop with the reason instead of crashing the job.
+    await failItems(pool, push.id, (await pendingItems(pool, push.id, 100_000)).map((i) => i.id), (e as Error).message);
+    await finishPush(pool, push.id, (e as Error).message);
+    return loadPush(pool, push.workspace_id, push.id);
+  }
   const variables = push.variable_map.filter((m) => m.variable.trim()).map((m) => m.variable.trim());
   try {
     await withRetries(() => tool.ensureVariables(push.tool_campaign_id, variables), deps);
