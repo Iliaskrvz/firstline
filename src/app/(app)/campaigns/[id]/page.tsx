@@ -20,6 +20,7 @@ import { AutoRefresh } from "./preview/auto-refresh";
 import { ResumeButton } from "./resume-button";
 import { RunPanel } from "./run-panel";
 import { SendPanel } from "./send-panel";
+import { EndCampaign } from "./end-campaign";
 import { SequenceEditor } from "./sequence-editor";
 
 export const metadata: Metadata = { title: "Campaign" };
@@ -255,6 +256,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               counts={sendCounts}
             />
           </div>
+          <EndCampaign campaignId={c.id} endedAt={(c as CampaignRow & { ended_at: string | null }).ended_at} purged={!!(c as CampaignRow & { purged_at: string | null }).purged_at} />
           <div className="text-xs text-slate-500">
             Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
           </div>

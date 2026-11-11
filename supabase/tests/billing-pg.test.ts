@@ -202,3 +202,39 @@ describe("admin margin view", () => {
     expect(a.drift.level).toBe("ok"); // fewer than 20 emails: no alert
   });
 });
+
+describe("data retention (§11)", () => {
+  it("ending a campaign releases credits and stops sending; 30 days later its lead data is gone, the money history stays", async () => {
+    const { endCampaign, runRetention } = await import("@/billing/retention");
+    const c = (await pool.query("insert into public.campaigns (workspace_id, name, template_id, status) values ($1, 'Ends', $2, 'running') returning id", [ws, template])).rows[0].id;
+    const id = (await pool.query("insert into public.leads (workspace_id, campaign_id, email, domain) values ($1, $2, 'r@ret.nl', 'ret.nl') returning id", [ws, c])).rows[0].id;
+    await pool.query("insert into public.generations (lead_id, workspace_id, subject, full_email, slot_outputs) values ($1, $2, 's', 'e', '{}')", [id, ws]);
+    await pool.query("insert into public.usage_costs (workspace_id, step, model, cost_usd, lead_id, campaign_id) values ($1, 'write', 'x', 0.01, $2, $3)", [ws, id, c]);
+    await reserveForRun(pool, { workspaceId: ws, leadIds: [id], perLead: 1 });
+    const before = (await balance(pool, ws)).available;
+
+    expect(await endCampaign(pool, ws, c)).toBe(true);
+    expect(await endCampaign(pool, ws, c)).toBe(false); // once
+    expect((await balance(pool, ws)).available).toBe(before + 1);
+    expect((await pool.query("select status, send_state from public.campaigns where id = $1", [c])).rows[0]).toEqual({ status: "done", send_state: null });
+
+    expect((await runRetention(pool, new Date(Date.now() + 29 * 86_400_000))).purged).toBe(0);
+    const later = await runRetention(pool, new Date(Date.now() + 31 * 86_400_000));
+    expect(later).toMatchObject({ purged: 1, leadsDeleted: 1 });
+    expect((await pool.query("select count(*)::int n from public.leads where campaign_id = $1", [c])).rows[0].n).toBe(0);
+    expect((await pool.query("select count(*)::int n from public.generations where lead_id = $1", [id])).rows[0].n).toBe(0);
+    // Ledger and costs stay (no personal data); the campaign row stays, marked purged.
+    expect((await pool.query("select count(*)::int n from public.credit_ledger where lead_id = $1", [id])).rows[0].n).toBeGreaterThan(0);
+    expect((await pool.query("select lead_id, campaign_id from public.usage_costs where campaign_id = $1", [c])).rows[0]).toEqual({ lead_id: null, campaign_id: c });
+    expect((await pool.query("select purged_at is not null p from public.campaigns where id = $1", [c])).rows[0].p).toBe(true);
+    expect((await runRetention(pool, new Date(Date.now() + 32 * 86_400_000))).purged).toBe(0); // once
+  });
+
+  it("a campaign without any activity for 90 days ends by itself", async () => {
+    const { runRetention } = await import("@/billing/retention");
+    const c = (await pool.query("insert into public.campaigns (workspace_id, name, status, created_at) values ($1, 'Idle', 'preview', now() - interval '100 days') returning id", [ws])).rows[0].id;
+    await pool.query("insert into public.leads (workspace_id, campaign_id, email, created_at) values ($1, $2, 'i@idle.nl', now() - interval '100 days')", [ws, c]);
+    expect((await runRetention(pool)).ended).toBeGreaterThanOrEqual(1);
+    expect((await pool.query("select ended_at is not null e from public.campaigns where id = $1", [c])).rows[0].e).toBe(true);
+  });
+});

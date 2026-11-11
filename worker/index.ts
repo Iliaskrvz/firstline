@@ -18,6 +18,7 @@ import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
 import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
+import { runRetention } from "@/billing/retention";
 import { collectFinished, submitPending } from "@/engine/economy-pg";
 import { dbConnection, LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
@@ -141,6 +142,18 @@ async function main() {
   };
   const labTimer = setInterval(labTick, 60_000);
 
+  // Data retention (§11): end idle campaigns and delete lead data 30 days after a campaign ended.
+  const retention = async () => {
+    try {
+      const r = await runRetention(pool);
+      if (r.ended || r.purged) log(`retention: ${r.ended} campaign(s) ended, ${r.purged} purged (${r.leadsDeleted} leads deleted)`);
+    } catch (e) {
+      log("retention failed:", (e as Error).message);
+    }
+  };
+  await retention();
+  const retentionTimer = setInterval(retention, 6 * 60 * 60_000);
+
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
@@ -208,6 +221,7 @@ async function main() {
     clearInterval(inboxTimer);
     clearInterval(economyTimer);
     clearInterval(labTimer);
+    clearInterval(retentionTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

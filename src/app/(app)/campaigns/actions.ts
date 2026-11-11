@@ -9,6 +9,7 @@ import { MAX_FOLLOW_UPS, validateStep } from "@/lib/sender/sequence";
 import { creditsPerLead, type Depth } from "@/lib/credits";
 import { n } from "@/lib/format";
 import { reserveForRun, stopRun } from "@/billing/db";
+import { endCampaign } from "@/billing/retention";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
 import { serverPool } from "@/server/db";
@@ -293,4 +294,14 @@ export async function saveSequence(input: z.input<typeof SequenceInput>): Promis
   }
   revalidatePath(`/campaigns/${campaignId}`);
   return { ok: true };
+}
+
+/** End a campaign (§11): sending stops, open credits come back, lead data is deleted 30 days later. */
+export async function endCampaignAction(campaignId: string): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const { workspace } = await requireWorkspace();
+  await endCampaign(serverPool(), workspace.id, campaignId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath("/campaigns");
+  revalidatePath("/credits");
 }
