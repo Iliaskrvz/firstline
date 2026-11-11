@@ -166,3 +166,33 @@ describe("Economy mode", () => {
     expect((await pool.query("select count(*)::int n from public.batch_items where status <> 'consumed'")).rows[0].n).toBe(0);
   });
 });
+
+describe("Quality Lab (database)", () => {
+  it("queues a run, runs it in the background and stores the result", async () => {
+    const { queueEvalRun, runQueuedEval, saveTestSet, upsertSkills } = await import("@/engine/lab-pg");
+    const { MemoryStore } = await import("@/engine/store");
+    await upsertSkills(pool, "1.0");
+    await saveTestSet(pool, {
+      id: "t",
+      name: "Test",
+      template: { subject: "Idee voor {{company}}", body: "Hoi {{first_name}},\n\n[[opener · iets specifieks van hun website · 25]]\n\nGroet" },
+      leads: [{ first_name: "Pieter", company: "Bos", title: null, domain: "bakkerij.nl" }],
+    });
+    const id = await queueEvalRun(pool, { testSetId: "t", candidate: "1.0", baseline: "1.0", provider: "fake" });
+    const deps = { store: new MemoryStore(), reader, llm: new FakeLLM(), config: engineConfig({}) };
+    expect(await runQueuedEval(pool, deps)).toBe(id);
+    expect(await runQueuedEval(pool, deps)).toBeNull(); // nothing left
+    const run = (await pool.query("select status, ties, wins, losses, details, provider from public.eval_runs where id = $1", [id])).rows[0];
+    expect(run).toMatchObject({ status: "done", ties: 1, wins: 0, losses: 0, provider: "fake" });
+    expect(run.details[0]).toMatchObject({ domain: "bakkerij.nl", winner: "tie" });
+    expect((await pool.query("select status from public.skill_versions where version = '1.0'")).rows[0].status).toBe("live");
+  });
+
+  it("a run on a missing test set fails with a clear error", async () => {
+    const { queueEvalRun, runQueuedEval } = await import("@/engine/lab-pg");
+    const { MemoryStore } = await import("@/engine/store");
+    const id = await queueEvalRun(pool, { testSetId: "nope", candidate: "1.0", baseline: "1.0", provider: "fake" });
+    await runQueuedEval(pool, { store: new MemoryStore(), reader, llm: new FakeLLM(), config: engineConfig({}) });
+    expect((await pool.query("select status, error from public.eval_runs where id = $1", [id])).rows[0]).toEqual({ status: "failed", error: 'Test set "nope" not found' });
+  });
+});

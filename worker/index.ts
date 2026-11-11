@@ -14,7 +14,8 @@ import { createFirecrawl } from "@/engine/firecrawl";
 import { effectiveConcurrency, Semaphore } from "@/engine/limiter";
 import { selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
-import { SKILL_V1_MOVES, SKILL_V1_PROMPT, SKILL_V1_RULES, SKILL_VERSION } from "@/engine/prompts/skill-v1";
+import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
+import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { collectFinished, submitPending } from "@/engine/economy-pg";
@@ -50,13 +51,8 @@ async function main() {
 
   const stats = { jobsDone: 0, jobsFailed: 0, lastHeartbeatAt: null as Date | null, lastHeartbeatError: null as string | null, startedAt: new Date() };
 
-  // Store Sales Skill v1 (§6: versioned in skill_versions).
-  await pool.query(
-    `insert into public.skill_versions (version, prompt, rules, moves, status, traffic_share, changelog)
-     values ($1, $2, $3, $4, 'live', 100, 'Initial version')
-     on conflict (version) do update set prompt = excluded.prompt, rules = excluded.rules, moves = excluded.moves`,
-    [SKILL_VERSION, SKILL_V1_PROMPT, JSON.stringify(SKILL_V1_RULES), JSON.stringify(SKILL_V1_MOVES)],
-  );
+  // Skill versions (§6), from code into skill_versions (the Quality Lab references them).
+  await upsertSkills(pool, LIVE_SKILL_VERSION);
 
   const boss = new PgBoss({ ...conn, max: 4, schema: "pgboss" });
   boss.on("error", (e) => log("pg-boss error:", e.message));
@@ -128,6 +124,23 @@ async function main() {
   };
   const economyTimer = setInterval(economyTick, 30_000);
 
+  // Quality Lab (§7.4): run queued evals one at a time, in the background.
+  let labBusy = false;
+  const labTick = async () => {
+    if (labBusy) return;
+    labBusy = true;
+    try {
+      while ((await runQueuedEval(pool, { store, reader, llm, config }, log)) != null) {
+        /* next queued run */
+      }
+    } catch (e) {
+      log("quality lab tick failed:", (e as Error).message);
+    } finally {
+      labBusy = false;
+    }
+  };
+  const labTimer = setInterval(labTick, 60_000);
+
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
@@ -194,6 +207,7 @@ async function main() {
     clearInterval(beat);
     clearInterval(inboxTimer);
     clearInterval(economyTimer);
+    clearInterval(labTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

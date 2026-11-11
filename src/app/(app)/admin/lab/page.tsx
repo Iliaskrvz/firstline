@@ -1,0 +1,143 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Suspense } from "react";
+import { Badge, Card, PageHeader, Skeleton } from "@/components/ui";
+import { summarise, type EvalSummary, type LeadResult } from "@/engine/lab";
+import { LIVE_SKILL_VERSION, SKILLS } from "@/engine/skills";
+import { requireAdmin } from "@/lib/auth";
+import { formatDate } from "@/lib/format";
+import { serverPool } from "@/server/db";
+import { AutoRefresh } from "../../campaigns/[id]/preview/auto-refresh";
+import { NewTestSet, RunForm } from "./lab-forms";
+
+export const metadata: Metadata = { title: "Quality Lab" };
+
+export default function LabPage() {
+  return (
+    <>
+      <PageHeader
+        title="Quality Lab"
+        description={
+          <>
+            A new skill version writes for a fixed test set next to the live one; checks, the AI judge and a side-by-side comparison decide. Ship only on a clear
+            win.{" "}
+            <Link href="/admin" className="font-medium text-indigo-700 hover:underline">
+              ← Admin
+            </Link>
+          </>
+        }
+      />
+      <Suspense fallback={<Skeleton className="h-96" />}>
+        <Lab />
+      </Suspense>
+    </>
+  );
+}
+
+type Run = {
+  id: number;
+  skill_version: string;
+  baseline_version: string | null;
+  test_set_id: string;
+  status: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  cost_usd: string;
+  provider: string | null;
+  error: string | null;
+  details: LeadResult[];
+  created_at: string;
+};
+
+const VERDICT: Record<EvalSummary["verdict"], "green" | "red" | "gray"> = { ship: "green", no: "red", inconclusive: "gray" };
+
+async function Lab() {
+  await requireAdmin();
+  const pool = serverPool();
+  const [{ rows: sets }, { rows: runs }] = await Promise.all([
+    pool.query("select id, name, jsonb_array_length(leads)::int n from public.test_sets order by created_at"),
+    pool.query("select * from public.eval_runs order by created_at desc limit 20"),
+  ]);
+  const versions = Object.keys(SKILLS);
+  const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running");
+  return (
+    <div className="space-y-6">
+      <AutoRefresh active={busy} intervalMs={10_000} />
+      <Card className="space-y-4">
+        <h2 className="text-base font-semibold text-slate-900">Compare two skill versions</h2>
+        {sets.length ? (
+          <RunForm sets={sets.map((s) => ({ id: s.id, name: `${s.name} (${s.n})` }))} versions={versions} live={LIVE_SKILL_VERSION} />
+        ) : (
+          <p className="text-sm text-slate-500">Add a test set first.</p>
+        )}
+        <p className="text-xs text-slate-500">
+          Versions live in code (src/engine/skills.ts). Live now: {LIVE_SKILL_VERSION}. To ship a winner, set LIVE_SKILL_VERSION to it and deploy. Research comes from the
+          30-day domain cache; Claude costs about $0.01–0.02 per company per run.
+        </p>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="text-base font-semibold text-slate-900">Test sets</h2>
+        <ul className="text-sm text-slate-700">
+          {sets.map((s) => (
+            <li key={s.id}>
+              {s.name} · {s.n} companies
+            </li>
+          ))}
+        </ul>
+        <NewTestSet hasStarter={sets.some((s) => s.id === "nl-starter")} />
+      </Card>
+
+      {(runs as Run[]).map((r) => {
+        const s = summarise(r.details ?? []);
+        return (
+          <Card key={r.id} className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">
+                {r.skill_version} vs {r.baseline_version ?? r.skill_version} · {r.test_set_id}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                {r.provider === "fake" && <Badge tone="amber">Test output, no AI used</Badge>}
+                <Badge tone={r.status === "done" ? VERDICT[s.verdict] : r.status === "failed" ? "red" : "indigo"}>{r.status === "done" ? s.verdict : r.status}</Badge>
+                {formatDate(r.created_at)} · ${Number(r.cost_usd).toFixed(3)}
+              </div>
+            </div>
+            {r.error && <p className="text-xs text-rose-700">{r.error}</p>}
+            <p className="text-sm text-slate-700">
+              {s.wins} wins · {s.losses} losses · {s.ties} ties · {s.skipped} skipped · judge {s.judgeAvg ?? "–"} vs {s.baselineJudgeAvg ?? "–"} · failed checks{" "}
+              {s.ruleFailRate == null ? "–" : `${Math.round(s.ruleFailRate * 100)}%`} vs {s.baselineRuleFailRate == null ? "–" : `${Math.round(s.baselineRuleFailRate * 100)}%`}
+            </p>
+            {r.status === "done" && <p className="text-sm font-medium text-slate-900">{s.verdictText}</p>}
+            {(r.details ?? []).length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-xs font-medium text-indigo-700">Per company</summary>
+                <ul className="mt-2 space-y-3 text-xs">
+                  {r.details.map((d, i) => (
+                    <li key={i} className="rounded-lg bg-slate-50 p-3">
+                      <div className="font-medium text-slate-900">
+                        {d.company} ({d.domain}) · <span className="text-slate-600">{d.winner}</span> · {d.reason}
+                      </div>
+                      {d.winner !== "skipped" && (
+                        <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                          {(["candidate", "baseline"] as const).map((k) => (
+                            <div key={k}>
+                              <div className="text-slate-500">
+                                {k} {d[k].passed ? "✓" : "✗"} {d[k].judgeAvg != null && `· judge ${d[k].judgeAvg.toFixed(1)}`}
+                              </div>
+                              <div className="text-slate-800">{Object.values(d[k].slots ?? {}).join(" · ") || d[k].error || "–"}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
