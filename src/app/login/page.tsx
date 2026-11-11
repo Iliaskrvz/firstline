@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 import { Card, Logo } from "@/components/ui";
 import { LoginForm } from "./login-form";
@@ -18,6 +19,9 @@ export default function LoginPage(props: PageProps<"/login">) {
           <LoginInner searchParams={props.searchParams} />
         </Suspense>
       </Card>
+      <p className="mt-6 max-w-sm text-center text-xs text-slate-500">
+        By continuing you agree to the <Link href="/terms" className="underline">terms</Link>, including the <Link href="/dpa" className="underline">DPA</Link>, and the <Link href="/privacy" className="underline">privacy policy</Link>.
+      </p>
     </div>
   );
 }

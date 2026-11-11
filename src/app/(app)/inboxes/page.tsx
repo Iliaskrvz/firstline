@@ -4,10 +4,12 @@ import { Badge, Card, PageHeader, Skeleton } from "@/components/ui";
 import { requireWorkspace } from "@/lib/auth";
 import type { InboxHealth } from "@/lib/sender/schedule";
 import { queueConfigured } from "@/server/queue";
+import { inboxWarnings } from "@/lib/sender/safety";
 import { loadInboxes, publicAppUrl, senderScript } from "@/server/sender-view";
 import { AutoRefresh } from "../campaigns/[id]/preview/auto-refresh";
 import { AddInbox } from "./add-inbox";
 import { InboxActions } from "./inbox-actions";
+import { SafetyTips } from "./safety-tips";
 
 export const metadata: Metadata = { title: "Inboxes" };
 
@@ -41,7 +43,7 @@ function ago(s: number | null) {
 }
 
 async function InboxList() {
-  const { workspace } = await requireWorkspace();
+  const { workspace, user } = await requireWorkspace();
   const appUrl = publicAppUrl();
   const script = senderScript();
   if (!queueConfigured()) {
@@ -51,6 +53,7 @@ async function InboxList() {
   return (
     <div className="space-y-6">
       <AutoRefresh active={inboxes.some((i) => i.health === "not_connected")} intervalMs={10_000} />
+      <SafetyTips open={inboxes.length === 0} />
       {inboxes.map((i) => (
         <Card key={i.id} className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -76,6 +79,11 @@ async function InboxList() {
               </div>
             </div>
           </div>
+          {inboxWarnings(i, user.email).map((w) => (
+            <p key={w.id} className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              {w.text}
+            </p>
+          ))}
           {i.lastError && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{i.lastError}</p>}
           <InboxActions inboxId={i.id} paused={i.health === "paused"} appUrl={appUrl} script={script} />
         </Card>
