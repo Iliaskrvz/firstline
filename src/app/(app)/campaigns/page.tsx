@@ -32,6 +32,7 @@ async function CampaignList() {
   const { data, error } = await supabase
     .from("campaigns")
     .select("id, name, status, counts, created_at, templates(name)")
+    .eq("source", "app")
     .order("created_at", { ascending: false });
   if (error) throw error;
   const rows = (data ?? []) as unknown as (Pick<CampaignRow, "id" | "name" | "status" | "counts" | "created_at"> & {

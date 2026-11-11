@@ -1,0 +1,1 @@
+{ "name": "personalizeLead", "type": "action", "label": "Personalise a lead", "description": "Reads the lead's company website and writes the [[slots]] in your email, with cited facts. Uses 1 credit; a fallback (no usable facts) is free.", "connection": "firstline" }

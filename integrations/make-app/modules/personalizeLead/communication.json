@@ -1,0 +1,27 @@
+{
+  "url": "/personalize",
+  "method": "POST",
+  "headers": {
+    "Idempotency-Key": "{{parameters.idempotency_key}}"
+  },
+  "body": {
+    "lead": {
+      "email": "{{parameters.email}}",
+      "first_name": "{{parameters.first_name}}",
+      "last_name": "{{parameters.last_name}}",
+      "company": "{{parameters.company}}",
+      "title": "{{parameters.title}}",
+      "website": "{{parameters.website}}"
+    },
+    "copy": { "subject": "{{parameters.subject}}", "body": "{{parameters.body}}" },
+    "campaign_id": "{{parameters.campaign_id}}",
+    "options": { "writer": "{{ifempty(parameters.writer, 'pro')}}" },
+    "wait": "{{ifempty(parameters.wait, 45)}}"
+  },
+  "response": {
+    "output": "{{body}}"
+  },
+  "log": {
+    "sanitize": ["request.headers.authorization"]
+  }
+}

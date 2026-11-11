@@ -32,6 +32,7 @@ async function TemplateList() {
   const { data, error } = await supabase
     .from("templates")
     .select("id, name, subject, slots, updated_at")
+    .eq("source", "app")
     .order("updated_at", { ascending: false });
   if (error) throw error;
   const rows = (data ?? []) as Pick<TemplateRow, "id" | "name" | "subject" | "slots" | "updated_at">[];

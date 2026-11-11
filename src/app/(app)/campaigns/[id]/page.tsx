@@ -60,7 +60,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
-    supabase.from("templates").select("id, name, subject, body").order("updated_at", { ascending: false }),
+    supabase.from("templates").select("id, name, subject, body").eq("source", "app").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
     supabase.from("leads").select("id, status, status_detail, domain").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),

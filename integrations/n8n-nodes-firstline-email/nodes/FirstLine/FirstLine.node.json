@@ -1,0 +1,10 @@
+{
+	"node": "n8n-nodes-firstline-email.firstLine",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Sales", "Marketing & Content"],
+	"resources": {
+		"credentialDocumentation": [{ "url": "https://github.com/OWNER/n8n-nodes-firstline-email#credentials" }],
+		"primaryDocumentation": [{ "url": "https://github.com/OWNER/n8n-nodes-firstline-email#readme" }]
+	}
+}

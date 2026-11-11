@@ -41,12 +41,12 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
   const { supabase, workspace } = await requireWorkspace();
   const [{ data: bal }, { data: rows }, { data: camps }] = await Promise.all([
     supabase.from("workspace_balance").select("available, reserved, spent").eq("workspace_id", workspace.id).maybeSingle(),
-    supabase.from("credit_ledger").select("id, type, amount, note, campaign_id, lead_id, stripe_event_id, created_at").order("created_at", { ascending: false }).limit(300),
+    supabase.from("credit_ledger").select("id, type, amount, note, campaign_id, lead_id, stripe_event_id, source, created_at").order("created_at", { ascending: false }).limit(300),
     supabase.from("campaigns").select("id, name"),
   ]);
   const b = (bal ?? { available: 0, reserved: 0, spent: 0 }) as { available: number; reserved: number; spent: number };
   const campaigns = new Map((camps ?? []).map((c) => [c.id, c.name as string]));
-  const ledger = (rows ?? []) as { id: number; type: string; amount: number; note: string | null; campaign_id: string | null; lead_id: string | null; stripe_event_id: string | null; created_at: string }[];
+  const ledger = (rows ?? []) as { id: number; type: string; amount: number; note: string | null; campaign_id: string | null; lead_id: string | null; stripe_event_id: string | null; source: string | null; created_at: string }[];
   const justPaid = typeof paid === "string" && paid.length > 0;
   const arrived = justPaid && boughtJustNow(ledger);
 
@@ -58,11 +58,13 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
     const t = TYPE[r.type] ?? { label: r.type, tone: "gray" as const };
     const signed = r.type === "capture" ? -r.amount : r.type === "reserve" ? r.amount : r.amount;
     if (r.lead_id && r.campaign_id) {
-      const key = `${r.campaign_id}:${r.type}`;
+      // API calls are one hidden campaign each: sum them per day instead.
+      const api = r.source === "api";
+      const key = api ? `api:${r.created_at.slice(0, 10)}:${r.type}` : `${r.campaign_id}:${r.type}`;
       const g = grouped.get(key);
       if (g) g.amount += signed;
       else {
-        const row = { key, label: t.label, tone: t.tone, amount: signed, text: campaigns.get(r.campaign_id) ?? "Deleted campaign", at: r.created_at };
+        const row = { key, label: t.label, tone: t.tone, amount: signed, text: api ? "API" : (campaigns.get(r.campaign_id) ?? "Deleted campaign"), at: r.created_at };
         grouped.set(key, row);
         history.push(row);
       }

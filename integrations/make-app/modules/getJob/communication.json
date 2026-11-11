@@ -1,0 +1,7 @@
+{
+  "url": "/jobs/{{encodeURL(parameters.job_id)}}",
+  "method": "GET",
+  "qs": { "wait": "{{ifempty(parameters.wait, 0)}}" },
+  "response": { "output": "{{body}}" },
+  "log": { "sanitize": ["request.headers.authorization"] }
+}

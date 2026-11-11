@@ -6,7 +6,7 @@ import type { CampaignRow, LeadRow } from "@/lib/types";
 
 /** Variables + a sample lead for the editor preview, from the given or latest campaign. */
 export async function previewContext(supabase: SupabaseClient, campaignId: string | null) {
-  let q = supabase.from("campaigns").select("id, name, column_map");
+  let q = supabase.from("campaigns").select("id, name, column_map").eq("source", "app");
   q = campaignId ? q.eq("id", campaignId) : q.order("created_at", { ascending: false });
   const { data: campaign } = await q.limit(1).maybeSingle();
   if (!campaign) return { campaignName: null, variables: null, sample: null };

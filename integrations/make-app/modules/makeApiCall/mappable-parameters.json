@@ -1,0 +1,17 @@
+[
+  { "name": "url", "type": "text", "label": "URL", "required": true, "help": "Path after /api/v1, e.g. /credits or /personalize/batch." },
+  {
+    "name": "method",
+    "type": "select",
+    "label": "Method",
+    "required": true,
+    "default": "GET",
+    "options": [
+      { "label": "GET", "value": "GET" },
+      { "label": "POST", "value": "POST" }
+    ]
+  },
+  { "name": "headers", "type": "array", "label": "Headers", "spec": [{ "name": "key", "type": "text", "label": "Key" }, { "name": "value", "type": "text", "label": "Value" }] },
+  { "name": "qs", "type": "array", "label": "Query string", "spec": [{ "name": "key", "type": "text", "label": "Key" }, { "name": "value", "type": "text", "label": "Value" }] },
+  { "name": "body", "type": "any", "label": "Body (JSON)" }
+]

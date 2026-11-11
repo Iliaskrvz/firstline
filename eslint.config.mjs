@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Separate packages with their own lint setup (n8n node, Make app).
+    "integrations/**",
   ]),
 ]);
 

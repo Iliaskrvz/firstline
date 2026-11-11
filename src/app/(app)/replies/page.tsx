@@ -34,7 +34,7 @@ async function Replies() {
       .limit(5000),
     supabase.from("suppression").select("email, domain, reason, created_at").order("created_at", { ascending: false }).limit(1000),
     supabase.from("inboxes").select("id, email"),
-    supabase.from("campaigns").select("id, name"),
+    supabase.from("campaigns").select("id, name").eq("source", "app"),
   ]);
   const sends = (sendRows ?? []) as Send[];
   const answered = sends.filter((s) => s.status === "replied" || s.status === "bounced");

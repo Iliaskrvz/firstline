@@ -1,0 +1,20 @@
+[
+  {
+    "name": "apiKey",
+    "type": "password",
+    "label": "API key",
+    "help": "In FirstLine: Settings → API → Create key. It starts with fl_live_.",
+    "required": true,
+    "editable": true
+  },
+  {
+    "name": "baseUrl",
+    "type": "url",
+    "label": "FirstLine address",
+    "help": "The address of your FirstLine app, without /api/v1.",
+    "default": "https://firstline.46-17-99-33.sslip.io",
+    "required": true,
+    "advanced": true,
+    "editable": true
+  }
+]

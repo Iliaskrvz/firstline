@@ -1,0 +1,221 @@
+import { NodeConnectionTypes, type INodeProperties, type INodeType, type INodeTypeDescription } from 'n8n-workflow';
+
+const forLead = { resource: ['lead'], operation: ['personalize'] };
+
+const leadFields: INodeProperties[] = [
+	{
+		displayName: 'Email',
+		name: 'email',
+		type: 'string',
+		placeholder: 'name@company.com',
+		default: '',
+		required: true,
+		displayOptions: { show: forLead },
+		description: 'The email address of the lead',
+		routing: { send: { type: 'body', property: 'lead.email' } },
+	},
+	{
+		displayName: 'Copy Source',
+		name: 'copySource',
+		type: 'options',
+		noDataExpression: true,
+		options: [
+			{ name: 'Write It Here', value: 'copy', description: 'Your email with [[slots]] for FirstLine to write' },
+			{ name: 'FirstLine Campaign', value: 'campaign', description: 'Use the copy of a campaign you made in FirstLine' },
+		],
+		default: 'copy',
+		displayOptions: { show: forLead },
+	},
+	{
+		displayName: 'Subject',
+		name: 'subject',
+		type: 'string',
+		default: '',
+		placeholder: 'Idea for {{company}}',
+		displayOptions: { show: { ...forLead, copySource: ['copy'] } },
+		routing: { send: { type: 'body', property: 'copy.subject' } },
+	},
+	{
+		displayName: 'Email Body',
+		name: 'body',
+		type: 'string',
+		typeOptions: { rows: 8 },
+		default: '',
+		required: true,
+		placeholder: 'Hi {{first_name}},\n\n[[opener · something specific from their website · 25]]\n\nWe help …',
+		description:
+			'Your email. FirstLine writes only the [[slot · instruction · max words]] parts and keeps the rest word for word. {{first_name}}, {{company}} etc. are filled from the lead.',
+		displayOptions: { show: { ...forLead, copySource: ['copy'] } },
+		routing: { send: { type: 'body', property: 'copy.body' } },
+	},
+	{
+		displayName: 'Campaign ID',
+		name: 'campaignId',
+		type: 'string',
+		default: '',
+		required: true,
+		description: 'The ID of a FirstLine campaign (from its address in the app)',
+		displayOptions: { show: { ...forLead, copySource: ['campaign'] } },
+		routing: { send: { type: 'body', property: 'campaign_id' } },
+	},
+	{
+		displayName: 'Wait for Result (Seconds)',
+		name: 'wait',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 60 },
+		default: 45,
+		description: 'Wait up to this long for the result in this step. If it takes longer, use Job → Get with the returned ID.',
+		displayOptions: { show: forLead },
+		routing: { send: { type: 'body', property: 'wait' } },
+	},
+	{
+		displayName: 'Additional Fields',
+		name: 'additionalFields',
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		displayOptions: { show: forLead },
+		options: [
+			{ displayName: 'Company', name: 'company', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.company' } } },
+			{ displayName: 'First Name', name: 'first_name', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.first_name' } } },
+			{
+				displayName: 'Idempotency Key',
+				name: 'idempotencyKey',
+				type: 'string',
+				default: '',
+				description: 'Retrying with the same key returns the same result and never charges twice, e.g. the row ID',
+				routing: { request: { headers: { 'Idempotency-Key': '={{$value}}' } } },
+			},
+			{ displayName: 'Job Title', name: 'title', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.title' } } },
+			{ displayName: 'Last Name', name: 'last_name', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.last_name' } } },
+			{ displayName: 'LinkedIn Headline', name: 'linkedin_headline', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.linkedin_headline' } } },
+			{
+				displayName: 'Website',
+				name: 'website',
+				type: 'string',
+				default: '',
+				description: 'Company website. Without it, the domain of the email address is used.',
+				routing: { send: { type: 'body', property: 'lead.website' } },
+			},
+			{
+				displayName: 'Writer',
+				name: 'writer',
+				type: 'options',
+				options: [
+					{ name: 'Pro', value: 'pro' },
+					{ name: 'Lite', value: 'lite' },
+				],
+				default: 'pro',
+				routing: { send: { type: 'body', property: 'options.writer' } },
+			},
+		],
+	},
+];
+
+const jobFields: INodeProperties[] = [
+	{
+		displayName: 'Job ID',
+		name: 'jobId',
+		type: 'string',
+		default: '',
+		required: true,
+		displayOptions: { show: { resource: ['job'], operation: ['get'] } },
+	},
+	{
+		displayName: 'Wait for Result (Seconds)',
+		name: 'jobWait',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 60 },
+		default: 0,
+		displayOptions: { show: { resource: ['job'], operation: ['get'] } },
+		routing: { send: { type: 'query', property: 'wait' } },
+	},
+];
+
+export class FirstLine implements INodeType {
+	description: INodeTypeDescription = {
+		displayName: 'FirstLine',
+		name: 'firstLine',
+		icon: { light: 'file:firstline.svg', dark: 'file:firstline.dark.svg' },
+		group: ['transform'],
+		version: 1,
+		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
+		description: 'Personalise cold emails with researched, cited first lines',
+		defaults: { name: 'FirstLine' },
+		usableAsTool: true,
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main],
+		credentials: [{ name: 'firstLineApi', required: true }],
+		requestDefaults: {
+			baseURL: '={{$credentials.baseUrl.replace(/\\/+$/, "")}}/api/v1',
+			headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+		},
+		properties: [
+			{
+				displayName: 'Resource',
+				name: 'resource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{ name: 'Credit', value: 'credit' },
+					{ name: 'Job', value: 'job' },
+					{ name: 'Lead', value: 'lead' },
+				],
+				default: 'lead',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['lead'] } },
+				options: [
+					{
+						name: 'Personalise',
+						value: 'personalize',
+						action: 'Personalise a lead',
+						description: 'Research the lead’s company website and write the slots in your email',
+						routing: { request: { method: 'POST', url: '/personalize' } },
+					},
+				],
+				default: 'personalize',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['job'] } },
+				options: [
+					{
+						name: 'Get',
+						value: 'get',
+						action: 'Get a job',
+						description: 'Get a job and its results',
+						routing: { request: { method: 'GET', url: '=/jobs/{{$parameter.jobId}}' } },
+					},
+				],
+				default: 'get',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: { show: { resource: ['credit'] } },
+				options: [
+					{
+						name: 'Get Balance',
+						value: 'get',
+						action: 'Get the credit balance',
+						description: 'Get available and reserved credits',
+						routing: { request: { method: 'GET', url: '/credits' } },
+					},
+				],
+				default: 'get',
+			},
+			...leadFields,
+			...jobFields,
+		],
+	};
+}

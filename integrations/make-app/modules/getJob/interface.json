@@ -1,0 +1,22 @@
+[
+  { "name": "id", "type": "text", "label": "Job ID" },
+  { "name": "status", "type": "text", "label": "Job status (running or done)" },
+  { "name": "credits_used", "type": "uinteger", "label": "Credits used" },
+  { "name": "lead_count", "type": "uinteger", "label": "Leads" },
+  { "name": "created_at", "type": "date", "label": "Created at" },
+  { "name": "finished_at", "type": "date", "label": "Finished at" },
+  { "name": "result", "type": "collection", "label": "Result", "spec": [
+    { "name": "email", "type": "email", "label": "Email" },
+    { "name": "status", "type": "text", "label": "Status (personalised, fallback, failed, skipped, queued, processing)" },
+    { "name": "subject", "type": "text", "label": "Subject" },
+    { "name": "email_body", "type": "text", "label": "Personalised email" },
+    { "name": "slots", "type": "any", "label": "Written slots" },
+    { "name": "sources", "type": "array", "label": "Sources", "spec": { "type": "collection", "spec": [
+      { "name": "fact", "type": "text", "label": "Fact" },
+      { "name": "url", "type": "url", "label": "URL" }
+    ] } },
+    { "name": "confidence", "type": "text", "label": "Confidence" },
+    { "name": "credits_used", "type": "uinteger", "label": "Credits used" },
+    { "name": "detail", "type": "text", "label": "Detail" }
+  ] }
+]

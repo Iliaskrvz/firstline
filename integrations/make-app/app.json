@@ -1,0 +1,8 @@
+{
+  "name": "firstline-email",
+  "label": "FirstLine",
+  "description": "Personalise cold emails with researched, cited first lines from each lead's company website.",
+  "theme": "#4f46e5",
+  "language": "en",
+  "audience": "global"
+}

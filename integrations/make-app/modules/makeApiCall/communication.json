@@ -1,0 +1,11 @@
+{
+  "url": "{{parameters.url}}",
+  "method": "{{parameters.method}}",
+  "headers": "{{toCollection(parameters.headers, 'key', 'value')}}",
+  "qs": "{{toCollection(parameters.qs, 'key', 'value')}}",
+  "body": "{{parameters.body}}",
+  "response": {
+    "output": { "headers": "{{headers}}", "body": "{{body}}", "statusCode": "{{statusCode}}" }
+  },
+  "log": { "sanitize": ["request.headers.authorization"] }
+}

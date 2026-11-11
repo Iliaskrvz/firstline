@@ -1,0 +1,20 @@
+{
+  "url": "{{parameters.baseUrl}}/api/v1/credits",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer {{parameters.apiKey}}"
+  },
+  "response": {
+    "valid": "{{statusCode = 200}}",
+    "error": {
+      "message": "[{{statusCode}}] {{ifempty(body.error.message, 'Could not connect to FirstLine')}}"
+    },
+    "metadata": {
+      "type": "text",
+      "value": "{{body.available}} credits available"
+    }
+  },
+  "log": {
+    "sanitize": ["request.headers.authorization"]
+  }
+}

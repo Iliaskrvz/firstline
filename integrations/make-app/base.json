@@ -1,0 +1,15 @@
+{
+  "baseUrl": "{{connection.baseUrl}}/api/v1",
+  "headers": {
+    "Authorization": "Bearer {{connection.apiKey}}"
+  },
+  "response": {
+    "error": {
+      "message": "[{{statusCode}}] {{ifempty(body.error.message, body)}}",
+      "type": "{{if(statusCode = 429, 'RateLimitError', if(statusCode = 401, 'ConnectionError', if(statusCode >= 500, 'ConnectionError', 'DataError')))}}"
+    }
+  },
+  "log": {
+    "sanitize": ["request.headers.authorization"]
+  }
+}

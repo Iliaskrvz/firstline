@@ -1,0 +1,4 @@
+[
+  { "name": "available", "type": "integer", "label": "Available credits" },
+  { "name": "reserved", "type": "integer", "label": "Reserved credits" }
+]

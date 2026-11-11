@@ -1,0 +1,1 @@
+{ "name": "getJob", "type": "action", "label": "Get a job", "description": "Gets a job and its result by ID, e.g. when Personalise a lead returned status running.", "connection": "firstline" }

@@ -24,6 +24,8 @@ import { dbConnection, LEAD_QUEUE, leadJobId, PUSH_QUEUE, type LeadJobData, type
 import { createTool } from "@/integrations/registry";
 import { pollIntegrations, pushesToResume, runPush, type PushDeps } from "@/integrations/push-pg";
 import { encryptionKey } from "@/lib/secret-box";
+import { apiHousekeeping, completeFinishedJobs, completeJobsFor } from "@/api/core-pg";
+import { deliverDue } from "@/api/webhooks-pg";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 
 const VERSION = process.env.npm_package_version ?? "dev";
@@ -182,9 +184,29 @@ async function main() {
     await runOnePush(job.data.pushId);
   });
 
+  // Public API: finish jobs the hook missed, deliver signed webhooks, clean up.
+  let apiBusy = false;
+  const apiTick = async () => {
+    if (apiBusy) return;
+    apiBusy = true;
+    try {
+      await completeFinishedJobs(pool);
+      if (pushDeps) {
+        const d = await deliverDue(pool, pushDeps.key, (url, init) => fetch(url, { ...init, redirect: "manual" }));
+        if (d.delivered || d.failed || d.retried) log(`webhooks: ${d.delivered} delivered, ${d.retried} to retry, ${d.failed} failed`);
+      }
+    } catch (e) {
+      log("api tick failed:", (e as Error).message);
+    } finally {
+      apiBusy = false;
+    }
+  };
+  const apiTimer = setInterval(apiTick, 15_000);
+
   // Data retention (§11): end idle campaigns and delete lead data 30 days after a campaign ended.
   const retention = async () => {
     try {
+      await apiHousekeeping(pool);
       const r = await runRetention(pool);
       if (r.ended || r.purged) log(`retention: ${r.ended} campaign(s) ended, ${r.purged} purged (${r.leadsDeleted} leads deleted)`);
     } catch (e) {
@@ -208,6 +230,8 @@ async function main() {
       try {
         const res = await processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force });
         stats.jobsDone++;
+        // Public API: the last lead of a job finishes the job and queues its webhook.
+        if (!preview) await completeJobsFor(pool, leadId).catch((e) => log("api job completion failed:", (e as Error).message));
         log(`lead ${leadId}: ${res.outcome}${res.detail ? ` (${res.detail})` : ""} · $${res.costUsd.toFixed(5)} · ${Date.now() - t0}ms`);
         return res;
       } catch (e) {
@@ -217,6 +241,7 @@ async function main() {
         if (finalAttempt) {
           stats.jobsFailed++;
           await store.setLeadStatus(leadId, "failed", { detail: `Error after retries: ${msg.slice(0, 200)}`, confidence: null }).catch(() => {});
+          await completeJobsFor(pool, leadId).catch(() => {});
         }
         throw e; // pg-boss retries with backoff
       }
@@ -263,6 +288,7 @@ async function main() {
     clearInterval(labTimer);
     clearInterval(retentionTimer);
     clearInterval(pushTimer);
+    clearInterval(apiTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

@@ -1,0 +1,50 @@
+[
+  { "name": "email", "type": "email", "label": "Email", "required": true },
+  { "name": "first_name", "type": "text", "label": "First name" },
+  { "name": "last_name", "type": "text", "label": "Last name" },
+  { "name": "company", "type": "text", "label": "Company" },
+  { "name": "title", "type": "text", "label": "Job title" },
+  { "name": "website", "type": "text", "label": "Company website", "help": "Without it, the domain of the email address is used." },
+  {
+    "name": "source",
+    "type": "select",
+    "label": "Copy",
+    "required": true,
+    "default": "copy",
+    "options": [
+      {
+        "label": "Write it here",
+        "value": "copy",
+        "nested": [
+          { "name": "subject", "type": "text", "label": "Subject", "help": "May use {{company}}, {{first_name}} etc." },
+          {
+            "name": "body",
+            "type": "text",
+            "multiline": true,
+            "label": "Email body",
+            "required": true,
+            "help": "Your email. FirstLine writes only the [[slot · instruction · max words]] parts, e.g. [[opener · something specific from their website · 25]]."
+          }
+        ]
+      },
+      {
+        "label": "A FirstLine campaign",
+        "value": "campaign",
+        "nested": [{ "name": "campaign_id", "type": "text", "label": "Campaign ID", "required": true, "help": "From the campaign's address in FirstLine." }]
+      }
+    ]
+  },
+  {
+    "name": "writer",
+    "type": "select",
+    "label": "Writer",
+    "default": "pro",
+    "advanced": true,
+    "options": [
+      { "label": "Pro", "value": "pro" },
+      { "label": "Lite", "value": "lite" }
+    ]
+  },
+  { "name": "wait", "type": "uinteger", "label": "Wait for the result (seconds)", "default": 45, "validate": { "max": 60 }, "help": "If it takes longer, use Get a job with the returned Job ID." },
+  { "name": "idempotency_key", "type": "text", "label": "Idempotency key", "advanced": true, "help": "Something unique per lead, e.g. the row number. A retried run then returns the same result and is never charged twice." }
+]

@@ -1,0 +1,123 @@
+{
+  "name": "FirstLine: personalise a lead",
+  "active": false,
+  "settings": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Credits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Credits": {
+      "main": [
+        [
+          {
+            "node": "Personalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalise": {
+      "main": [
+        [
+          {
+            "node": "Get job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "id": "n0",
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "n1",
+      "name": "Credits",
+      "type": "n8n-nodes-firstline-email.firstLine",
+      "typeVersion": 1,
+      "position": [
+        200,
+        0
+      ],
+      "parameters": {
+        "resource": "credit",
+        "operation": "get"
+      },
+      "credentials": {
+        "firstLineApi": {
+          "name": "FirstLine API"
+        }
+      }
+    },
+    {
+      "id": "n2",
+      "name": "Personalise",
+      "type": "n8n-nodes-firstline-email.firstLine",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
+      ],
+      "parameters": {
+        "resource": "lead",
+        "operation": "personalize",
+        "email": "sanne@bakkerijvos.nl",
+        "copySource": "copy",
+        "subject": "Idea for {{company}}",
+        "body": "Hi {{first_name}},\n\n[[opener · something specific from their website · 25]]\n\nWe help bakeries cut waste. Worth a call?",
+        "wait": 30,
+        "additionalFields": {
+          "first_name": "Sanne",
+          "company": "Bakkerij Vos",
+          "website": "bakkerijvos.nl",
+          "idempotencyKey": "={{ $execution.id }}"
+        }
+      },
+      "credentials": {
+        "firstLineApi": {
+          "name": "FirstLine API"
+        }
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Get job",
+      "type": "n8n-nodes-firstline-email.firstLine",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "parameters": {
+        "resource": "job",
+        "operation": "get",
+        "jobId": "={{ $json.id }}",
+        "jobWait": 0
+      },
+      "credentials": {
+        "firstLineApi": {
+          "name": "FirstLine API"
+        }
+      }
+    }
+  ]
+}

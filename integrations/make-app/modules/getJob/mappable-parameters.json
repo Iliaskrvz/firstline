@@ -1,0 +1,4 @@
+[
+  { "name": "job_id", "type": "text", "label": "Job ID", "required": true },
+  { "name": "wait", "type": "uinteger", "label": "Wait for the result (seconds)", "default": 0, "validate": { "max": 60 } }
+]

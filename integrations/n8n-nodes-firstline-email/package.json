@@ -1,0 +1,53 @@
+{
+	"name": "n8n-nodes-firstline-email",
+	"version": "0.1.0",
+	"description": "n8n node for FirstLine: personalise cold emails with researched, cited first lines from each company's website.",
+	"license": "MIT",
+	"homepage": "https://github.com/OWNER/n8n-nodes-firstline-email#readme",
+	"keywords": [
+		"n8n-community-node-package",
+		"cold email",
+		"personalization",
+		"outreach"
+	],
+	"author": {
+		"name": "FirstLine",
+		"email": "OWNER_EMAIL"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/OWNER/n8n-nodes-firstline-email.git"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease"
+	},
+	"files": [
+		"dist"
+	],
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/FirstLineApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/FirstLine/FirstLine.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "0.56.2",
+		"eslint": "9.39.4",
+		"prettier": "3.8.3",
+		"release-it": "20.2.0",
+		"typescript": "5.9.3"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}
