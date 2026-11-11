@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { publicUrl } from "@/lib/public-origin";
 import { supabaseEnv } from "./env";
 
-const PROTECTED = ["/campaigns", "/templates", "/inboxes", "/replies", "/credits"];
+const PROTECTED = ["/campaigns", "/templates", "/inboxes", "/replies", "/credits", "/admin"];
 
 /** Refreshes the auth session on every request and guards app routes. */
 export async function updateSession(request: NextRequest) {

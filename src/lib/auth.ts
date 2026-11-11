@@ -1,5 +1,6 @@
 import "server-only";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { isAdmin } from "@/lib/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export type CurrentUser = { id: string; email: string | null };
@@ -29,4 +30,11 @@ export async function requireWorkspace() {
   const ws = data?.workspaces as unknown as Workspace | null;
   if (!ws) throw new Error("No workspace found for this account.");
   return { supabase, user, workspace: ws };
+}
+
+/** /admin is for ADMIN_EMAILS only; anyone else gets a plain 404. */
+export async function requireAdmin() {
+  const { supabase, user } = await requireUser();
+  if (!isAdmin(user.email)) notFound();
+  return { supabase, user };
 }

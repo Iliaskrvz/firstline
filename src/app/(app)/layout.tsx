@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { Logo } from "@/components/ui";
 import { NavLinks, NavLinksFallback } from "@/components/nav-links";
+import { isAdmin } from "@/lib/admin";
 import { requireWorkspace } from "@/lib/auth";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
@@ -35,6 +36,11 @@ async function UserMenu() {
         <div className="font-medium leading-tight text-slate-800">{workspace.name}</div>
         <div className="text-xs leading-tight text-slate-500">{user.email}</div>
       </div>
+      {isAdmin(user.email) && (
+        <Link href="/admin" className="rounded-lg px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900">
+          Admin
+        </Link>
+      )}
       <form action="/auth/signout" method="post">
         <button className="rounded-lg px-2.5 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900">Sign out</button>
       </form>

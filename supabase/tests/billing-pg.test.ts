@@ -182,3 +182,23 @@ describe("Kelviq", () => {
     expect((await handleKelviqEvent(pool, { ...completed(), type: "order.created" }, plans)).handled).toBe(false);
   });
 });
+
+describe("admin margin view", () => {
+  it("adds up credits, real costs and margin per campaign and per day, across workspaces", async () => {
+    const { loadAdmin } = await import("@/billing/admin-db");
+    await pool.query("insert into public.usage_costs (workspace_id, step, model, cost_usd, campaign_id) values ($1, 'write', 'claude-sonnet-5-5', 0.05, $2)", [ws, campaign]);
+    const a = await loadAdmin(pool);
+    const c = a.campaigns.find((x) => x.id === campaign)!;
+    expect(c.creditsUsed).toBe(1); // one written lead in the credit tests above
+    expect(c.emails).toBe(1);
+    expect(c.costUsd).toBeCloseTo(0.05);
+    expect(c.m.costEur).toBeCloseTo(0.05 * 0.92);
+    // Purchases in these tests: Starter (Kelviq checkout) and Agency (plan fallback) → weighted price per credit.
+    expect(a.perCreditEur).toBeGreaterThan(0.029);
+    expect(a.perCreditEur).toBeLessThan(0.039);
+    expect(a.days).toHaveLength(30);
+    expect(a.days[0].creditsUsed).toBeGreaterThanOrEqual(1);
+    expect(a.workspaces.find((w) => w.id === ws)).toMatchObject({ senderDisabled: false, personalShare: 0 });
+    expect(a.drift.level).toBe("ok"); // fewer than 20 emails: no alert
+  });
+});
