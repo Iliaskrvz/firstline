@@ -264,6 +264,7 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
       );
       if (r.rowCount) {
         out.sent = 1;
+        await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', 'sent', $3)", [[r.rows[0].lead_id], r.rows[0].step_no, now]);
         await c.query("update public.inboxes set next_send_at = $2 where id = $1", [inbox.id, new Date(now.getTime() + nextGapMs(opts.random))]);
         // The next step becomes due its delay in working days from now (inbox timezone).
         const { rows: next } = await c.query(
@@ -292,13 +293,17 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
                 replied_at = case when $3 = 'replied' then $5::timestamptz end,
                 bounced_at = case when $3 = 'bounced' then $5::timestamptz end
           where id = $1 and inbox_id = $2 and status = 'sent'
-          returning lead_id, workspace_id, lower(to_email) to_email`,
+          returning lead_id, workspace_id, step_no, lower(to_email) to_email`,
         [ev.send_id, inbox.id, status, detail, now],
       );
       const hit = rows[0];
       if (!hit) continue; // unknown or already handled: reports are idempotent
       if (status === "bounced") out.bounced++;
       else out.replied++;
+      await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', $3, $4)", [[hit.lead_id], hit.step_no, status, now]);
+      if (status === "replied" && ev.unsubscribe) {
+        await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', 'unsubscribed', $3)", [[hit.lead_id], hit.step_no, now]);
+      }
 
       // Stop rules: never email this person again; later steps for this lead stop.
       await c.query(

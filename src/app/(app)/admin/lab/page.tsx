@@ -6,6 +6,7 @@ import { summarise, type EvalSummary, type LeadResult } from "@/engine/lab";
 import { LIVE_SKILL_VERSION, SKILLS } from "@/engine/skills";
 import { requireAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
+import { MIN_SENT_FOR_RATE, replyRates, type OutcomeCount } from "@/lib/outcomes";
 import { serverPool } from "@/server/db";
 import { AutoRefresh } from "../../campaigns/[id]/preview/auto-refresh";
 import { NewTestSet, RunForm } from "./lab-forms";
@@ -55,10 +56,12 @@ const VERDICT: Record<EvalSummary["verdict"], "green" | "red" | "gray"> = { ship
 async function Lab() {
   await requireAdmin();
   const pool = serverPool();
-  const [{ rows: sets }, { rows: runs }] = await Promise.all([
+  const [{ rows: sets }, { rows: runs }, { rows: outcomeCounts }] = await Promise.all([
     pool.query("select id, name, jsonb_array_length(leads)::int n from public.test_sets order by created_at"),
     pool.query("select * from public.eval_runs order by created_at desc limit 20"),
+    pool.query<OutcomeCount>("select skill_version, channel, personalised, status, count(*)::int n from public.outcomes group by 1, 2, 3, 4"),
   ]);
+  const rates = replyRates(outcomeCounts);
   const versions = Object.keys(SKILLS);
   const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running");
   return (
@@ -74,6 +77,51 @@ async function Lab() {
         <p className="text-xs text-slate-500">
           Versions live in code (src/engine/skills.ts). Live now: {LIVE_SKILL_VERSION}. To ship a winner, set LIVE_SKILL_VERSION to it and deploy. Research comes from the
           30-day domain cache; Claude costs about $0.01–0.02 per company per run.
+        </p>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="text-base font-semibold text-slate-900">Reply rate per version</h2>
+        {rates.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-slate-500">
+                <tr>
+                  <th className="py-1 pr-4 font-medium">Version</th>
+                  <th className="py-1 pr-4 font-medium">Channel</th>
+                  <th className="py-1 pr-4 font-medium">Exported / pushed</th>
+                  <th className="py-1 pr-4 font-medium">Sent</th>
+                  <th className="py-1 pr-4 font-medium">Replied</th>
+                  <th className="py-1 pr-4 font-medium">Bounced</th>
+                  <th className="py-1 pr-4 font-medium">Unsubscribed</th>
+                  <th className="py-1 font-medium">Reply rate</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-700">
+                {rates.map((r) => (
+                  <tr key={`${r.skillVersion}-${r.channel}`} className="border-t border-slate-100">
+                    <td className="py-1 pr-4">{r.skillVersion}</td>
+                    <td className="py-1 pr-4">{r.channel}</td>
+                    <td className="py-1 pr-4">{r.handedOver}</td>
+                    <td className="py-1 pr-4">{r.sent}</td>
+                    <td className="py-1 pr-4">{r.replied}</td>
+                    <td className="py-1 pr-4">{r.bounced}</td>
+                    <td className="py-1 pr-4">{r.unsubscribed}</td>
+                    <td className="py-1">
+                      {r.replyRate == null ? "–" : `${r.replyRate}%`}
+                      {r.replyRate != null && !r.enough && <span className="ml-1 text-xs text-slate-400">(too early)</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">No emails sent, exported or pushed yet.</p>
+        )}
+        <p className="text-xs text-slate-500">
+          From outcome rows (no personal data; kept after leads are deleted). Replies only, opens are unreliable. Compare versions from {MIN_SENT_FOR_RATE} sent emails
+          each. Exported and pushed emails count as sent once the tool reports it.
         </p>
       </Card>
 

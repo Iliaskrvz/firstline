@@ -90,6 +90,17 @@ npm run tunnel
 Copy the `https://….trycloudflare.com` address into `PUBLIC_APP_URL` in `.env.local`. The address changes every
 time the tunnel restarts; then run FirstLine → Connect… in the sheet again.
 
+## Sending tools (Phase 7)
+
+Push written leads into Instantly (Smartlead and Lemlist follow) with the personalised parts as custom variables.
+
+- Code: `src/integrations/`. One `SendingTool` interface (`types.ts`), the Instantly API v2 adapter, a fake, and `push-pg.ts` (pushes, events, polling). Every adapter must pass `testing/contract.ts`; Instantly is tested against an in-memory API (`testing/instantly-sim.ts`), never the real one.
+- Keys are encrypted with `INTEGRATIONS_ENCRYPTION_KEY` (AES-256-GCM). Create it once with `bash scripts/gen-secret.sh INTEGRATIONS_ENCRYPTION_KEY`; never change it after keys are saved.
+- Flow: Integrations page → paste key → test → saved, webhooks registered. Campaign page → "Push to a sending tool" → pick campaign → variables (defaults match the CSV export: `fl_subject`, `fl_<slot>`, `fl_full_email`) → dry run (5) → push all. The worker runs pushes in batches of up to 1,000 with retries, resumes after a crash (2-minute lease) and offers "Retry failed".
+- Webhooks: `/api/integrations/webhook/{id}/{token}`. Instantly doesn't sign webhooks, so the secret token in the URL authenticates. Events are stored once as a hash (no email, no reply text). Bounces and unsubscribes go on the suppression list. Without webhooks (plan or no public https address), the worker polls every 15 minutes.
+- Outcome rows (`outcomes`): one per email that left FirstLine (Gmail, CSV, push), with skill version, writer, slot types and fact tiers, no personal data. The Quality Lab shows reply rate per version from them.
+- No account? Use the key `fake-instantly` (or `fake-instantly-nohooks`) outside production.
+
 ## Running on the VPS
 
 `bash deploy/deploy.sh` (from this Mac) sets up the server and deploys: Node 22, pm2 and Caddy (automatic HTTPS) on
@@ -114,6 +125,9 @@ on crash and after a reboot). It copies the code with rsync and `.env.local` ove
 | `npm run tunnel` | Public https address for the dev server (Cloudflare quick tunnel), for the Sender Sheet |
 | `npm run engine:try -- <csv>` | Engine on a CSV without the database (max 5 leads) |
 | `npx supabase db push --remote` | Apply `supabase/migrations` to the linked project |
+
+- `scripts/gen-secret.sh NAME`: create a random secret in .env.local without showing it (never overwrites).
+- `scripts/secret-scan.sh`: scan staged changes and unpushed commits for secrets. Run it on its own before pushing.
 
 ## Layout
 

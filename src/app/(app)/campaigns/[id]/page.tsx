@@ -22,6 +22,7 @@ import { RunPanel } from "./run-panel";
 import { SendPanel } from "./send-panel";
 import { EndCampaign } from "./end-campaign";
 import { SequenceEditor } from "./sequence-editor";
+import { PushSection } from "./push-section";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -42,7 +43,7 @@ export default function CampaignPage(props: PageProps<"/campaigns/[id]">) {
 async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">["params"] }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
 
   const [
     { data: campaign },
@@ -243,6 +244,17 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-indigo-700 hover:underline">
               Export CSV for a sending tool (fl_ columns) ↓
             </a>
+          )}
+          {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
+            <div className="border-t border-slate-100 pt-5">
+              <PushSection
+                campaignId={c.id}
+                workspaceId={workspace.id}
+                slotKeys={parsed?.slots.map((s) => s.key) ?? []}
+                followUpSteps={steps.filter((s) => s.kind === "personalised").map((s) => s.step_no)}
+                written={(byStatus.done ?? 0) + (byStatus.fallback ?? 0)}
+              />
+            </div>
           )}
           <div className="border-t border-slate-100 pt-5">
             <SendPanel

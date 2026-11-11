@@ -20,7 +20,10 @@ import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { runRetention } from "@/billing/retention";
 import { collectFinished, submitPending } from "@/engine/economy-pg";
-import { dbConnection, LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
+import { dbConnection, LEAD_QUEUE, leadJobId, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
+import { createTool } from "@/integrations/registry";
+import { pollIntegrations, pushesToResume, runPush, type PushDeps } from "@/integrations/push-pg";
+import { encryptionKey } from "@/lib/secret-box";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 
 const VERSION = process.env.npm_package_version ?? "dev";
@@ -65,6 +68,10 @@ async function main() {
       retryBackoff: true,
       expireInSeconds: 600,
     });
+  }
+
+  if (!(await boss.getQueue(PUSH_QUEUE))) {
+    await boss.createQueue(PUSH_QUEUE, { retryLimit: 3, retryDelay: 30, retryBackoff: true, expireInSeconds: 3600 });
   }
 
   const heartbeat = async () => {
@@ -141,6 +148,38 @@ async function main() {
     }
   };
   const labTimer = setInterval(labTick, 60_000);
+
+  // Pushes to sending tools (§8 Lane B): jobs from the app, plus resuming pushes a crashed worker left behind,
+  // plus status polling for tools whose plan has no webhooks.
+  let pushDeps: PushDeps | null = null;
+  try {
+    pushDeps = { key: encryptionKey(), toolFor: (provider, apiKey) => createTool(provider, apiKey), log };
+  } catch {
+    log("INTEGRATIONS_ENCRYPTION_KEY not set: pushes to sending tools are off.");
+  }
+  const runOnePush = async (pushId: string) => {
+    if (!pushDeps) return;
+    const r = await runPush(pool, pushId, pushDeps);
+    if (r) log(`push ${pushId}: ${r.status} · ${r.added} added, ${r.skipped} skipped, ${r.failed} failed${r.error ? ` (${r.error})` : ""}`);
+  };
+  let pushBusy = false;
+  const pushTick = async () => {
+    if (pushBusy || !pushDeps) return;
+    pushBusy = true;
+    try {
+      for (const id of await pushesToResume(pool)) await runOnePush(id);
+      const p = await pollIntegrations(pool, pushDeps);
+      if (p.applied) log(`integrations: ${p.applied} status update(s) from polling`);
+    } catch (e) {
+      log("push tick failed:", (e as Error).message);
+    } finally {
+      pushBusy = false;
+    }
+  };
+  const pushTimer = setInterval(pushTick, 60_000);
+  await boss.work<PushJobData>(PUSH_QUEUE, { localConcurrency: 2, pollingIntervalSeconds: 2 }, async ([job]) => {
+    await runOnePush(job.data.pushId);
+  });
 
   // Data retention (§11): end idle campaigns and delete lead data 30 days after a campaign ended.
   const retention = async () => {
@@ -222,6 +261,7 @@ async function main() {
     clearInterval(economyTimer);
     clearInterval(labTimer);
     clearInterval(retentionTimer);
+    clearInterval(pushTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

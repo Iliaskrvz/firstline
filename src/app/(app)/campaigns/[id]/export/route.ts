@@ -34,6 +34,10 @@ export async function GET(_request: NextRequest, ctx: RouteContext<"/campaigns/[
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
   const slotKeys = tpl ? parseTemplate(tpl).slots.map((s) => s.key) : [];
 
+  // Outcome rows for the reply-rate loop (no personal data): these emails left FirstLine as CSV.
+  const written = leads.filter((l) => l.status === "done" || l.status === "fallback").map((l) => l.id);
+  if (written.length) await pool.query("select public.record_outcomes($1::uuid[], 1, 'csv', 'exported')", [written]).catch(() => {});
+
   const { headers, rows } = buildExport(leads, generations, { slotKeys, followUpSteps: steps.map((s) => s.step_no) });
   // BOM so Excel opens accents (é, ë, ß) correctly.
   const csv = "﻿" + Papa.unparse({ fields: headers, data: rows });

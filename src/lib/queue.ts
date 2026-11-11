@@ -32,3 +32,7 @@ export function dbConnection(url: string, env: Record<string, string | undefined
   const ssl = local ? false : caPath ? { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true } : { rejectUnauthorized: false };
   return { connectionString: u.toString(), ssl };
 }
+
+/** Pushes to sending tools (§8 Lane B): one job per push; the worker also resumes stuck pushes on its own. */
+export const PUSH_QUEUE = "push-run";
+export type PushJobData = { pushId: string };
