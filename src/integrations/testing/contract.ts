@@ -37,17 +37,20 @@ export function describeSendingTool(name: string, setup: () => ContractSetup) {
       expect(cs[0]).toEqual({ id: expect.any(String), name: expect.any(String), status: expect.any(String) });
     });
 
-    it("adds leads with variables, skips them the second time, and a replayed call changes nothing", async () => {
+    it("adds leads with variables, skips them the second time, and a replayed call never adds twice", async () => {
       const { tool } = setup();
       const [c] = await tool.listCampaigns();
       await tool.ensureVariables(c.id, ["fl_opener", "fl_full_email"]);
       const first = await tool.pushLeads(c.id, [lead(1), lead(2)], { idempotencyKey: "k1" });
       expect(first.map((r) => [r.ref, r.status])).toEqual([["ref-1", "added"], ["ref-2", "added"]]);
+      // A replayed call (same key) either returns the same answer (tools with idempotency keys) or
+      // reports the leads as duplicates, so the push can count them as added once.
       const replay = await tool.pushLeads(c.id, [lead(1), lead(2)], { idempotencyKey: "k1" });
-      expect(replay).toEqual(first);
+      for (const r of replay) expect(r.status === "added" || (r.status === "skipped" && r.duplicate === true)).toBe(true);
       const again = await tool.pushLeads(c.id, [lead(1), lead(3)], { idempotencyKey: "k2" });
       expect(again.find((r) => r.ref === "ref-1")?.status).toBe("skipped");
-      expect(again.find((r) => r.ref === "ref-1")?.reason).toMatch(/already in this campaign/);
+      expect(again.find((r) => r.ref === "ref-1")?.reason).toMatch(/already (in|exists in) (this )?campaign/i);
+      expect(again.find((r) => r.ref === "ref-1")?.duplicate).toBe(true);
       expect(again.find((r) => r.ref === "ref-3")?.status).toBe("added");
       expect(tool.batchSize).toBeGreaterThan(0);
     });
@@ -62,9 +65,15 @@ export function describeSendingTool(name: string, setup: () => ContractSetup) {
       expect(tool.handleWebhook("garbage")).toEqual([]);
     });
 
-    it("sets up webhooks", async () => {
-      const r = await setup().tool.setupWebhooks("https://app.example/api/integrations/webhook/id/token");
-      expect(r.ok).toBe(true);
+    it("sets up webhooks for the account or per campaign", async () => {
+      const { tool } = setup();
+      const url = "https://app.example/api/integrations/webhook/id/token";
+      if (tool.webhookMode === "account") expect((await tool.setupWebhooks(url)).ok).toBe(true);
+      else {
+        const [c] = await tool.listCampaigns();
+        const r = await tool.setupCampaignWebhook!(c.id, url);
+        expect(r.ok).toBe(true);
+      }
     });
   });
 }

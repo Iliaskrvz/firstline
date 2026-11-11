@@ -24,7 +24,7 @@ export async function PushSection({ campaignId, workspaceId, slotKeys, followUpS
       <div className="text-sm font-medium text-slate-700">Push to a sending tool</div>
       {!connected.length ? (
         <p className="text-sm text-slate-600">
-          Use Instantly?{" "}
+          Use Instantly, Smartlead or Lemlist?{" "}
           <Link href="/integrations" className="font-medium text-indigo-700 hover:underline">
             Connect it
           </Link>{" "}

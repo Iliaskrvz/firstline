@@ -12,11 +12,14 @@ export type FakeToolOptions = {
   /** Throw a transient error on the next N pushLeads calls. */
   transientTimes?: number;
   batchSize?: number;
+  webhookMode?: "account" | "campaign";
 };
 
 export class FakeTool implements SendingTool {
   readonly provider: Provider;
   readonly batchSize: number;
+  readonly webhookMode: "account" | "campaign";
+  readonly campaignHooks = new Map<string, string>();
   readonly campaigns: ToolCampaign[] = [
     { id: "fake-camp-1", name: "Fake campaign: Q4 outreach", status: "Draft" },
     { id: "fake-camp-2", name: "Fake campaign: Agencies NL", status: "Active" },
@@ -33,6 +36,13 @@ export class FakeTool implements SendingTool {
   constructor(private readonly opts: FakeToolOptions = {}) {
     this.provider = opts.provider ?? "instantly";
     this.batchSize = opts.batchSize ?? 1000;
+    this.webhookMode = opts.webhookMode ?? "account";
+  }
+
+  async setupCampaignWebhook(campaignId: string, url: string) {
+    if (!(this.opts.webhooks ?? true)) return { ok: false as const, reason: "This fake plan has no webhooks." };
+    this.campaignHooks.set(campaignId, url);
+    return { ok: true as const, ids: [`fake-hook-${campaignId}`] };
   }
 
   async testConnection(): Promise<ConnectionResult> {
@@ -74,7 +84,7 @@ export class FakeTool implements SendingTool {
       if (unknownVar) return { ref: l.ref, status: "failed", reason: `Variable ${unknownVar} not on the campaign` };
       if (email.includes("+fail")) return { ref: l.ref, status: "failed", reason: "Invalid email address" };
       if (email.includes("+skip")) return { ref: l.ref, status: "skipped", reason: "Skipped by the tool: on your blocklist" };
-      if (camp.has(email)) return { ref: l.ref, status: "skipped", reason: "Skipped by the tool: already in this campaign" };
+      if (camp.has(email)) return { ref: l.ref, status: "skipped", reason: "Skipped by the tool: already in this campaign", duplicate: true };
       const id = `fake-lead-${camp.size + 1}`;
       camp.set(email, { ...l, email, id });
       return { ref: l.ref, status: "added", toolLeadId: id };

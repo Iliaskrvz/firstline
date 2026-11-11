@@ -20,15 +20,23 @@ export type IntegrationRow = {
   status: string;
   key_hint: string | null;
   account_name: string | null;
-  capabilities: { webhooks?: boolean; reason?: string };
+  capabilities: { webhooks?: boolean; perCampaign?: boolean; reason?: string };
   tool_webhook_ids: string[];
+  hooked_campaigns: string[];
   last_checked_at: Date | null;
   last_error: string | null;
   last_polled_at: Date | null;
 };
 
 export type ToolFactory = (provider: Provider, apiKey: string) => SendingTool;
-export type PushDeps = { toolFor: ToolFactory; key: Buffer; sleep?: (ms: number) => Promise<void>; log?: (...a: unknown[]) => void };
+export type PushDeps = {
+  toolFor: ToolFactory;
+  key: Buffer;
+  /** The app's public https address, for per-campaign webhooks. */
+  publicUrl?: string | null;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (...a: unknown[]) => void;
+};
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -50,7 +58,7 @@ async function tx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promi
 
 // ---- Integrations ---------------------------------------------------------------------
 
-const INTEGRATION_COLS = "id, workspace_id, provider, status, key_hint, account_name, capabilities, tool_webhook_ids, last_checked_at, last_error, last_polled_at";
+const INTEGRATION_COLS = "id, workspace_id, provider, status, key_hint, account_name, capabilities, tool_webhook_ids, hooked_campaigns, last_checked_at, last_error, last_polled_at";
 
 export async function listIntegrations(pool: pg.Pool, workspaceId: string): Promise<IntegrationRow[]> {
   const { rows } = await pool.query<IntegrationRow>(`select ${INTEGRATION_COLS} from public.integrations where workspace_id = $1 and status <> 'disconnected' order by provider`, [workspaceId]);
@@ -67,7 +75,7 @@ export async function saveIntegration(
     `insert into public.integrations (workspace_id, provider, api_key_encrypted, webhook_secret, key_hint, account_name, status, capabilities, tool_webhook_ids, last_checked_at, last_error, updated_at)
      values ($1, $2, $3, $4, $5, $6, 'connected', '{}', '{}', now(), null, now())
      on conflict (workspace_id, provider) do update set api_key_encrypted = excluded.api_key_encrypted, webhook_secret = excluded.webhook_secret,
-       key_hint = excluded.key_hint, account_name = excluded.account_name, status = 'connected', capabilities = '{}', tool_webhook_ids = '{}',
+       key_hint = excluded.key_hint, account_name = excluded.account_name, status = 'connected', capabilities = '{}', tool_webhook_ids = '{}', hooked_campaigns = '{}',
        last_checked_at = now(), last_error = null, updated_at = now()
      returning id`,
     [i.workspaceId, i.provider, encryptSecret(i.apiKey, key), encryptSecret(i.webhookToken, key), i.keyHint, i.accountName],
@@ -75,7 +83,7 @@ export async function saveIntegration(
   return rows[0].id;
 }
 
-export async function setCapabilities(pool: pg.Pool, integrationId: string, cap: { webhooks: boolean; reason?: string }, webhookIds: string[]) {
+export async function setCapabilities(pool: pg.Pool, integrationId: string, cap: { webhooks: boolean; perCampaign?: boolean; reason?: string }, webhookIds: string[]) {
   await pool.query("update public.integrations set capabilities = $2, tool_webhook_ids = $3, updated_at = now() where id = $1", [integrationId, JSON.stringify(cap), webhookIds]);
 }
 
@@ -93,7 +101,7 @@ export async function integrationSecret(pool: pg.Pool, key: Buffer, integrationI
 
 export async function disconnectIntegration(pool: pg.Pool, workspaceId: string, integrationId: string) {
   await pool.query(
-    `update public.integrations set status = 'disconnected', api_key_encrypted = null, webhook_secret = null, tool_webhook_ids = '{}', updated_at = now()
+    `update public.integrations set status = 'disconnected', api_key_encrypted = null, webhook_secret = null, tool_webhook_ids = '{}', hooked_campaigns = '{}', updated_at = now()
       where id = $1 and workspace_id = $2`,
     [integrationId, workspaceId],
   );
@@ -256,7 +264,7 @@ async function applyResults(pool: pg.Pool, push: PushRow, results: PushOutcome[]
       await c.query("savepoint item");
       try {
         const res = await c.query(
-          `update public.push_items set status = $2, reason = $3, tool_lead_id = $4, attempts = attempts + 1, updated_at = now()
+          `update public.push_items set status = $2, reason = $3, tool_lead_id = $4, updated_at = now()
             where id = $1 and status = 'pending'`,
           [r.ref, r.status, r.reason ?? null, r.toolLeadId ?? null],
         );
@@ -275,7 +283,7 @@ async function applyResults(pool: pg.Pool, push: PushRow, results: PushOutcome[]
 }
 
 async function failItems(pool: pg.Pool, pushId: string, ids: string[], reason: string) {
-  await pool.query("update public.push_items set status = 'failed', reason = $3, attempts = attempts + 1, updated_at = now() where push_id = $1 and id = any($2) and status = 'pending'", [pushId, ids, reason]);
+  await pool.query("update public.push_items set status = 'failed', reason = $3, updated_at = now() where push_id = $1 and id = any($2) and status = 'pending'", [pushId, ids, reason]);
   await refreshCounts(pool, pushId);
 }
 
@@ -333,6 +341,7 @@ export async function runPush(pool: pg.Pool, pushId: string, deps: PushDeps): Pr
   const variables = push.variable_map.filter((m) => m.variable.trim()).map((m) => m.variable.trim());
   try {
     await withRetries(() => tool.ensureVariables(push.tool_campaign_id, variables), deps);
+    await ensureCampaignWebhook(pool, push, tool, secret, deps);
     for (;;) {
       const items = await pendingItems(pool, push.id, tool.batchSize);
       if (!items.length) break;
@@ -352,8 +361,15 @@ export async function runPush(pool: pg.Pool, pushId: string, deps: PushDeps): Pr
         }),
       }));
       const key = sha(`${push.id}:${items.map((i) => i.id).join(",")}`);
+      // Count the attempt before calling the tool: if we crash after the tool took the leads, the next try
+      // knows these leads were sent before.
+      await pool.query("update public.push_items set attempts = attempts + 1 where id = any($1)", [items.map((i) => i.id)]);
+      const triedBefore = new Set(items.filter((i) => i.attempts > 0).map((i) => i.id));
       try {
-        const results = await withRetries(() => tool.pushLeads(push.tool_campaign_id, leads, { idempotencyKey: key }), deps);
+        const raw = await withRetries(() => tool.pushLeads(push.tool_campaign_id, leads, { idempotencyKey: key }), deps);
+        // Tools without an idempotency key (Smartlead, Lemlist) answer a retried lead with "already in this
+        // campaign": if we sent that lead before, it is ours, so it counts as added (once).
+        const results = raw.map((r): PushOutcome => (r.status === "skipped" && r.duplicate && triedBefore.has(r.ref) ? { ref: r.ref, status: "added", toolLeadId: r.toolLeadId } : r));
         // Anything the tool didn't report on counts as failed, so the loop can't spin.
         const seen = new Set(results.map((r) => r.ref));
         const missing = items.filter((i) => !seen.has(i.id)).map((i): PushOutcome => ({ ref: i.id, status: "failed", reason: "No answer from the tool for this lead" }));
@@ -377,6 +393,26 @@ export async function runPush(pool: pg.Pool, pushId: string, deps: PushDeps): Pr
     await finishPush(pool, push.id, msg);
   }
   return loadPush(pool, push.workspace_id, push.id);
+}
+
+/**
+ * Tools with per-campaign webhooks (Smartlead): add ours to this tool campaign once. If that fails, the
+ * campaign is simply polled every 15 minutes (pollIntegrations).
+ */
+async function ensureCampaignWebhook(pool: pg.Pool, push: PushRow, tool: SendingTool, secret: { row: IntegrationRow; webhookToken: string | null }, deps: PushDeps) {
+  if (tool.webhookMode !== "campaign" || !tool.setupCampaignWebhook) return;
+  if (!secret.row.capabilities.webhooks || !deps.publicUrl || !secret.webhookToken) return;
+  if (secret.row.hooked_campaigns.includes(push.tool_campaign_id)) return;
+  const url = `${deps.publicUrl.replace(/\/+$/, "")}/api/integrations/webhook/${push.integration_id}/${secret.webhookToken}`;
+  const r = await tool.setupCampaignWebhook(push.tool_campaign_id, url);
+  if (r.ok) {
+    await pool.query(
+      "update public.integrations set hooked_campaigns = array_append(hooked_campaigns, $2), tool_webhook_ids = tool_webhook_ids || $3::text[], updated_at = now() where id = $1",
+      [push.integration_id, push.tool_campaign_id, r.ids],
+    );
+  } else {
+    await pool.query("update public.integrations set last_error = $2 where id = $1", [push.integration_id, `Webhook for this campaign: ${r.reason} Statuses are checked every 15 minutes instead.`.slice(0, 300)]);
+  }
 }
 
 /** Put the failed leads of a finished push back in the queue. Returns how many. */
@@ -469,11 +505,15 @@ export async function applyToolEvents(pool: pg.Pool, integrationId: string, even
   return out;
 }
 
-/** Plans without webhooks: ask the tool every 15 minutes about campaigns we pushed to in the last 60 days. */
+/**
+ * Every 15 minutes, ask the tool about campaigns we pushed to in the last 60 days that have no webhook of ours:
+ * all of them for plans without webhooks, and per-campaign tools' campaigns where adding the webhook failed.
+ */
 export async function pollIntegrations(pool: pg.Pool, deps: PushDeps, now = new Date()): Promise<{ polled: number; applied: number }> {
   const { rows } = await pool.query<{ id: string }>(
     `select id from public.integrations
-      where status = 'connected' and coalesce((capabilities->>'webhooks')::boolean, true) = false
+      where status = 'connected'
+        and (coalesce((capabilities->>'webhooks')::boolean, true) = false or coalesce((capabilities->>'perCampaign')::boolean, false))
         and (last_polled_at is null or last_polled_at < $1)`,
     [new Date(now.getTime() - POLL_EVERY_MS)],
   );
@@ -482,9 +522,10 @@ export async function pollIntegrations(pool: pg.Pool, deps: PushDeps, now = new 
     const secret = await integrationSecret(pool, deps.key, id);
     if (!secret) continue;
     await pool.query("update public.integrations set last_polled_at = $2 where id = $1", [id, now]);
+    const hooked = secret.row.capabilities.webhooks ? secret.row.hooked_campaigns : [];
     const { rows: camps } = await pool.query<{ tool_campaign_id: string }>(
-      "select distinct tool_campaign_id from public.push_items where integration_id = $1 and status = 'added' and updated_at > $2::timestamptz - interval '60 days'",
-      [id, now],
+      "select distinct tool_campaign_id from public.push_items where integration_id = $1 and status = 'added' and updated_at > $2::timestamptz - interval '60 days' and not (tool_campaign_id = any($3::text[]))",
+      [id, now, hooked],
     );
     const tool = deps.toolFor(secret.row.provider, secret.apiKey);
     for (const c of camps) {

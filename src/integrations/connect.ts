@@ -38,6 +38,17 @@ export async function connectTool(
   const id = await saveIntegration(pool, key, { workspaceId: p.workspaceId, provider: p.provider, apiKey: p.apiKey, keyHint: keyHint(p.apiKey), accountName: test.accountName, webhookToken: token });
   let note: string | null = null;
   let webhooks = false;
+  if (tool.webhookMode === "campaign") {
+    // Webhooks are added to each tool campaign on its first push (see push-pg ensureCampaignWebhook).
+    const can = test.webhooks && !!p.publicUrl;
+    await setCapabilities(pool, id, { webhooks: can, perCampaign: true, reason: can ? undefined : "No public https address or no webhooks: FirstLine checks statuses every 15 minutes instead." }, []);
+    return {
+      ok: true,
+      integrationId: id,
+      webhooks: can,
+      note: can ? "Connected. FirstLine adds its webhook to each campaign the first time you push to it." : "Connected. Without webhooks, FirstLine checks reply and bounce status every 15 minutes.",
+    };
+  }
   if (!test.webhooks) {
     note = `${test.webhooksReason ?? "Webhooks are not available."} FirstLine checks reply and bounce status every 15 minutes instead.`;
   } else if (!p.publicUrl) {

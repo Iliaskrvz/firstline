@@ -22,7 +22,14 @@ export function defaultVariableMap(slotKeys: string[], followUpSteps: number[]):
 
 const VAR_RE = /^[A-Za-z][A-Za-z0-9_]{0,49}$/;
 /** Names the core lead fields use in the tools; a custom variable with that name would clash. */
-const RESERVED = new Set(["email", "first_name", "firstname", "last_name", "lastname", "company_name", "companyname", "website", "phone", "job_title", "personalization"]);
+const RESERVED = new Set([
+  // Instantly
+  "email", "first_name", "last_name", "company_name", "website", "phone", "job_title", "personalization",
+  // Smartlead
+  "phone_number", "location", "linkedin_profile", "company_url",
+  // Lemlist (names are compared lower case)
+  "firstname", "lastname", "companyname", "companydomain", "jobtitle", "linkedinurl", "picture", "icebreaker", "timezone",
+]);
 
 export function validateVariableMap(map: VariableMapping[], allowed: string[]): string | null {
   const used = map.filter((m) => m.variable.trim());
@@ -33,6 +40,8 @@ export function validateVariableMap(map: VariableMapping[], allowed: string[]): 
     const v = m.variable.trim();
     if (!VAR_RE.test(v)) return `"${v}" is not a valid variable name: use letters, digits and _ (start with a letter, max 50).`;
     if (RESERVED.has(v.toLowerCase())) return `"${v}" is a built-in lead field in the tool; pick another name.`;
+    // Lemlist writes any "company…" variable to the shared company record instead of the lead.
+    if (/^company/i.test(v)) return `"${v}": names starting with "company" change the company record in Lemlist; pick another name.`;
     if (seen.has(v.toLowerCase())) return `"${v}" is used twice.`;
     seen.add(v.toLowerCase());
   }

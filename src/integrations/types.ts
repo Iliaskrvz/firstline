@@ -4,7 +4,7 @@
 export const PROVIDERS = ["instantly", "smartlead", "lemlist"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 export const PROVIDER_NAMES: Record<Provider, string> = { instantly: "Instantly", smartlead: "Smartlead", lemlist: "Lemlist" };
-export const LIVE_PROVIDERS: Provider[] = ["instantly"];
+export const LIVE_PROVIDERS: Provider[] = ["instantly", "smartlead", "lemlist"];
 
 export type ToolCampaign = { id: string; name: string; status: string };
 
@@ -20,7 +20,8 @@ export type PushLead = {
   variables: Record<string, string>;
 };
 
-export type PushOutcome = { ref: string; status: "added" | "skipped" | "failed"; reason?: string; toolLeadId?: string };
+/** duplicate: skipped because the lead is already in this tool campaign (maybe from our own earlier, interrupted try). */
+export type PushOutcome = { ref: string; status: "added" | "skipped" | "failed"; reason?: string; toolLeadId?: string; duplicate?: boolean };
 
 export type ToolEventType = "sent" | "replied" | "bounced" | "unsubscribed";
 export type ToolEvent = { type: ToolEventType; toolCampaignId: string; email: string; at: string; step?: number | null };
@@ -49,6 +50,14 @@ export interface SendingTool {
   readonly provider: Provider;
   /** Max leads per pushLeads call. */
   readonly batchSize: number;
+  /**
+   * "account": one set of webhooks for the whole tool account, set up when connecting.
+   * "campaign": a webhook per tool campaign, set up on the first push to it (account-wide hooks would
+   * replace the customer's own, e.g. Smartlead's user-level webhooks).
+   */
+  readonly webhookMode: "account" | "campaign";
+  /** Only for webhookMode "campaign". */
+  setupCampaignWebhook?(campaignId: string, url: string): Promise<{ ok: true; ids: string[] } | { ok: false; reason: string }>;
   testConnection(): Promise<ConnectionResult>;
   listCampaigns(): Promise<ToolCampaign[]>;
   /** Make the variables known on the campaign before leads use them. */

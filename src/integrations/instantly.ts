@@ -28,6 +28,7 @@ const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null
 export class InstantlyTool implements SendingTool {
   readonly provider = "instantly" as const;
   readonly batchSize = 1000;
+  readonly webhookMode = "account" as const;
 
   constructor(
     private readonly apiKey: string,
@@ -177,7 +178,7 @@ export class InstantlyTool implements SendingTool {
       if (created.has(i)) return { ref: l.ref, status: "added", toolLeadId: created.get(i) };
       const e = l.email.toLowerCase();
       if (byEmail.has(e)) return { ref: l.ref, status: "added", toolLeadId: byEmail.get(e) };
-      return { ref: l.ref, status: "skipped", reason: skippedReason };
+      return { ref: l.ref, status: "skipped", reason: skippedReason, ...(reasons.length === 1 && reasons[0][1] === "already in this campaign" ? { duplicate: true } : {}) };
     });
   }
 

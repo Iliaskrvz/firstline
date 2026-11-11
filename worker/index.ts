@@ -153,7 +153,8 @@ async function main() {
   // plus status polling for tools whose plan has no webhooks.
   let pushDeps: PushDeps | null = null;
   try {
-    pushDeps = { key: encryptionKey(), toolFor: (provider, apiKey) => createTool(provider, apiKey), log };
+    const publicUrl = process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") || null;
+    pushDeps = { key: encryptionKey(), toolFor: (provider, apiKey) => createTool(provider, apiKey), publicUrl: publicUrl && /^https:\/\//.test(publicUrl) ? publicUrl : null, log };
   } catch {
     log("INTEGRATIONS_ENCRYPTION_KEY not set: pushes to sending tools are off.");
   }

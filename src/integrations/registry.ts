@@ -2,6 +2,8 @@
 // unless INTEGRATIONS_ALLOW_FAKE=1, so a click-through needs no real account.
 import { FakeTool } from "./fake";
 import { InstantlyTool } from "./instantly";
+import { LemlistTool } from "./lemlist";
+import { SmartleadTool } from "./smartlead";
 import type { FetchLike, Provider, SendingTool } from "./types";
 
 export function fakeKeysAllowed(env: Record<string, string | undefined> = process.env): boolean {
@@ -15,12 +17,14 @@ export function isFakeKey(key: string): boolean {
 export function createTool(provider: Provider, apiKey: string, opts: { fetch?: FetchLike; env?: Record<string, string | undefined> } = {}): SendingTool {
   if (isFakeKey(apiKey)) {
     if (!fakeKeysAllowed(opts.env)) throw new Error("Fake keys are not allowed here.");
-    return new FakeTool({ provider, webhooks: !/no-?hooks/i.test(apiKey) });
+    return new FakeTool({ provider, webhooks: !/no-?hooks/i.test(apiKey), webhookMode: provider === "smartlead" ? "campaign" : "account" });
   }
   switch (provider) {
     case "instantly":
       return new InstantlyTool(apiKey.trim(), opts.fetch);
-    default:
-      throw new Error(`${provider} is not available yet.`);
+    case "smartlead":
+      return new SmartleadTool(apiKey.trim(), opts.fetch);
+    case "lemlist":
+      return new LemlistTool(apiKey.trim(), opts.fetch);
   }
 }

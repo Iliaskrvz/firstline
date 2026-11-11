@@ -25,7 +25,7 @@ export function ConnectForm({ provider, fakeHint }: { provider: Provider; fakeHi
         });
       }}
     >
-      <Field label="API key" hint={fakeHint ? 'Testing without an account? Use the key "fake-instantly".' : undefined}>
+      <Field label="API key" hint={fakeHint ? `Testing without an account? Use the key "fake-${provider}".` : undefined}>
         <input type="password" autoComplete="off" spellCheck={false} className={inputClass} value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your API key" />
       </Field>
       <Button type="submit" disabled={pending || key.trim().length < 8}>

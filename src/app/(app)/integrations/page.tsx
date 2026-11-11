@@ -14,6 +14,8 @@ export const metadata: Metadata = { title: "Integrations" };
 
 const HELP: Record<string, string> = {
   instantly: "Instantly → Settings → Integrations → API Keys → Create API key. Pick API v2 and the all:all scope (or leads, campaigns and webhooks).",
+  smartlead: "Smartlead → Settings → API Keys → copy your API key. FirstLine adds its webhook to each Smartlead campaign the first time you push to it.",
+  lemlist: "Lemlist → Settings → Integrations → API → Generate. For webhooks, the Lemlist user needs the \"Edit integrations\" permission.",
 };
 
 export default function IntegrationsPage() {
