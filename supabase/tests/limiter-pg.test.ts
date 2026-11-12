@@ -127,17 +127,29 @@ describe("limits shared across workers", () => {
   it("fair sharing: a small workspace gets the next free slot, before a big workspace's queue", async () => {
     const g = new PgSlotGate(a, "fair-test", 2, { pollMs: 5 });
     const order: string[] = [];
-    const call = (who: string, ms: number) => async () => {
+    // Each call holds its slot until the test lets it go: no timing guesswork, so a busy machine (the
+    // whole suite runs in parallel) can't make this flaky.
+    const gates = new Map<string, () => void>();
+    let all = false;
+    const call = (who: string) => async () => {
       order.push(who);
-      await wait(ms);
+      if (!all) await new Promise<void>((r) => gates.set(who, r));
     };
-    const big = Array.from({ length: 8 }, (_, i) => jobContext.run({ workspaceId: "big", priority: PRIORITY.run }, () => g.run(call(`big${i}`, 40))));
-    await wait(15); // the big run already holds both slots and has 6 calls waiting
-    const small = Array.from({ length: 2 }, (_, i) => jobContext.run({ workspaceId: "small", priority: PRIORITY.run }, () => g.run(call(`small${i}`, 40))));
+    const until = async (ok: () => boolean | Promise<boolean>) => {
+      while (!(await ok())) await wait(2);
+    };
+    const big = Array.from({ length: 8 }, (_, i) => jobContext.run({ workspaceId: "big", priority: PRIORITY.run }, () => g.run(call(`big${i}`))));
+    await until(() => gates.size === 2); // the big run holds both slots and has 6 calls waiting
+    const small = Array.from({ length: 2 }, (_, i) => jobContext.run({ workspaceId: "small", priority: PRIORITY.run }, () => g.run(call(`small${i}`))));
+    await until(async () => (await a.query("select count(*)::int n from public.provider_waiters where provider = 'fair-test' and workspace_id = 'small'")).rows[0].n === 2);
+    // One big call ends: the freed slot goes to the small workspace, not to the big one's queue.
+    gates.get(order[0])!();
+    await until(() => order.length === 3);
+    expect(order[2]).toMatch(/^small/);
+    all = true;
+    for (const r of gates.values()) r();
     await Promise.all([...big, ...small]);
-    // Both small calls start within the next two freed slots, not after the whole big queue.
-    expect(order.indexOf("small0")).toBeLessThanOrEqual(4);
-    expect(order.indexOf("small1")).toBeLessThanOrEqual(5);
+    expect(order).toHaveLength(10);
   });
 
   it("fair sharing: a free preview goes before a big run's waiting calls, even from the same workspace", async () => {

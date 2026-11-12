@@ -109,6 +109,20 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
 - **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and Anthropic's requests per minute are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
 - **Packs:** `src/config/packs.ts`. Lite credits pay for Lite-writer campaigns only. Load test: `npx tsx scripts/load-test.ts 5000`.
 
+## Sign-in methods
+
+People sign in with an email address and password, a passkey, Google, or a sign-in link by email (`/login`, `/signup`, `/forgot-password`, Settings → Account). Passwords: at least 10 characters (`src/lib/auth-messages.ts`). Sign-up needs a confirmed email address before the 25 welcome credits arrive. The Google and passkey buttons only show when the Supabase project has them switched on (read from `/auth/v1/settings`, `src/lib/auth-options.ts`), so a half-configured project never shows a broken button.
+
+**Live project setup (Supabase dashboard, project FirstLine):** do this by hand. Don't run `supabase config push`: `supabase/config.toml` holds localhost values for local testing.
+
+1. Authentication → URL Configuration: Site URL `https://firstline.46-17-99-33.sslip.io`; add redirect URL `https://firstline.46-17-99-33.sslip.io/auth/callback`.
+2. Authentication → Sign In / Providers → Email: Confirm email ON; minimum password length 10.
+3. Authentication → Passkeys: enable; RP display name `FirstLine`; RP ID `firstline.46-17-99-33.sslip.io`; origin `https://firstline.46-17-99-33.sslip.io`. Changing the RP ID later (brand domain) makes existing passkeys stop working: people must add them again, and sign in with password, Google or link in the meantime.
+4. Google: Google Cloud Console → APIs & Services → Credentials → OAuth client ID (Web application); authorised redirect URI `https://enxycdkxofmfendkvafy.supabase.co/auth/v1/callback`. Then Supabase → Sign In / Providers → Google: paste the client ID and secret, enable. The consent screen shows the app name and domain, so finish it once the brand and domain are decided.
+5. Recommended: Authentication → Emails → SMTP settings with Resend. Supabase's built-in mailer sends only a few emails per hour, too few for sign-ups and password resets.
+
+**Test locally without touching the live project:** `npx supabase start` (local ports 553xx), then `bash scripts/dev-local-auth.sh` (or `… prod` for a production build in `.next-local`). Confirmation and reset emails land in Mailpit at http://127.0.0.1:55324. Passkeys work there with RP ID `localhost`; Google stays off locally.
+
 ## Running on the VPS
 
 `bash deploy/deploy.sh` (from this Mac) sets up the server and deploys: Node 22, pm2 and Caddy (automatic HTTPS) on

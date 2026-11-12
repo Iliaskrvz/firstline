@@ -4,7 +4,23 @@
     {
       "name": "firstline",
       "runtimeExecutable": "env",
-      "runtimeArgs": ["-u", "ANTHROPIC_API_KEY", "-u", "FIRECRAWL_API_KEY", "npm", "run", "dev"],
+      "runtimeArgs": [
+        "-u",
+        "ANTHROPIC_API_KEY",
+        "-u",
+        "FIRECRAWL_API_KEY",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "firstline-local-auth",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "scripts/dev-local-auth.sh"
+      ],
       "port": 3000
     }
   ]

@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Local sign-in tests build into .next-local so they never overwrite the normal build.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Server-only Node packages: keep them out of the bundle.
   serverExternalPackages: ["pg", "pg-boss"],
   partialPrefetching: true,

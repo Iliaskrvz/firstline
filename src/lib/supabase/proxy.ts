@@ -43,7 +43,7 @@ export async function updateSession(request: NextRequest) {
   };
 
   if (!signedIn && PROTECTED.some((p) => path === p || path.startsWith(`${p}/`))) return redirectTo("/login");
-  if (signedIn && (path === "/login" || path === "/")) return redirectTo("/campaigns");
+  if (signedIn && (path === "/login" || path === "/" || path === "/signup" || path === "/forgot-password")) return redirectTo("/campaigns");
 
   return response;
 }

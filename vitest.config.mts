@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "supabase/tests/**/*.test.ts", "apps-script/**/*.test.ts", "integrations/make-app/**/*.test.ts"],
     environment: "node",
+    setupFiles: ["supabase/tests/vitest-setup.ts"],
     testTimeout: 30_000,
   },
 });

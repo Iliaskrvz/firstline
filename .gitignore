@@ -45,3 +45,5 @@ next-env.d.ts
 
 # worker logs
 /logs
+
+/.next-local/
