@@ -55,7 +55,7 @@ async function TemplateList() {
       {rows.map((t) => (
         <Link key={t.id} href={`/templates/${t.id}`} className="group">
           <Card className="h-full transition-shadow group-hover:shadow-md">
-            <div className="font-semibold text-slate-900 group-hover:text-indigo-700">{t.name}</div>
+            <div className="font-semibold text-slate-900 group-hover:text-brand-700">{t.name}</div>
             <div className="mt-1 truncate text-sm text-slate-500">{t.subject || <em>No subject</em>}</div>
             <div className="mt-4 flex flex-wrap gap-1">
               {t.slots.map((s) => (

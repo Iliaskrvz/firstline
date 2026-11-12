@@ -32,7 +32,7 @@ function Links({ path }: { path: string }) {
           href={l.href}
           className={cx(
             "rounded-lg px-3 py-1.5 text-sm font-medium",
-            path.startsWith(l.href) ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+            path.startsWith(l.href) ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
           )}
         >
           {l.label}

@@ -23,7 +23,7 @@ export default function ApiSettingsPage() {
         description={
           <>
             Use FirstLine from n8n, Make or your own code, with the same credits.{" "}
-            <Link href="/docs/api" className="font-medium text-indigo-700 hover:underline">
+            <Link href="/docs/api" className="font-medium text-brand-700 hover:underline">
               Read the API docs →
             </Link>
           </>
@@ -77,7 +77,7 @@ async function Settings() {
         <h2 className="text-base font-semibold text-slate-900">Webhooks</h2>
         <p className="text-sm text-slate-600">
           FirstLine posts the finished job to these URLs (job.completed, batch.completed), signed with the endpoint&apos;s secret. See{" "}
-          <Link href="/docs/api#webhooks" className="text-indigo-700 hover:underline">
+          <Link href="/docs/api#webhooks" className="text-brand-700 hover:underline">
             how to check the signature
           </Link>
           .

@@ -139,7 +139,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-slate-900">Email preview</h2>
             {template && (
-              <Link href={`/templates/${template.id}`} className="text-sm font-medium text-indigo-700 hover:underline">
+              <Link href={`/templates/${template.id}`} className="text-sm font-medium text-brand-700 hover:underline">
                 Edit template
               </Link>
             )}
@@ -185,15 +185,15 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             <div className="text-sm font-medium text-slate-700">Research depth</div>
             <div className="mt-2 space-y-2 text-sm">
               <label className="flex items-center gap-2">
-                <input type="radio" checked readOnly className="accent-indigo-600" /> Standard: company website
+                <input type="radio" checked readOnly className="accent-brand-600" /> Standard: company website
               </label>
               {deepEnabled() && <DeepSetting campaignId={c.id} deep={!!c.depth?.deep} locked={c.status === "running"} />}
             </div>
           </div>
-          <div className="rounded-xl bg-indigo-50 p-4">
-            <div className="text-xs font-medium text-indigo-700">Estimated cost</div>
-            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(runCredits(researchable, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</div>
-            <div className="mt-1 text-xs text-indigo-800/80">The first 5 leads are a free preview.</div>
+          <div className="rounded-xl bg-brand-50 p-4">
+            <div className="text-xs font-medium text-brand-700">Estimated cost</div>
+            <div className="mt-0.5 text-xl font-semibold text-brand-900">≤ {n(runCredits(researchable, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</div>
+            <div className="mt-1 text-xs text-brand-800/80">The first 5 leads are a free preview.</div>
           </div>
           <PreviewButton
             campaignId={c.id}
@@ -209,7 +209,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             }
           />
           {previewCount > 0 && (
-            <Link href={`/campaigns/${c.id}/preview`} className="block text-center text-sm font-medium text-indigo-700 hover:underline">
+            <Link href={`/campaigns/${c.id}/preview`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
               View preview ({previewCount} leads) →
             </Link>
           )}
@@ -238,7 +238,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             )}
           </div>
           {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
-            <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-indigo-700 hover:underline">
+            <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
               Export CSV for a sending tool (fl_ columns) ↓
             </a>
           )}

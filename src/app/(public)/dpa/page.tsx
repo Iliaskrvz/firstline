@@ -10,7 +10,7 @@ export default function Dpa() {
   return (
     <LegalPage title="Data Processing Agreement">
       <p>
-        This Data Processing Agreement (&quot;DPA&quot;) is part of the <Link className="text-indigo-600" href="/terms">terms of service</Link> between you (the customer, &quot;controller&quot;) and {c.name} (&quot;processor&quot;). It meets Article 28 of the GDPR. It applies automatically; if you need a signed copy, email {c.email}.
+        This Data Processing Agreement (&quot;DPA&quot;) is part of the <Link className="text-brand-600" href="/terms">terms of service</Link> between you (the customer, &quot;controller&quot;) and {c.name} (&quot;processor&quot;). It meets Article 28 of the GDPR. It applies automatically; if you need a signed copy, email {c.email}.
       </p>
 
       <h2>1. Subject and duration</h2>
@@ -38,7 +38,7 @@ export default function Dpa() {
       </ul>
 
       <h2>5. Sub-processors</h2>
-      <p>The controller gives general permission to use the sub-processors below. The processor imposes the same data protection duties on them, announces new ones at least 14 days ahead on the <Link className="text-indigo-600" href="/subprocessors">sub-processor page</Link>, and the controller may object on reasonable grounds (and end the contract if no solution is found).</p>
+      <p>The controller gives general permission to use the sub-processors below. The processor imposes the same data protection duties on them, announces new ones at least 14 days ahead on the <Link className="text-brand-600" href="/subprocessors">sub-processor page</Link>, and the controller may object on reasonable grounds (and end the contract if no solution is found).</p>
       <SubprocessorTable />
 
       <h2>6. Transfers outside the EU</h2>

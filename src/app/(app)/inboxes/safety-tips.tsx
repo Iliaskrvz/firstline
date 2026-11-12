@@ -11,7 +11,7 @@ const TIPS: { title: string; text: string }[] = [
 
 export function SafetyTips({ open }: { open: boolean }) {
   return (
-    <details open={open} className="group rounded-xl border border-indigo-100 bg-indigo-50/60 p-5 text-sm text-slate-700">
+    <details open={open} className="group rounded-xl border border-brand-100 bg-brand-50/60 p-5 text-sm text-slate-700">
       <summary className="cursor-pointer list-none font-semibold text-slate-900">
         <span className="mr-2 inline-block transition group-open:rotate-90">›</span>
         Gmail safety tips: protect your domain before you send
@@ -19,7 +19,7 @@ export function SafetyTips({ open }: { open: boolean }) {
       <ol className="mt-4 grid gap-4 sm:grid-cols-2">
         {TIPS.map((t, i) => (
           <li key={t.title} className="flex gap-3">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">{i + 1}</span>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">{i + 1}</span>
             <div>
               <p className="font-medium text-slate-900">{t.title}</p>
               <p className="mt-1 text-slate-600">{t.text}</p>

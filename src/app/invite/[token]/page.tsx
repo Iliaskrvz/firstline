@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Join a workspace" };
 
 export default function InvitePage(props: PageProps<"/invite/[token]">) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+    <div className="bg-grid flex min-h-screen flex-col items-center justify-center bg-white px-4 py-12">
       <div className="mb-8">
         <Logo />
       </div>
@@ -35,7 +35,7 @@ async function Invite({ params }: { params: PageProps<"/invite/[token]">["params
       <>
         <h1 className="text-lg font-semibold text-slate-900">Invite not available</h1>
         <p className="text-sm text-slate-600">{msg} Ask the person who invited you for a new link.</p>
-        <Link href="/campaigns" className="text-sm font-medium text-indigo-700 hover:underline">
+        <Link href="/campaigns" className="text-sm font-medium text-brand-700 hover:underline">
           Go to FirstLine →
         </Link>
       </>

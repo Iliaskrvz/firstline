@@ -34,7 +34,7 @@ type Loaded = {
 
 function SuggestionBanner({ s, onAccept, onDismiss }: { s: EmailSuggestion; onAccept: () => void; onDismiss?: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900 ring-1 ring-indigo-100">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-brand-50 p-4 text-sm text-brand-900 ring-1 ring-brand-100">
       <p className="min-w-0 flex-1">
         Column <strong>‘{s.header}’</strong> contains email addresses ({n(s.valid)} of {n(s.filled)} filled rows). Use it as Email?
       </p>
@@ -119,7 +119,7 @@ export function UploadWizard() {
           }}
           className={cx(
             "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-16 text-center transition-colors",
-            dragging ? "border-indigo-400 bg-indigo-50" : "border-slate-300 hover:border-indigo-300 hover:bg-slate-50",
+            dragging ? "border-brand-400 bg-brand-50" : "border-slate-300 hover:border-brand-300 hover:bg-slate-50",
           )}
         >
           <svg className="size-10 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
@@ -162,7 +162,7 @@ export function UploadWizard() {
           <Button variant="secondary" onClick={reset}>
             Choose another file
           </Button>
-          <button className="text-sm font-medium text-indigo-700 hover:underline" onClick={() => setPickManually(true)}>
+          <button className="text-sm font-medium text-brand-700 hover:underline" onClick={() => setPickManually(true)}>
             Pick columns manually
           </button>
         </div>
@@ -282,10 +282,10 @@ export function UploadWizard() {
               <Stat label="Skipped: no email" value={n(result.stats.missing_email + result.stats.invalid_email)} />
             </div>
           )}
-          <div className="rounded-xl bg-indigo-50 p-4">
-            <div className="text-xs font-medium text-indigo-700">Estimated cost</div>
-            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(estimateCredits(withWebsite, { deep: false }))} credits</div>
-            <div className="mt-1 text-xs text-indigo-800/80">1 credit per personalised email. Fallbacks are free.</div>
+          <div className="rounded-xl bg-brand-50 p-4">
+            <div className="text-xs font-medium text-brand-700">Estimated cost</div>
+            <div className="mt-0.5 text-xl font-semibold text-brand-900">≤ {n(estimateCredits(withWebsite, { deep: false }))} credits</div>
+            <div className="mt-1 text-xs text-brand-800/80">1 credit per personalised email. Fallbacks are free.</div>
           </div>
           {result && result.stats.imported > 0 && result.stats.personal_email / result.stats.imported > 0.3 && (
             <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">

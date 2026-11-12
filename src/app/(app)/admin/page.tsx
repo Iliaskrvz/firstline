@@ -26,7 +26,7 @@ export default function AdminPage() {
         description={
           <>
             Margin and costs across all workspaces. Costs are real (logged per call); revenue is credits used × average pack price.{" "}
-            <Link href="/admin/lab" className="font-medium text-indigo-700 hover:underline">
+            <Link href="/admin/lab" className="font-medium text-brand-700 hover:underline">
               Quality Lab →
             </Link>
           </>

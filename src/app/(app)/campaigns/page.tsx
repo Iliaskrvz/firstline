@@ -71,7 +71,7 @@ async function CampaignList() {
             {rows.map((c) => (
               <tr key={c.id} className="hover:bg-slate-50">
                 <td className="px-6 py-3 font-medium">
-                  <Link href={`/campaigns/${c.id}`} className="text-slate-900 hover:text-indigo-700">
+                  <Link href={`/campaigns/${c.id}`} className="text-slate-900 hover:text-brand-700">
                     {c.name}
                   </Link>
                 </td>

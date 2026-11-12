@@ -35,7 +35,7 @@ export default function Terms() {
       </ul>
 
       <h2>5. Your data</h2>
-      <p>Your lead lists and generated emails are yours. We process them only to provide the service, under our <Link className="text-indigo-600" href="/dpa">Data Processing Agreement</Link>, which is part of these terms. See also our <Link className="text-indigo-600" href="/privacy">privacy policy</Link>.</p>
+      <p>Your lead lists and generated emails are yours. We process them only to provide the service, under our <Link className="text-brand-600" href="/dpa">Data Processing Agreement</Link>, which is part of these terms. See also our <Link className="text-brand-600" href="/privacy">privacy policy</Link>.</p>
 
       <h2>6. Availability and changes</h2>
       <p>We work to keep FirstLine available but do not guarantee it is uninterrupted. We may change features. We tell you about material changes to these terms at least 30 days in advance by email.</p>

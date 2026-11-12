@@ -49,7 +49,7 @@ export function InviteForm() {
       </form>
       {error && <p className="text-sm text-rose-700">{error}</p>}
       {result && (
-        <div className="space-y-2 rounded-lg bg-indigo-50 p-3 text-sm text-indigo-950">
+        <div className="space-y-2 rounded-lg bg-brand-50 p-3 text-sm text-brand-950">
           <p>{result.emailed ? "Invite sent by email. You can also share this link:" : "Send this link to them (valid 7 days). They sign in with the invited address and join."}</p>
           <div className="flex gap-2">
             <code className="flex-1 overflow-x-auto rounded bg-white px-2 py-1.5 text-xs">{result.link}</code>

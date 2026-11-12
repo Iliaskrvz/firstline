@@ -82,7 +82,7 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
     <div className="space-y-6">
       <AutoRefresh active={justPaid && !arrived} intervalMs={3000} />
       {justPaid && (
-        <Card className={arrived ? "bg-emerald-50 text-sm text-emerald-900" : "bg-indigo-50 text-sm text-indigo-900"}>
+        <Card className={arrived ? "bg-emerald-50 text-sm text-emerald-900" : "bg-brand-50 text-sm text-brand-900"}>
           {arrived ? "Payment received: your credits are added." : "Payment received. Your credits appear here in a few seconds…"}
         </Card>
       )}

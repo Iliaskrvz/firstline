@@ -77,7 +77,7 @@ export function AddInbox({ appUrl, script }: { appUrl: string | null; script: st
             <label key={d} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm ring-1 ring-slate-200">
               <input
                 type="checkbox"
-                className="accent-indigo-600"
+                className="accent-brand-600"
                 checked={days.includes(d)}
                 onChange={(e) => setDays(e.target.checked ? [...days, d] : days.filter((x) => x !== d))}
               />

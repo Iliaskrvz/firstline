@@ -34,12 +34,12 @@ export function CampaignSettings({
         templates.length === 0 ? (
           <>
             No templates yet.{" "}
-            <Link href={`/templates/new?campaign=${campaignId}`} className="font-medium text-indigo-700 hover:underline">
+            <Link href={`/templates/new?campaign=${campaignId}`} className="font-medium text-brand-700 hover:underline">
               Write one
             </Link>
           </>
         ) : (
-          <Link href={`/templates/new?campaign=${campaignId}`} className="font-medium text-indigo-700 hover:underline">
+          <Link href={`/templates/new?campaign=${campaignId}`} className="font-medium text-brand-700 hover:underline">
             + New template
           </Link>
         )
@@ -98,7 +98,7 @@ export function DeepSetting({ campaignId, deep, locked }: { campaignId: string; 
       <label className="flex items-start gap-2 text-sm">
         <input
           type="checkbox"
-          className="mt-0.5 accent-indigo-600"
+          className="mt-0.5 accent-brand-600"
           checked={on}
           disabled={pending || locked}
           onChange={(e) => {

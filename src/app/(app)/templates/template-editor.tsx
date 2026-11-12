@@ -93,7 +93,7 @@ function AddSlotForm({
   const err = (k: keyof SlotDraft) => touched && errors[k] && <span className="mt-1 block text-xs text-rose-700">{errors[k]}</span>;
 
   return (
-    <form onSubmit={submit} className="mt-2 rounded-xl bg-indigo-50/60 p-3 ring-1 ring-indigo-100">
+    <form onSubmit={submit} className="mt-2 rounded-xl bg-brand-50/60 p-3 ring-1 ring-brand-100">
       <div className="grid gap-2 sm:grid-cols-[140px_1fr_90px]">
         <label className="block">
           <span className="text-xs font-medium text-slate-700">Name</span>
@@ -131,7 +131,7 @@ function AddSlotForm({
         <Button type="button" variant="ghost" className="py-1.5" onClick={onCancel}>
           Cancel
         </Button>
-        <code className="ml-auto hidden truncate text-xs text-indigo-700 sm:block">{ok ? formatSlot(draft) : ""}</code>
+        <code className="ml-auto hidden truncate text-xs text-brand-700 sm:block">{ok ? formatSlot(draft) : ""}</code>
       </div>
     </form>
   );

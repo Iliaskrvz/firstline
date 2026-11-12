@@ -110,7 +110,7 @@ async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview"
         title="Free preview"
         description={
           <>
-            <Link href={`/campaigns/${id}`} className="text-indigo-700 hover:underline">
+            <Link href={`/campaigns/${id}`} className="text-brand-700 hover:underline">
               {campaign.name}
             </Link>{" "}
             · first {leads.length} leads · no credits used
@@ -155,7 +155,7 @@ function SlotEmail({ tokens, lead, slots, factsUsed }: { tokens: Token[]; lead: 
         return (
           <span key={i} className="tok-slot" title={`AI-written slot “${t.key}” · cites ${factsUsed.join(", ") || "no facts"}`}>
             {v}
-            {factsUsed.length > 0 && <sup className="ml-1 text-[10px] font-semibold text-indigo-500">{factsUsed.join(" ")}</sup>}
+            {factsUsed.length > 0 && <sup className="ml-1 text-[10px] font-semibold text-brand-500">{factsUsed.join(" ")}</sup>}
           </span>
         );
       })}
@@ -225,7 +225,7 @@ function LeadCard({
                     <li key={p.url} className="flex items-center gap-2">
                       <span className={scrapedUrls.has(p.url) ? "text-emerald-600" : "text-slate-400"}>{scrapedUrls.has(p.url) ? "✓" : "✗"}</span>
                       <span className="w-16 shrink-0 text-xs text-slate-500">{p.type}</span>
-                      <a href={p.url} target="_blank" rel="noreferrer" className="truncate text-slate-700 hover:text-indigo-700">
+                      <a href={p.url} target="_blank" rel="noreferrer" className="truncate text-slate-700 hover:text-brand-700">
                         {p.url.replace(/^https?:\/\//, "")}
                       </a>
                     </li>
@@ -242,7 +242,7 @@ function LeadCard({
               ) : (
                 <ul className="mt-2 space-y-2 text-sm">
                   {facts.map((f) => (
-                    <li key={f.id} className={cx("rounded-lg p-2", gen.facts_used.includes(f.id) ? "bg-indigo-50/70 ring-1 ring-indigo-100" : "bg-slate-50")}>
+                    <li key={f.id} className={cx("rounded-lg p-2", gen.facts_used.includes(f.id) ? "bg-brand-50/70 ring-1 ring-brand-100" : "bg-slate-50")}>
                       <div className="flex items-center gap-2 text-xs">
                         <span className="font-semibold text-slate-700">{f.id}</span>
                         <Badge tone="gray">
@@ -252,7 +252,7 @@ function LeadCard({
                       </div>
                       <p className="mt-1 text-slate-800">{f.text}</p>
                       {f.src.startsWith("http") ? (
-                        <a href={f.src} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-indigo-700">
+                        <a href={f.src} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-brand-700">
                           {f.src.replace(/^https?:\/\//, "")}
                         </a>
                       ) : (

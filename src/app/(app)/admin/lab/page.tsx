@@ -22,7 +22,7 @@ export default function LabPage() {
           <>
             A new skill version writes for a fixed test set next to the live one; checks, the AI judge and a side-by-side comparison decide. Ship only on a clear
             win.{" "}
-            <Link href="/admin" className="font-medium text-indigo-700 hover:underline">
+            <Link href="/admin" className="font-medium text-brand-700 hover:underline">
               ← Admin
             </Link>
           </>
@@ -159,7 +159,7 @@ async function Lab() {
             {r.status === "done" && <p className="text-sm font-medium text-slate-900">{s.verdictText}</p>}
             {(r.details ?? []).length > 0 && (
               <details>
-                <summary className="cursor-pointer text-xs font-medium text-indigo-700">Per company</summary>
+                <summary className="cursor-pointer text-xs font-medium text-brand-700">Per company</summary>
                 <ul className="mt-2 space-y-3 text-xs">
                   {r.details.map((d, i) => (
                     <li key={i} className="rounded-lg bg-slate-50 p-3">

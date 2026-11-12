@@ -4,6 +4,21 @@
   --font-sans: var(--font-inter);
 }
 
+/* FirstLine accent: a warm orange-red. Ink (slate-950) carries headings and primary buttons. */
+@theme {
+  --color-brand-50: #fff5ef;
+  --color-brand-100: #ffe8d9;
+  --color-brand-200: #ffcdb0;
+  --color-brand-300: #fdaa7d;
+  --color-brand-400: #fb7d45;
+  --color-brand-500: #f65d1d;
+  --color-brand-600: #e44511;
+  --color-brand-700: #bd3410;
+  --color-brand-800: #962b14;
+  --color-brand-900: #792614;
+  --color-brand-950: #411008;
+}
+
 :root {
   color-scheme: light;
 }
@@ -11,6 +26,23 @@
 body {
   background: var(--color-slate-50);
   color: var(--color-slate-900);
+}
+
+/* Faint drafting grid behind marketing and sign-in pages, fading out towards the edges. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(15 23 42 / 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.bg-grid-fade {
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, #000 40%, transparent 100%);
+}
+.bg-grid-dark {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 /* Highlighted template markers in previews */
@@ -21,9 +53,9 @@ body {
   padding: 0 0.15rem;
 }
 .tok-slot {
-  background: var(--color-indigo-50);
-  color: var(--color-indigo-700);
-  border: 1px dashed var(--color-indigo-300);
+  background: var(--color-brand-50);
+  color: var(--color-brand-700);
+  border: 1px dashed var(--color-brand-300);
   border-radius: 0.375rem;
   padding: 0 0.25rem;
 }

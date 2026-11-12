@@ -28,7 +28,7 @@ export default function ApiDocs() {
         <Link href="/">
           <Logo />
         </Link>
-        <a href="/api/v1/openapi.json" className="text-sm font-medium text-indigo-700 hover:underline">
+        <a href="/api/v1/openapi.json" className="text-sm font-medium text-brand-700 hover:underline">
           OpenAPI 3.1 file
         </a>
       </header>
@@ -41,7 +41,7 @@ export default function ApiDocs() {
 
         <H2 id="auth">1. Get an API key</H2>
         <p>
-          In the app: <Link href="/settings/api" className="text-indigo-700 hover:underline">Settings → API</Link> → Create key. It starts with <code>fl_live_</code>{" "}
+          In the app: <Link href="/settings/api" className="text-brand-700 hover:underline">Settings → API</Link> → Create key. It starts with <code>fl_live_</code>{" "}
           and is shown once. Send it on every call:
         </p>
         <Code>{`Authorization: Bearer fl_live_…`}</Code>
@@ -131,7 +131,7 @@ export default function ApiDocs() {
 
         <H2 id="webhooks">5. Webhooks</H2>
         <p>
-          Add an https URL in <Link href="/settings/api" className="text-indigo-700 hover:underline">Settings → API</Link>. FirstLine posts{" "}
+          Add an https URL in <Link href="/settings/api" className="text-brand-700 hover:underline">Settings → API</Link>. FirstLine posts{" "}
           <code>job.completed</code> (one lead) or <code>batch.completed</code> with the whole job as <code>data</code>. Any 2xx within 10 seconds counts; otherwise it
           retries after {retry}.
         </p>
@@ -155,7 +155,7 @@ function verify(secret, rawBody, header) {
 
         <H2 id="data">7. Data</H2>
         <p>
-          Leads sent through the API are processed like campaign leads under our <Link href="/dpa" className="text-indigo-700 hover:underline">DPA</Link> and deleted 30
+          Leads sent through the API are processed like campaign leads under our <Link href="/dpa" className="text-brand-700 hover:underline">DPA</Link> and deleted 30
           days after the job finishes. Webhook deliveries are deleted after 30 days too.
         </p>
       </div>

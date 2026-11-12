@@ -99,12 +99,12 @@ export function LoginForm({ initialError, next, options }: { initialError: strin
 
   if (state === "link-sent") {
     return (
-      <div className="mt-6 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900">
+      <div className="mt-6 rounded-xl bg-brand-50 p-4 text-sm text-brand-900">
         <p className="font-medium">Check your inbox</p>
         <p className="mt-1">
           We sent a sign-in link to <strong>{email}</strong>. Open it in this browser.
         </p>
-        <button className="mt-3 text-indigo-700 underline" onClick={() => setState("idle")}>
+        <button className="mt-3 text-brand-700 underline" onClick={() => setState("idle")}>
           Back
         </button>
       </div>
@@ -150,7 +150,7 @@ export function LoginForm({ initialError, next, options }: { initialError: strin
         </Button>
       </form>
       <div className="flex flex-wrap justify-between gap-2 text-sm">
-        <button type="button" className="text-indigo-700 hover:underline" onClick={() => (setMode(mode === "password" ? "link" : "password"), setError(null))}>
+        <button type="button" className="text-brand-700 hover:underline" onClick={() => (setMode(mode === "password" ? "link" : "password"), setError(null))}>
           {mode === "password" ? "Email me a sign-in link instead" : "Use my password instead"}
         </button>
         {mode === "password" && (
@@ -171,7 +171,7 @@ export function LoginForm({ initialError, next, options }: { initialError: strin
       )}
       <p className="text-center text-sm text-slate-600">
         New here?{" "}
-        <Link href={next ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} className="font-medium text-indigo-700 hover:underline">
+        <Link href={next ? `/signup?next=${encodeURIComponent(next)}` : "/signup"} className="font-medium text-brand-700 hover:underline">
           Create an account
         </Link>
       </p>

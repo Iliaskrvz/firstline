@@ -4,16 +4,17 @@ export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonVariant = "primary" | "accent" | "secondary" | "ghost";
 const BUTTON: Record<ButtonVariant, string> = {
-  primary: "bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-300 shadow-sm",
+  primary: "bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-300 shadow-sm",
+  accent: "bg-brand-600 text-white hover:bg-brand-500 disabled:bg-brand-300 shadow-sm shadow-brand-600/20",
   secondary: "bg-white text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50 disabled:text-slate-400",
   ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
 };
 
 export function buttonClass(variant: ButtonVariant = "primary", extra?: string) {
   return cx(
-    "inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed",
+    "inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 disabled:cursor-not-allowed",
     BUTTON[variant],
     extra,
   );
@@ -41,7 +42,7 @@ export function PageHeader({ title, description, actions }: { title: string; des
 
 const BADGE = {
   gray: "bg-slate-100 text-slate-700",
-  indigo: "bg-indigo-50 text-indigo-700",
+  indigo: "bg-brand-50 text-brand-700",
   green: "bg-emerald-50 text-emerald-700",
   amber: "bg-amber-50 text-amber-800",
   red: "bg-rose-50 text-rose-700",
@@ -62,7 +63,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 }
 
 export const inputClass =
-  "block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500";
+  "block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-600 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500";
 
 export function Stat({ label, value, tone }: { label: string; value: ReactNode; tone?: "amber" | "green" }) {
   return (
@@ -80,7 +81,9 @@ export function Skeleton({ className }: { className?: string }) {
 export function Logo() {
   return (
     <span className="inline-flex items-center gap-2 font-semibold tracking-tight text-slate-900">
-      <span className="grid size-7 place-items-center rounded-lg bg-indigo-600 text-sm text-white">F</span>
+      <span className="relative grid size-7 place-items-center rounded-lg bg-slate-950 text-sm text-white">
+        F<span className="absolute right-1 bottom-1 size-1 rounded-full bg-brand-500" />
+      </span>
       FirstLine
     </span>
   );

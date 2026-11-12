@@ -42,33 +42,33 @@ export function RunPanel({
       <fieldset className="space-y-1.5 text-sm" disabled={running || pending}>
         <legend className="mb-1 text-xs text-slate-500">If research finds nothing usable for a lead:</legend>
         <label className="flex items-start gap-2">
-          <input type="radio" className="mt-0.5 accent-indigo-600" checked={fallbacks} onChange={() => setFallbacks(true)} />
+          <input type="radio" className="mt-0.5 accent-brand-600" checked={fallbacks} onChange={() => setFallbacks(true)} />
           <span>
             Send the neutral version <span className="text-slate-500">(your copy, one neutral line, free)</span>
           </span>
         </label>
         <label className="flex items-start gap-2">
-          <input type="radio" className="mt-0.5 accent-indigo-600" checked={!fallbacks} onChange={() => setFallbacks(false)} />
+          <input type="radio" className="mt-0.5 accent-brand-600" checked={!fallbacks} onChange={() => setFallbacks(false)} />
           <span>Skip that lead</span>
         </label>
       </fieldset>
       <fieldset className="space-y-1.5 text-sm" disabled={running || pending}>
         <legend className="mb-1 text-xs text-slate-500">Speed:</legend>
         <label className="flex items-start gap-2">
-          <input type="radio" className="mt-0.5 accent-indigo-600" checked={speed === "now"} onChange={() => setSpeed("now")} />
+          <input type="radio" className="mt-0.5 accent-brand-600" checked={speed === "now"} onChange={() => setSpeed("now")} />
           <span>
             Now <span className="text-slate-500">(ready in minutes)</span>
           </span>
         </label>
         <label className="flex items-start gap-2">
-          <input type="radio" className="mt-0.5 accent-indigo-600" checked={speed === "economy"} onChange={() => setSpeed("economy")} />
+          <input type="radio" className="mt-0.5 accent-brand-600" checked={speed === "economy"} onChange={() => setSpeed("economy")} />
           <span>
             Economy <span className="text-slate-500">(written in one batch: usually within the hour, at most a day)</span>
           </span>
         </label>
       </fieldset>
       {running && waitingForBatch > 0 && (
-        <p className="rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+        <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-900">
           {waitingForBatch} {waitingForBatch === 1 ? "lead is" : "leads are"} researched and waiting for the Economy batch. You can close this page; they finish on their own.
         </p>
       )}

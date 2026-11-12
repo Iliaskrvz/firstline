@@ -107,7 +107,7 @@ export function NewWebhook() {
         <div className="flex flex-wrap gap-4 text-sm text-slate-700">
           {["job.completed", "batch.completed"].map((ev) => (
             <label key={ev} className="flex items-center gap-1.5">
-              <input type="checkbox" className="accent-indigo-600" checked={events.includes(ev)} onChange={(e) => setEvents(e.target.checked ? [...events, ev] : events.filter((x) => x !== ev))} />
+              <input type="checkbox" className="accent-brand-600" checked={events.includes(ev)} onChange={(e) => setEvents(e.target.checked ? [...events, ev] : events.filter((x) => x !== ev))} />
               {ev}
             </label>
           ))}

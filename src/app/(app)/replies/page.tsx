@@ -89,7 +89,7 @@ async function Replies() {
                         </div>
                       </td>
                       <td className="px-6 py-2.5">
-                        <Link href={`/campaigns/${s.campaign_id}`} className="text-indigo-700 hover:underline">
+                        <Link href={`/campaigns/${s.campaign_id}`} className="text-brand-700 hover:underline">
                           {campaigns.get(s.campaign_id) ?? "Campaign"}
                         </Link>
                       </td>
@@ -101,7 +101,7 @@ async function Replies() {
                       <td className="px-6 py-2.5 text-right">
                         {s.gmail_thread_id && inbox && (
                           <a
-                            className="text-xs font-medium text-indigo-700 hover:underline"
+                            className="text-xs font-medium text-brand-700 hover:underline"
                             href={`https://mail.google.com/mail/u/?authuser=${encodeURIComponent(inbox)}#all/${s.gmail_thread_id}`}
                             target="_blank"
                             rel="noreferrer"

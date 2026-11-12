@@ -83,7 +83,7 @@ export function SendPanel({
       <div className="text-sm font-medium text-slate-700">Send via Gmail</div>
       {inboxes.length === 0 ? (
         <p className="text-sm text-slate-600">
-          <Link href="/inboxes" className="font-medium text-indigo-700 hover:underline">
+          <Link href="/inboxes" className="font-medium text-brand-700 hover:underline">
             Connect a Gmail inbox
           </Link>{" "}
           first.
@@ -96,7 +96,7 @@ export function SendPanel({
                 <label key={i.id} className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    className="accent-indigo-600"
+                    className="accent-brand-600"
                     checked={picked.includes(i.id)}
                     onChange={(e) => setPicked(e.target.checked ? [...picked, i.id] : picked.filter((x) => x !== i.id))}
                   />

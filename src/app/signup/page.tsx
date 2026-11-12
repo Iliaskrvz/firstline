@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Create an account" };
 
 export default function SignupPage(props: PageProps<"/signup">) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+    <div className="bg-grid flex min-h-screen flex-col items-center justify-center bg-white px-4 py-12">
       <div className="mb-8">
         <Logo />
       </div>

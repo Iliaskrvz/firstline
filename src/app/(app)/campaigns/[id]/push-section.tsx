@@ -25,7 +25,7 @@ export async function PushSection({ campaignId, workspaceId, slotKeys, followUpS
       {!connected.length ? (
         <p className="text-sm text-slate-600">
           Use Instantly, Smartlead or Lemlist?{" "}
-          <Link href="/integrations" className="font-medium text-indigo-700 hover:underline">
+          <Link href="/integrations" className="font-medium text-brand-700 hover:underline">
             Connect it
           </Link>{" "}
           and push these leads with their personalised lines as variables. Free.

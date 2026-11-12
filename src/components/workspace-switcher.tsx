@@ -10,7 +10,7 @@ export function WorkspaceSwitcher({ current, options }: { current: string; optio
   return (
     <select
       aria-label="Workspace"
-      className="max-w-48 truncate rounded-lg border-0 bg-transparent py-0 pl-0 pr-6 text-right text-sm font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500"
+      className="max-w-48 truncate rounded-lg border-0 bg-transparent py-0 pl-0 pr-6 text-right text-sm font-medium text-slate-800 focus:ring-2 focus:ring-brand-500"
       value={current}
       disabled={pending}
       onChange={(e) =>

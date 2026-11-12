@@ -142,7 +142,7 @@ export function PushPanel({
           </div>
           {busy && (
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full bg-indigo-600 transition-all" style={{ width: `${latest.total ? Math.round(((latest.added + latest.skipped + latest.failed) / latest.total) * 100) : 0}%` }} />
+              <div className="h-full bg-brand-600 transition-all" style={{ width: `${latest.total ? Math.round(((latest.added + latest.skipped + latest.failed) / latest.total) * 100) : 0}%` }} />
             </div>
           )}
           <p className="text-slate-700">
@@ -165,7 +165,7 @@ export function PushPanel({
           )}
           {items.length > 0 && (
             <details>
-              <summary className="cursor-pointer text-xs font-medium text-indigo-700">Results per lead</summary>
+              <summary className="cursor-pointer text-xs font-medium text-brand-700">Results per lead</summary>
               <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto text-xs">
                 {items.map((i) => (
                   <li key={i.email} className="flex justify-between gap-2 border-b border-slate-100 pb-1">

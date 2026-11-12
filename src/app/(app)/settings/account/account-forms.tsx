@@ -30,7 +30,7 @@ export function PasswordForm({ email, highlight }: { email: string; highlight: b
   }
 
   return (
-    <form onSubmit={save} className={`space-y-2 ${highlight ? "rounded-lg ring-2 ring-indigo-200 p-3" : ""}`}>
+    <form onSubmit={save} className={`space-y-2 ${highlight ? "rounded-lg ring-2 ring-brand-200 p-3" : ""}`}>
       <input
         type="password"
         autoComplete="new-password"

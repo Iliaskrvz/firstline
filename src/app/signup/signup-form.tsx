@@ -34,7 +34,7 @@ export function SignupForm({ next, google }: { next: string | null; google: bool
 
   if (state === "sent") {
     return (
-      <div className="mt-6 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900">
+      <div className="mt-6 rounded-xl bg-brand-50 p-4 text-sm text-brand-900">
         <p className="font-medium">Confirm your email address</p>
         <p className="mt-1">
           We sent a link to <strong>{email}</strong>. Open it to finish creating your account, then sign in with your password. Tip: add a passkey later in
@@ -73,7 +73,7 @@ export function SignupForm({ next, google }: { next: string | null; google: bool
       {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       <p className="text-center text-sm text-slate-600">
         Already have an account?{" "}
-        <Link href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} className="font-medium text-indigo-700 hover:underline">
+        <Link href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"} className="font-medium text-brand-700 hover:underline">
           Sign in
         </Link>
       </p>

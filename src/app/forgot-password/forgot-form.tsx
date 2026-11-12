@@ -28,7 +28,7 @@ export function ForgotForm() {
 
   if (state === "sent") {
     return (
-      <div className="mt-6 rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900">
+      <div className="mt-6 rounded-xl bg-brand-50 p-4 text-sm text-brand-900">
         If <strong>{email}</strong> has an account, a reset link is on its way. Open it in this browser to choose a new password.
       </div>
     );
@@ -41,7 +41,7 @@ export function ForgotForm() {
       </Button>
       {error && <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       <p className="text-center text-sm">
-        <Link href="/login" className="text-indigo-700 hover:underline">
+        <Link href="/login" className="text-brand-700 hover:underline">
           Back to sign in
         </Link>
       </p>

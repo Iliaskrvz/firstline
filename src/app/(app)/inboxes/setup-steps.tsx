@@ -6,7 +6,7 @@ import { connectionCode } from "@/lib/sender/connection";
 /** The 4 setup steps (§10.6), shown right after a key is created. The key is shown only here, once. */
 export function SetupSteps({ email, senderKey, appUrl, script }: { email: string; senderKey: string; appUrl: string | null; script: string }) {
   return (
-    <div className="space-y-4 rounded-xl bg-indigo-50/60 p-4 ring-1 ring-indigo-100">
+    <div className="space-y-4 rounded-xl bg-brand-50/60 p-4 ring-1 ring-brand-100">
       <div>
         <div className="text-sm font-semibold text-slate-900">Connect {email}</div>
         <p className="mt-0.5 text-xs text-slate-600">
