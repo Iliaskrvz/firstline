@@ -65,9 +65,10 @@ The script:
 
 It's safe to run again: it reuses existing products (matched by `metadata.pack`) and the existing endpoint. If you change pack prices later, change them in Polar too (or archive the product and run the script again).
 
-Record the ids it prints here:
-- Starter / Growth / Agency product ids: `…`
-- Webhook endpoint id: `…`
+Done on 2026-11-12 (organization default currency switched to EUR first):
+- Starter `f9ccd69b-02ae-4e28-abff-0e35058ded12` (€19), Growth `ec3e2405-7298-4365-901a-77d29dadd001` (€69), Agency `2d0cd553-82d9-4122-8540-39ac429b1d8c` (€299), all excl. VAT
+- Test Product `cabfc829-c0b5-4b51-8775-5d78849c7494` (private, $10 / €10)
+- Webhook endpoint `047331f5-2add-493c-8a54-08a1e6eea7d6` → `https://firstline.46-17-99-33.sslip.io/api/webhook/polar`
 
 ## Customer portal
 
@@ -75,9 +76,9 @@ Polar hosts it and emails customers the link (receipts, invoices). No app code i
 
 ## Check before going live
 
-- [ ] Token created in **production** with read+write on products, checkouts, webhooks and discounts
+- [x] Token created in **production** with read+write on products, checkouts, webhooks and discounts
 - [ ] Polar account fully set up for payouts (identity, bank details)
-- [ ] `scripts/polar-setup.ts … --packs` ran clean; ids recorded above
-- [ ] Deployed (`SSH_KEY=~/.ssh/sbd_hostkey bash deploy/deploy.sh`), so the server has the routes and the `POLAR_*` settings
+- [x] `scripts/polar-setup.ts … --packs` ran clean; ids recorded above
+- [x] Deployed: the live webhook route answers (unsigned → 403) and /checkout sends signed-out visitors to sign in
 - [ ] Credits page → Buy Starter → enter the 100% code → paid. Then the Credits page shows +500, and Polar → Webhooks shows the delivery with 202
 - [ ] Legal: the sub-processor list, privacy and terms now name Polar (Polar Software, Inc., US). Have the lawyer confirm the entity and the data-transfer basis.
