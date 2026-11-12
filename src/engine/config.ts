@@ -33,6 +33,11 @@ export function engineConfig(env: Record<string, string | undefined> = process.e
        */
       anthropicPerMinute: env.ANTHROPIC_RPM?.trim() ? num(env.ANTHROPIC_RPM, 0) || null : null,
     },
+    /**
+     * Deep research (search the contact's own professional content). OFF and hidden until the lawyer
+     * and Anthropic have confirmed it (owner's decision, 2026-11-12). DEEP_RESEARCH_ENABLED=1 turns it on.
+     */
+    deep: { enabled: env.DEEP_RESEARCH_ENABLED === "1", searchResults: 5, pagesToRead: 2, maxFacts: 2 },
     retries: { jobRetryLimit: 3, jobRetryDelaySec: 20 },
     quality: { judgePassAvg: 3.5 },
     /** List price per Firecrawl credit (Standard plan $83 / 100k). Override for your plan. */

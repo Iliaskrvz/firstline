@@ -22,11 +22,13 @@ import {
   type JudgeInput,
   type LLM,
   type LLMResult,
+  type PersonInput,
   type WriteInput,
 } from "./llm";
 import { EXTRACT_PROMPT, EXTRACT_VERSION } from "./prompts/extract";
 import { COMPARE_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
-import { CompareSchema, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
+import { PERSON_PROMPT } from "./prompts/person";
+import { CompareSchema, PersonFactsSchema, type PersonFactsOutput, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
 import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
 import type { Fact, JudgeScores, WriterOutput } from "./types";
@@ -117,6 +119,12 @@ export class AnthropicLLM implements LLM {
         : []),
       "Facts:",
       factsBlock(input.facts),
+      ...(input.facts.some((f) => f.tier === "D")
+        ? [
+            "",
+            "Facts P1/P2 (tier D) are the contact's own public work for their company (an article, talk, podcast or company news). If you use one, mention it the way a peer would (\"your talk on …\", \"your piece about …\"), never say how you found it, never add anything about them as a person, and use at most one.",
+          ]
+        : []),
       ...(input.feedback?.length
         ? ["", "Your previous attempt failed these checks. Fix them:", ...input.feedback.map((f) => `- ${f}`), "", `Previous attempt: ${JSON.stringify(input.previous)}`]
         : []),
@@ -219,6 +227,29 @@ export class AnthropicLLM implements LLM {
       return out;
     },
   };
+
+  async personFacts(input: PersonInput): Promise<LLMResult<PersonFactsOutput>> {
+    const model = this.config.models.extract;
+    const data = wrapPagesAsData(input.pages.map((p, i) => ({ id: `W${i + 1}`, url: p.url, type: "web", markdown: p.markdown.slice(0, 8000) })));
+    const p = input.person;
+    const res = await this.call(() =>
+      this.client.messages.parse({
+        model,
+        max_tokens: 1500,
+        system: cachedSystem(PERSON_PROMPT),
+        output_config: { format: zodOutputFormat(PersonFactsSchema), effort: "low" },
+        messages: [
+          {
+            role: "user",
+            content: `Contact: ${p.first_name} ${p.last_name}\nCompany: ${p.company ?? "unknown"} (${p.domain})\nJob title: ${p.title ?? "unknown"}\n\n${data}`,
+          },
+        ],
+      }),
+    );
+    if (res.stop_reason === "refusal") throw new LLMRefusalError();
+    if (!res.parsed_output) throw new Error("Person check returned no valid JSON");
+    return { output: res.parsed_output, costs: [anthropicCostEntry("search", model, res.usage)] };
+  }
 
   async compare(input: CompareInput): Promise<LLMResult<CompareOutput>> {
     const model = this.config.models.judge;

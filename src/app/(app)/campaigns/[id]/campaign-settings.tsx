@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Field, inputClass } from "@/components/ui";
-import { updateCampaignSettings, updateCampaignWriter } from "../actions";
+import { updateCampaignDeep, updateCampaignSettings, updateCampaignWriter } from "../actions";
 
 export function CampaignSettings({
   campaignId,
@@ -85,5 +85,44 @@ export function WriterSetting({ campaignId, writer, locked }: { campaignId: stri
       {locked && <p className="mt-1 text-xs text-slate-500">Can&apos;t change while the campaign is running.</p>}
       {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
     </Field>
+  );
+}
+
+/** Deep research (+1 credit, only when a fact about the contact's own work is used). Shown only when switched on. */
+export function DeepSetting({ campaignId, deep, locked }: { campaignId: string; deep: boolean; locked: boolean }) {
+  const [on, setOn] = useState(deep);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  return (
+    <div>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5 accent-indigo-600"
+          checked={on}
+          disabled={pending || locked}
+          onChange={(e) => {
+            const v = e.target.checked;
+            setOn(v);
+            setError(null);
+            startTransition(async () => {
+              const r = await updateCampaignDeep(campaignId, v);
+              if (r && "error" in r) {
+                setError(r.error);
+                setOn(!v);
+              }
+            });
+          }}
+        />
+        <span>
+          + Deep: the contact&apos;s own published work (+1 credit, only when used)
+          <span className="block text-xs text-slate-500">
+            At most 2 facts from an article, talk, podcast or company news by the contact for their current company. No LinkedIn, nothing personal. No confident
+            match = not used, not charged.
+          </span>
+        </span>
+      </label>
+      {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
+    </div>
   );
 }

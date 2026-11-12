@@ -1,7 +1,8 @@
 // Fake LLM for building and testing without Claude. Output is realistic and
 // grounded in the real page text, but it is NOT AI writing: the UI labels it
 // "Test output, no AI used". Costs $0.
-import type { BatchWriter, CompareOutput, ExtractInput, LLM, LLMResult, WriteInput } from "./llm";
+import type { BatchWriter, CompareOutput, ExtractInput, LLM, LLMResult, PersonInput, WriteInput } from "./llm";
+import type { PersonFactsOutput } from "./schemas";
 import type { Fact, JudgeScores, Language, WriterOutput } from "./types";
 import { countWords } from "@/lib/template";
 
@@ -53,12 +54,16 @@ export class FakeLLM implements LLM {
     const websiteFacts = input.facts.filter((f) => f.tier === "A");
     // A follow-up uses a different fact than the first email, when there is one.
     const pick = input.followUp ? input.followUp.stepNo - 1 : 0;
-    const angle = websiteFacts.length ? websiteFacts[pick % websiteFacts.length] : input.facts[0];
+    // Deep (tests): the first email uses the contact's own published work when there is a fact about it.
+    const personFact = input.followUp ? undefined : input.facts.find((f) => f.tier === "D");
+    const angle = personFact ?? (websiteFacts.length ? websiteFacts[pick % websiteFacts.length] : input.facts[0]);
     const lang = input.language;
     const slots: Record<string, string> = {};
     input.template.slots.forEach((slot, i) => {
       if (i === 0 && angle) {
-        const lead = { en: "Read on your site that", nl: "Las op jullie site dat", de: "Habe auf Ihrer Website gelesen, dass", fr: "J'ai lu sur votre site que" }[lang];
+        const lead = personFact
+          ? { en: "Saw your work:", nl: "Zag je werk:", de: "Habe Ihre Arbeit gesehen:", fr: "J'ai vu votre travail :" }[lang]
+          : { en: "Read on your site that", nl: "Las op jullie site dat", de: "Habe auf Ihrer Website gelesen, dass", fr: "J'ai lu sur votre site que" }[lang];
         const room = Math.max(4, slot.max_words - countWords(lead));
         const fact = angle.text.replace(/[.!?]+$/, "").split(/\s+/).slice(0, room).join(" ");
         slots[slot.key] = `${lead} ${fact.charAt(0).toLowerCase()}${fact.slice(1)}.`;
@@ -84,6 +89,30 @@ export class FakeLLM implements LLM {
   }
 
   /** Quality Lab stand-in: no opinion, so identical or different outputs both tie. */
+  /** Test stand-in: "yes" when a page names the person and their company, facts from sentences naming them. */
+  async personFacts(input: PersonInput): Promise<LLMResult<PersonFactsOutput>> {
+    const p = input.person;
+    const full = `${p.first_name} ${p.last_name}`.toLowerCase();
+    const company = (p.company ?? "").toLowerCase();
+    const facts: PersonFactsOutput["facts"] = [];
+    let named = false;
+    let tied = false;
+    for (const page of input.pages) {
+      const text = page.markdown.replace(/^#+\s.*$/gm, "").replace(/\s+/g, " ").trim();
+      const lower = text.toLowerCase();
+      if (!lower.includes(full)) continue;
+      named = true;
+      if ((company && lower.includes(company)) || lower.includes(p.domain)) tied = true;
+      const sentence = text.split(/(?<=[.!?])\s+/).find((s) => s.toLowerCase().includes(p.last_name.toLowerCase()) && s.split(" ").length >= 6);
+      if (sentence && facts.length < 2) {
+        const kind = /podcast|interview/i.test(sentence) ? "podcast" : /talk|keynote|spreker|webinar|panel/i.test(sentence) ? "talk" : /wrote|schreef|article|artikel|blog/i.test(sentence) ? "article" : "company_news";
+        facts.push({ text: sentence.slice(0, 200), src: page.url, kind, date: null });
+      }
+    }
+    const verdict = named && tied ? "yes" : named ? "unsure" : "no";
+    return { output: { same_person: verdict, reason: `fake: named=${named} tied=${tied}`, facts: verdict === "yes" ? facts : [] }, costs: [] };
+  }
+
   async compare(): Promise<LLMResult<CompareOutput>> {
     return { output: { winner: "tie", reason: "Test output, no AI used" }, costs: [] };
   }

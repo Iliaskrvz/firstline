@@ -46,6 +46,10 @@ export interface EngineStore {
    * No-op when the lead holds no reservation (preview, no website).
    */
   settleCredits(leadId: string, used: number): Promise<void>;
+  /** Is this contact (email) or their domain on the workspace's do-not-contact list? Deep never searches them. */
+  isSuppressed(workspaceId: string, email: string, domain: string | null): Promise<boolean>;
+  /** Deep research result, stored only with the lead (never in the shared domain cache). */
+  savePersonResearch(leadId: string, r: { status: "matched" | "no_match" | "not_searched"; detail: string; facts: Fact[] }): Promise<void>;
   /** Economy mode: keep this lead's first write for the next batch (no-op if it is already waiting). */
   deferWrite(lead: { id: string; workspace_id: string; campaign_id: string }, input: WriteInput): Promise<void>;
   /** The batch's answer for this lead, once it is in: the output, or an error (then the lead is written directly). */
@@ -63,6 +67,14 @@ export class MemoryStore implements EngineStore {
   deferred = new Map<string, WriteInput>();
   batchResults = new Map<string, { output?: WriterOutput; costs: CostEntry[]; error?: string }>();
   costs: (CostEntry & { lead_id: string })[] = [];
+  suppressed = new Set<string>();
+  personResearch = new Map<string, { status: string; detail: string; facts: Fact[] }>();
+  async isSuppressed(_ws: string, email: string, domain: string | null) {
+    return this.suppressed.has(email.toLowerCase()) || (!!domain && this.suppressed.has(domain));
+  }
+  async savePersonResearch(leadId: string, r: { status: "matched" | "no_match" | "not_searched"; detail: string; facts: Fact[] }) {
+    this.personResearch.set(leadId, structuredClone(r));
+  }
 
   async loadLeadJob(id: string) {
     const j = this.jobs.get(id);

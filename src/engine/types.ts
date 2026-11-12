@@ -2,7 +2,7 @@
 import type { Slot } from "@/lib/template";
 import type { StyleRules } from "@/lib/types";
 
-export type PageType = "home" | "about" | "services" | "news" | "careers";
+export type PageType = "home" | "about" | "services" | "news" | "careers" | "reviews";
 
 export type PickedPage = { url: string; type: PageType };
 
@@ -58,8 +58,11 @@ export type LeadJob = {
     domain: string | null;
     custom: Record<string, string>;
     status: string;
+    /** Deep research done earlier for this lead (reused on a re-run, e.g. after an Economy batch). */
+    deep_status?: "matched" | "no_match" | "not_searched" | null;
+    person_facts?: Fact[] | null;
   };
-  campaign: { id: string; writer: "pro" | "lite"; depth: { deep: boolean; local: boolean }; status?: string; mode?: "now" | "economy" };
+  campaign: { id: string; writer: "pro" | "lite"; depth: { deep: boolean }; status?: string; mode?: "now" | "economy" };
   template: { id: string; subject: string; body: string; slots: Slot[]; style_rules: StyleRules; examples: unknown[] } | null;
   /** Personalised follow-up steps (2, 3, …), written right after step 1 from the same facts. */
   followUps?: { step_no: number; body: string }[];
@@ -67,7 +70,7 @@ export type LeadJob = {
 
 /** One provider call, as logged to usage_costs. */
 export type CostEntry = {
-  step: "scrape" | "extract" | "write" | "validate" | "judge" | "search" | "places";
+  step: "scrape" | "extract" | "write" | "validate" | "judge" | "search";
   model: string;
   input_tokens?: number;
   output_tokens?: number;

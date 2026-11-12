@@ -40,7 +40,7 @@ const STATUS: Record<string, { label: string; tone: "gray" | "indigo" | "green" 
   failed: { label: "Failed", tone: "red" },
   skipped: { label: "Skipped", tone: "gray" },
 };
-const TIER_LABEL: Record<string, string> = { A: "Website", B: "Google reviews", C: "Lead list", D: "Public mention" };
+const TIER_LABEL: Record<string, string> = { A: "Website", B: "Reviews", C: "Lead list", D: "Their own published work" };
 
 export default function PreviewPage(props: PageProps<"/campaigns/[id]/preview">) {
   return (
@@ -261,6 +261,11 @@ function LeadCard({
                     </li>
                   ))}
                 </ul>
+              )}
+              {(r as { person?: { status: string; detail: string } }).person && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Deep: {(r as { person: { status: string; detail: string } }).person.status === "matched" ? "facts from their own published work (tier D)" : (r as { person: { detail: string } }).person.detail || "no confident match (not charged)"}
+                </p>
               )}
             </section>
 

@@ -20,7 +20,7 @@ export const LEGAL_UPDATED = "10 November 2026";
 const hostName = process.env.LEGAL_HOST_NAME?.trim() || "Server hosting provider [to be completed]";
 const hostLocation = process.env.LEGAL_HOST_LOCATION?.trim() || "[to be completed]";
 
-/** §11 sub-processors (Kelviq replaces Stripe; Google Maps only once the Local add-on exists). */
+/** §11 sub-processors (Kelviq replaces Stripe; no Google Maps Platform: the Local add-on was dropped). */
 export const SUBPROCESSORS = [
   { name: "Supabase Inc.", purpose: "Database, sign-in", data: "Account data, lead lists, generated emails", location: "EU (Ireland)" },
   { name: "Anthropic PBC", purpose: "AI: reading facts from websites, writing and checking the personalised lines", data: "Company website text, lead first name, company, job title", location: "United States (SCCs)" },

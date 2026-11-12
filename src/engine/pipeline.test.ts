@@ -39,7 +39,7 @@ function job(over: Partial<LeadJob["lead"]> = {}): LeadJob {
       id: "lead-1", workspace_id: "ws-1", campaign_id: "c-1", email: "anna@acmestudio.nl", first_name: "Anna", last_name: "de Vries",
       company: "Acme Studio", title: "Founder", linkedin_headline: null, website: "acmestudio.nl", domain: "acmestudio.nl", custom: {}, status: "queued", ...over,
     },
-    campaign: { id: "c-1", writer: "pro", depth: { deep: false, local: false } },
+    campaign: { id: "c-1", writer: "pro", depth: { deep: false } },
     template: { id: "t-1", subject: "Idea for {{company}}", body: BODY, slots: [], style_rules: { language: "en" }, examples: [] },
   };
 }
@@ -286,5 +286,78 @@ describe("processLead (fake LLM, fake website)", () => {
     llm.write = async () => { throw new Error("503 overloaded"); };
     const { deps } = setup(llm);
     await expect(processLead("lead-1", deps)).rejects.toThrow("503");
+  });
+});
+
+describe("Deep research in the pipeline (switch on only in these tests)", () => {
+  const deepConfig = engineConfig({ DEEP_RESEARCH_ENABLED: "1" });
+  const TALK_URL = "https://packagingdays.nl/sprekers/anna-de-vries";
+  const TALK = "# Packaging Days 2026\n\nAnna de Vries, founder of Acme Studio, gave a talk on refill packaging for small food brands at Packaging Days in Utrecht.";
+  function deepReader(calls: string[] = []): WebReader {
+    const base = fakeReader(SITE, calls);
+    return {
+      ...base,
+      async scrape(url, t) {
+        if (url === TALK_URL) {
+          calls.push(`scrape ${url}`);
+          return { markdown: TALK, statusCode: 200, credits: 1 };
+        }
+        return base.scrape(url, t);
+      },
+      async search(q) {
+        calls.push(`search ${q}`);
+        return { results: [{ url: TALK_URL, title: "Anna de Vries · Packaging Days", description: "Talk by Anna de Vries" }], credits: 2 };
+      },
+    };
+  }
+  const deepJob = (over: Partial<LeadJob["lead"]> = {}) => ({ ...job(over), campaign: { id: "c-1", writer: "pro" as const, depth: { deep: true } } });
+  function run(j: LeadJob, cfg = deepConfig, calls: string[] = []) {
+    const store = new MemoryStore();
+    store.jobs.set(j.lead.id, j);
+    return { store, calls, go: () => processLead(j.lead.id, { store, reader: deepReader(calls), llm: new FakeLLM(), config: cfg, now: () => new Date("2026-11-12T12:00:00Z") }) };
+  }
+
+  it("uses one fact about the contact's own work in the first email, charges Deep only because it was used, and keeps it out of the domain cache", async () => {
+    const t = run(deepJob());
+    expect((await t.go()).outcome).toBe("done");
+    const g = t.store.generations[0];
+    expect(g.facts_used).toEqual(["P1"]);
+    expect(g.full_email).toMatch(/Saw your work: anna de Vries, founder of Acme Studio, gave a talk/i);
+    expect(t.store.settled).toEqual([{ leadId: "lead-1", used: 2 }]);
+    // Stored with the lead, not in the shared domain cache.
+    expect(t.store.personResearch.get("lead-1")).toMatchObject({ status: "matched", facts: [{ id: "P1", tier: "D", src: TALK_URL }] });
+    expect(JSON.stringify(t.store.research.get("acmestudio.nl"))).not.toContain("Packaging Days");
+    expect((g.research as { person: { status: string } }).person.status).toBe("matched");
+  });
+
+  it("no confident match: nothing used and Deep isn't charged", async () => {
+    const t = run(deepJob({ last_name: "Jansen" }));
+    await t.go();
+    expect(t.store.personResearch.get("lead-1")).toMatchObject({ status: "no_match", facts: [] });
+    expect(t.store.settled).toEqual([{ leadId: "lead-1", used: 1 }]);
+  });
+
+  it("never searches a contact on the do-not-contact list", async () => {
+    const t = run(deepJob());
+    t.store.suppressed.add("anna@acmestudio.nl");
+    await t.go();
+    expect(t.calls.some((c) => c.startsWith("search"))).toBe(false);
+    expect(t.store.personResearch.get("lead-1")).toMatchObject({ status: "not_searched", detail: "On the do-not-contact list: not searched" });
+  });
+
+  it("does nothing while the switch is off, even for a campaign set to Deep", async () => {
+    const t = run(deepJob(), engineConfig({}));
+    await t.go();
+    expect(t.calls.some((c) => c.startsWith("search"))).toBe(false);
+    expect(t.store.personResearch.size).toBe(0);
+    expect(t.store.settled).toEqual([{ leadId: "lead-1", used: 1 }]);
+  });
+
+  it("a re-run reuses the earlier result instead of searching again", async () => {
+    const j = deepJob({ deep_status: "matched", person_facts: [{ id: "P1", text: "Gave a talk on refill packaging", src: TALK_URL, tier: "D" }] });
+    const t = run(j);
+    await t.go();
+    expect(t.calls.some((c) => c.startsWith("search"))).toBe(false);
+    expect(t.store.generations[0].facts_used).toEqual(["P1"]);
   });
 });

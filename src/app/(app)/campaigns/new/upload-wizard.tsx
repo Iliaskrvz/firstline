@@ -284,7 +284,7 @@ export function UploadWizard() {
           )}
           <div className="rounded-xl bg-indigo-50 p-4">
             <div className="text-xs font-medium text-indigo-700">Estimated cost</div>
-            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(estimateCredits(withWebsite, { deep: false, local: false }))} credits</div>
+            <div className="mt-0.5 text-xl font-semibold text-indigo-900">≤ {n(estimateCredits(withWebsite, { deep: false }))} credits</div>
             <div className="mt-1 text-xs text-indigo-800/80">1 credit per personalised email. Fallbacks are free.</div>
           </div>
           {result && result.stats.imported > 0 && result.stats.personal_email / result.stats.imported > 0.3 && (

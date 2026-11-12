@@ -42,8 +42,8 @@ const source = {
       writer: { type: "string", enum: ["pro", "lite"], default: "pro" },
       depth: {
         type: "object",
-        description: "Deep and Local research are not available yet.",
-        properties: { deep: { type: "boolean", default: false, enum: [false] }, local: { type: "boolean", default: false, enum: [false] } },
+        description: "Deep research is not available.",
+        properties: { deep: { type: "boolean", default: false, enum: [false] } },
       },
     },
   },

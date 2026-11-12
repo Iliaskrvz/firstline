@@ -28,6 +28,7 @@ function wrap(llm: LLM, write: LLM["write"]): LLM {
     extractFacts: (i) => llm.extractFacts(i),
     judge: (i) => llm.judge(i),
     compare: llm.compare ? (i) => llm.compare!(i) : undefined,
+    personFacts: llm.personFacts ? (i) => llm.personFacts!(i) : undefined,
     batch: llm.batch,
     write,
   };

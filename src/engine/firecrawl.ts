@@ -3,6 +3,7 @@ import { HttpError, parseRetryAfter, TimeoutError, withRetry } from "./retry";
 
 export type MapLink = { url: string; title?: string; description?: string };
 export type ScrapeResult = { markdown: string; statusCode: number | null; title?: string; credits: number };
+export type SearchResult = { url: string; title: string; description: string };
 
 export interface WebReader {
   map(url: string): Promise<{ links: MapLink[]; credits: number }>;
@@ -13,6 +14,8 @@ export interface WebReader {
   planConcurrency?(): Promise<number | null>;
   /** Credits left in this billing period (Firecrawl's own numbers), or null if unknown. */
   creditUsage?(): Promise<CreditUsage | null>;
+  /** Web search (Deep research only): titles, links and snippets, no page content. */
+  search?(query: string, limit: number): Promise<{ results: SearchResult[]; credits: number }>;
 }
 
 const BASE = "https://api.firecrawl.dev/v2";
@@ -89,6 +92,16 @@ export function createFirecrawl(apiKey: string, fetchImpl: typeof fetch = fetch,
         statusCode: d.metadata?.statusCode ?? null,
         title: d.metadata?.title,
         credits: Number(d.metadata?.creditsUsed ?? 1),
+      };
+    },
+    async search(query, limit) {
+      const j = await withRetry(() => post("/search", { query, limit, sources: [{ type: "web" }] }, 20_000), { retries: 1 });
+      const d = j.data ?? {};
+      const list: { url?: string; title?: string; description?: string }[] = Array.isArray(d) ? d : Array.isArray(d.web) ? d.web : [];
+      return {
+        results: list.filter((r) => typeof r.url === "string").map((r) => ({ url: r.url!, title: r.title ?? "", description: r.description ?? "" })),
+        // Firecrawl: 2 credits per 10 results.
+        credits: Number(j.creditsUsed ?? 2 * Math.max(1, Math.ceil(list.length / 10))),
       };
     },
     async planConcurrency() {

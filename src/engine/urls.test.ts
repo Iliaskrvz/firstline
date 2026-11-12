@@ -130,3 +130,36 @@ describe("language preference (multi-language sites)", () => {
     expect(pickPages(picnic, "picnic.app", 4).map((p) => p.url)).toEqual(["https://picnic.app/nl", "https://picnic.app/nl/over-picnic"]);
   });
 });
+
+describe("reviews pages (local businesses)", () => {
+  const salon = [
+    "https://salonmira.nl/",
+    "https://salonmira.nl/over-ons",
+    "https://salonmira.nl/behandelingen",
+    "https://salonmira.nl/ervaringen",
+    "https://salonmira.nl/openingstijden",
+    "https://salonmira.nl/nieuws/2026/10/nieuwe-stoel",
+  ];
+  it("a local business's own reviews page comes right after the homepage", () => {
+    expect(pickPages(salon, "salonmira.nl").map((p) => [p.type, p.url])).toEqual([
+      ["home", "https://salonmira.nl/"],
+      ["reviews", "https://salonmira.nl/ervaringen"],
+      ["about", "https://salonmira.nl/over-ons"],
+      ["services", "https://salonmira.nl/behandelingen"],
+    ]);
+    // Lite reads 2 pages: home + their reviews.
+    expect(pickPages(salon, "salonmira.nl", 2).map((p) => p.type)).toEqual(["home", "reviews"]);
+  });
+
+  it("other sites keep about/services/news first; testimonials only if there's room", () => {
+    const agency = ["https://acme.io/", "https://acme.io/about", "https://acme.io/services", "https://acme.io/testimonials", "https://acme.io/blog/2026/09/launch"];
+    expect(pickPages(agency, "acme.io").map((p) => p.type)).toEqual(["home", "about", "services", "news"]);
+    expect(pickPages(agency, "acme.io", 5).map((p) => p.type)).toEqual(["home", "about", "services", "news", "reviews"]);
+  });
+
+  it("knows reviews pages in Dutch, English and German", () => {
+    for (const path of ["klantervaringen", "recensies", "reviews", "wat-klanten-zeggen", "kundenstimmen", "bewertungen"]) {
+      expect(classifyUrl(`https://x.nl/${path}`, "x.nl")?.type, path).toBe("reviews");
+    }
+  });
+});

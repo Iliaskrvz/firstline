@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireWorkspace } from "@/lib/auth";
+import { deepEnabled } from "@/lib/deep-switch";
 import { applyMapping, availableVariables, mappingErrors, MAX_ROWS, type ColumnMap, type ColumnTarget } from "@/lib/csv";
 import { MAX_FOLLOW_UPS, validateStep } from "@/lib/sender/sequence";
 import { creditsPerLead, type Depth } from "@/lib/credits";
@@ -115,6 +116,23 @@ const SettingsInput = z.object({
   template_id: z.uuid().nullable(),
 });
 
+export async function updateCampaignDeep(campaignId: string, deep: boolean): Promise<{ error: string } | { ok: true }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid setting." };
+  if (deep && !deepEnabled()) return { error: "Deep research isn't available." };
+  const { supabase, workspace } = await requireWorkspace();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .update({ depth: { deep } })
+    .eq("id", campaignId)
+    .eq("workspace_id", workspace.id)
+    .neq("status", "running")
+    .select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Can't change this while the campaign is running." };
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
+}
+
 export async function updateCampaignWriter(campaignId: string, writer: "pro" | "lite"): Promise<{ error: string } | { ok: true }> {
   if (!z.uuid().safeParse(campaignId).success || (writer !== "pro" && writer !== "lite")) return { error: "Invalid setting." };
   const { supabase } = await requireWorkspace();
@@ -181,7 +199,8 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean, mo
     .select("step_no", { count: "exact", head: true })
     .eq("campaign_id", campaignId)
     .eq("kind", "personalised");
-  const perLead = creditsPerLead(campaign.depth as Depth) + (personalised ?? 0);
+  // Deep reserves its extra credit only while Deep is switched on; it's charged only when used.
+  const perLead = creditsPerLead({ deep: !!(campaign.depth as Depth | null)?.deep && deepEnabled() }) + (personalised ?? 0);
   const reserved = await reserveForRun(pool, { workspaceId: workspace.id, leadIds: todo.filter((l) => l.domain).map((l) => l.id), perLead });
   if (!reserved.ok) {
     return { error: `This run needs up to ${n(reserved.need)} credits and you have ${n(reserved.available)}. Buy credits first (Credits page).` };

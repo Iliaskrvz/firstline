@@ -33,6 +33,12 @@ export type WriteInput = {
 
 export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null };
 
+/** Deep research (behind a switch): pages about a named contact → match verdict + at most 2 facts. */
+export type PersonInput = {
+  person: { first_name: string; last_name: string; company: string | null; domain: string; title: string | null };
+  pages: { url: string; markdown: string }[];
+};
+
 /** Two versions of the personalised lines for the same lead, for the Quality Lab. */
 export type CompareInput = { language: Language; facts: Fact[]; role: string | null; a: string; b: string };
 export type CompareOutput = { winner: "a" | "b" | "tie"; reason: string };
@@ -55,6 +61,8 @@ export interface LLM {
   extractFacts(input: ExtractInput): Promise<LLMResult<{ facts: Fact[] }>>;
   write(input: WriteInput): Promise<LLMResult<WriterOutput>>;
   judge(input: JudgeInput): Promise<LLMResult<JudgeScores>>;
+  /** Deep research (off by default): is this the contact, and what did they publish for their company? */
+  personFacts?(input: PersonInput): Promise<LLMResult<import("./schemas").PersonFactsOutput>>;
   /** Quality Lab: which of two versions is the better cold-email personalisation? */
   compare?(input: CompareInput): Promise<LLMResult<CompareOutput>>;
   /** Present when the provider can write in batches (Economy mode). */

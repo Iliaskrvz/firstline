@@ -1,11 +1,17 @@
 // Page picker (§5): classify a site's URLs by path keywords (no AI) and pick
-// homepage + best about/team + best services + newest news/blog post.
+// homepage + best about/team + best services + newest news/blog post. For local businesses
+// (opening hours, appointments, locations …) their own reviews/testimonials page comes first:
+// what their customers say, from their own site, at no extra cost (Google reviews aren't used).
 import type { PageType, PickedPage } from "./types";
 
 const KEYWORDS: Record<Exclude<PageType, "home">, string[]> = {
   about: ["over", "over-ons", "overons", "wie-zijn-wij", "wie-we-zijn", "ons-verhaal", "team", "about", "about-us", "story", "our-story", "ueber-uns", "uber-uns", "über-uns", "wer-wir-sind", "qui-sommes-nous", "a-propos"],
   services: ["diensten", "dienst", "behandelingen", "werkwijze", "services", "service", "solutions", "oplossingen", "what-we-do", "wat-we-doen", "leistungen", "aanbod", "expertise", "producten", "products"],
   news: ["nieuws", "blog", "blogs", "actueel", "news", "updates", "aktuelles", "neuigkeiten", "artikelen", "articles", "insights"],
+  reviews: [
+    "reviews", "review", "testimonials", "testimonial", "ervaringen", "klantervaringen", "klantverhalen", "recensies", "beoordelingen",
+    "wat-klanten-zeggen", "wat-onze-klanten-zeggen", "bewertungen", "kundenstimmen", "erfahrungen", "kundenbewertungen", "avis", "temoignages",
+  ],
   careers: ["vacatures", "vacature", "werken-bij", "werkenbij", "careers", "career", "jobs", "karriere", "karriere"],
 };
 
@@ -20,6 +26,24 @@ const DROP_SEGMENTS = new Set([
 const DROP_PARTS = ["terms-of", "terms-and", "privacy", "cookie-policy", "cookie-statement", "voorwaarden", "disclaimer", "datenschutz"];
 const DROP_EXT = /\.(pdf|jpe?g|png|gif|svg|webp|zip|docx?|xlsx?|pptx?|mp4|mp3|xml|json|css|js|ico|txt)$/i;
 const LANG_ROOT = /^(nl|en|de|fr|nl-nl|en-gb|en-us|de-de|be|fr-be|nl-be)$/;
+
+/** Pages a local business (shop, salon, practice, restaurant) tends to have. */
+const LOCAL_SIGNALS = [
+  "openingstijden", "opening-hours", "openingsuren", "oeffnungszeiten", "öffnungszeiten", "afspraak", "afspraak-maken", "online-afspraak",
+  "boeken", "reserveren", "reservering", "booking", "book-now", "appointment", "appointments", "termin", "termin-buchen",
+  "locatie", "locaties", "vestiging", "vestigingen", "route", "routebeschrijving", "behandelingen", "tarieven", "prijzen", "menu", "menukaart",
+];
+
+/** Does the site look like a local business? (path keywords only, no AI) */
+export function looksLocal(urls: string[], domain: string): boolean {
+  return urls.some((raw) => {
+    const n = normaliseUrl(raw);
+    if (!n) return false;
+    const u = new URL(n);
+    if (!sameSite(u.hostname, domain)) return false;
+    return decodeURIComponent(u.pathname).toLowerCase().split("/").filter(Boolean).some((seg) => LOCAL_SIGNALS.some((k) => segMatches(seg, k)));
+  });
+}
 
 export type Classified = { url: string; type: PageType; depth: number; date: number | null; lang: string | null } | null;
 
@@ -80,7 +104,7 @@ export function classifyUrl(raw: string, domain: string): Classified {
   if (content.length === 0) return { url: norm, type: "home", depth: 0, date: null, lang };
   if (content.some((s) => DROP_SEGMENTS.has(s) || DROP_PARTS.some((p) => s.includes(p)))) return null;
 
-  for (const type of ["careers", "news", "about", "services"] as const) {
+  for (const type of ["careers", "reviews", "news", "about", "services"] as const) {
     const at = content.findIndex((s) => KEYWORDS[type].some((k) => segMatches(s, k)));
     if (at !== -1) return { url: norm, type, depth: content.length, date: type === "news" ? urlDate(path) : null, lang };
   }
@@ -126,9 +150,12 @@ export function pickPages(urls: string[], domain: string, limit = 4, preferLang:
   const add = (c: NonNullable<Classified> | undefined) => {
     if (c && picked.length < limit && !picked.some((p) => p.url === c.url)) picked.push({ url: c.url, type: c.type });
   };
+  const reviews = best("reviews");
+  if (reviews && looksLocal(urls, domain)) add(reviews); // local business: what their customers say, first
   add(best("about"));
   add(best("services"));
   add(datedPost ?? newsIndex ?? anyPost);
+  add(reviews); // other sites: their testimonials if there's room
   add(best("careers")); // bonus hiring signal, only if there's room
   return picked;
 }

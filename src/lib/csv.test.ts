@@ -210,10 +210,9 @@ describe("variable keys", () => {
 
 describe("credits", () => {
   it("prices add-ons per lead", () => {
-    expect(creditsPerLead({ deep: false, local: false })).toBe(1);
-    expect(creditsPerLead({ deep: true, local: false })).toBe(2);
-    expect(creditsPerLead({ deep: true, local: true })).toBe(4);
-    expect(estimateCredits(120, { deep: false, local: true })).toBe(360);
+    expect(creditsPerLead({ deep: false })).toBe(1);
+    expect(creditsPerLead({ deep: true })).toBe(2);
+    expect(estimateCredits(120, { deep: true })).toBe(240);
   });
 });
 

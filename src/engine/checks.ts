@@ -24,7 +24,7 @@ const SPAM = [
 ];
 
 // Tier-✕: never personal life. Hard block.
-const FORBIDDEN_TOPICS = [
+export const FORBIDDEN_TOPICS = [
   // Family: only when it's about the reader ("your kids"), so a company's cause ("child labour") isn't blocked.
   /\b(your|you and your)\s+(wife|husband|partner|kids?|children|son|daughter|baby|family)\b/i,
   /\b(pregnan\w*|married|divorce\w*|honeymoon)\b/i,
@@ -168,4 +168,9 @@ export function allPass(items: CheckItem[]) {
 
 export function failureReasons(items: CheckItem[]): string[] {
   return items.filter((i) => !i.pass).map((i) => (i.detail ? `${i.label} (${i.detail})` : i.label));
+}
+
+/** True when a text touches a never-topic (personal life, health, religion, politics …). */
+export function touchesForbiddenTopic(text: string): boolean {
+  return FORBIDDEN_TOPICS.some((re) => re.test(text));
 }

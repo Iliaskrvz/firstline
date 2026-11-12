@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 import { reserveForRun } from "@/billing/db";
 import { creditsPerLead } from "@/lib/credits";
+import { deepEnabled } from "@/lib/deep-switch";
 import { isFreeMailDomain, normaliseDomain } from "@/lib/domain";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { ApiError, invalid, notFound } from "./errors";
@@ -113,8 +114,8 @@ export async function createJob(
   }
 
   const { source } = input;
-  if (source.options.depth.deep || source.options.depth.local) {
-    throw new ApiError(400, "not_available", "Deep and Local research are not available yet. Leave options.depth off.");
+  if (source.options.depth.deep && !deepEnabled()) {
+    throw new ApiError(400, "not_available", "Deep research is not available. Leave options.depth off.");
   }
   if (!source.copy === !source.campaign_id) throw invalid("Send either copy (your email with [[slots]]) or campaign_id, not both.");
   const emails = input.leads.map((l) => l.email.toLowerCase());
@@ -154,7 +155,7 @@ export async function createJob(
     const { rows: camp } = await c.query<{ id: string }>(
       `insert into public.campaigns (workspace_id, template_id, name, status, mode, depth, writer, source)
        values ($1, $2, $3, 'running', 'now', $4, $5, 'api') returning id`,
-      [caller.workspaceId, templateId, `API ${input.kind} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, JSON.stringify(source.options.depth), source.options.writer],
+      [caller.workspaceId, templateId, `API ${input.kind} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, JSON.stringify({ deep: source.options.depth.deep }), source.options.writer],
     );
     campaignId = camp[0].id;
     const { rows: leads } = await c.query<{ id: string }>(

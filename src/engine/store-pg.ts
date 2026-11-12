@@ -4,7 +4,7 @@
 import type { Pool } from "pg";
 import type { CachedResearch, EngineStore, GenerationRecord, LeadStatus } from "./store";
 import type { WriteInput } from "./llm";
-import type { CostEntry, LeadJob, WriterOutput } from "./types";
+import type { CostEntry, LeadJob, WriterOutput , Fact } from "./types";
 
 export class PgStore implements EngineStore {
   constructor(private pool: Pool) {}
@@ -12,7 +12,7 @@ export class PgStore implements EngineStore {
   async loadLeadJob(leadId: string): Promise<LeadJob | null> {
     const { rows } = await this.pool.query(
       `select l.id, l.workspace_id, l.campaign_id, l.email, l.first_name, l.last_name, l.company, l.title,
-              l.linkedin_headline, l.website, l.domain, l.custom, l.status,
+              l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.deep_status, l.person_facts,
               c.writer, c.depth, c.status as c_status, c.mode as c_mode,
               t.id as t_id, t.subject, t.body, t.slots, t.style_rules, t.examples
          from public.leads l
@@ -33,6 +33,7 @@ export class PgStore implements EngineStore {
         id: r.id, workspace_id: r.workspace_id, campaign_id: r.campaign_id, email: r.email, first_name: r.first_name,
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
         website: r.website, domain: r.domain, custom: r.custom ?? {}, status: r.status,
+        deep_status: r.deep_status ?? null, person_facts: r.person_facts ?? null,
       },
       campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode },
       template: r.t_id
@@ -72,6 +73,25 @@ export class PgStore implements EngineStore {
          extractor = excluded.extractor, researched_at = excluded.researched_at, expires_at = excluded.expires_at`,
       [r.domain, JSON.stringify(r.pages), JSON.stringify(r.facts), r.status, r.extractor, r.researched_at, r.expires_at],
     );
+  }
+
+  async isSuppressed(workspaceId: string, email: string, domain: string | null): Promise<boolean> {
+    const { rows } = await this.pool.query(
+      `select 1 from public.suppression where workspace_id = $1
+         and (lower(email) = lower($2) or (email is null and domain is not null and domain = any($3::text[])))
+       limit 1`,
+      [workspaceId, email, [domain, email.split("@")[1]?.toLowerCase()].filter(Boolean)],
+    );
+    return rows.length > 0;
+  }
+
+  async savePersonResearch(leadId: string, r: { status: "matched" | "no_match" | "not_searched"; detail: string; facts: Fact[] }): Promise<void> {
+    await this.pool.query("update public.leads set deep_status = $2, deep_detail = $3, person_facts = $4 where id = $1", [
+      leadId,
+      r.status,
+      r.detail,
+      r.facts.length ? JSON.stringify(r.facts) : null,
+    ]);
   }
 
   async settleCredits(leadId: string, used: number) {

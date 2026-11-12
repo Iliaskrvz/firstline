@@ -14,6 +14,7 @@ import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
 import type { Gate } from "./limiter";
+import { findPersonFacts } from "./deep";
 import { LIVE_SKILL_VERSION as SKILL_VERSION } from "./skills";
 import { researchDomain } from "./research";
 import type { CachedResearch, EngineStore } from "./store";
@@ -214,8 +215,29 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   }
   if (facts.length === 0) return fallback("no_facts", research);
 
+  // --- Deep research (behind a switch: off until the lawyer and Anthropic confirm) -------------
+  // At most 2 facts about the contact's own work for their current company. Never for a contact on
+  // the do-not-contact list; stored only with this lead, never in the shared domain cache.
+  let personFacts: Fact[] = [];
+  if (job.campaign.depth?.deep && config.deep.enabled) {
+    let deep: { status: "matched" | "no_match" | "not_searched"; detail: string; facts: Fact[] };
+    if (lead.deep_status) deep = { status: lead.deep_status, detail: "", facts: lead.person_facts ?? [] };
+    else if (await store.isSuppressed(lead.workspace_id, lead.email, lead.domain)) deep = { status: "not_searched", detail: "On the do-not-contact list: not searched", facts: [] };
+    else {
+      const r = await findPersonFacts(
+        { first_name: lead.first_name, last_name: lead.last_name, company: lead.company, domain: lead.domain, title: lead.title },
+        { reader: deps.reader, llm, config, gate: deps.firecrawlGate },
+      );
+      await log(r.costs);
+      deep = r;
+    }
+    if (!lead.deep_status) await store.savePersonResearch(lead.id, deep);
+    personFacts = deep.facts;
+    research = { ...research, facts: [...facts, ...personFacts], person: { status: deep.status, detail: deep.detail } };
+  }
+
   // --- Write + validate, one rewrite --------------------------------------------
-  const allFacts = [...facts, ...roleFacts(lead)];
+  const allFacts = [...facts, ...personFacts, ...roleFacts(lead)];
   const ctx: CheckContext = { slots: tpl.slots, facts: allFacts, language, skillVersion: SKILL_VERSION, extraBanned: rules.banned_phrases, company: lead.company };
   const examples = (job.template.examples ?? []).filter((e): e is string => typeof e === "string").slice(0, 3);
   await store.setLeadStatus(lead.id, "writing");
@@ -255,8 +277,11 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
           facts_used: out.facts_used, skill_version: out.skill_version, checks: { status: "passed", items: checks, attempts: attempt },
           judge_scores: judge ?? {}, research, provider: llm.provider, is_preview: !!opts.preview, attempts: attempt,
         });
-        const followUpsWritten = await writeFollowUps(allFacts, email.body);
-        await settle(creditsPerLead(job.campaign.depth) + followUpsWritten);
+        // Person facts are for this one email only, not the follow-ups.
+        const followUpsWritten = await writeFollowUps([...facts, ...roleFacts(lead)], email.body);
+        // Deep's extra credit only when a person fact was actually used (no confident match = free).
+        const usedPerson = personFacts.some((f) => out.facts_used.includes(f.id));
+        await settle(creditsPerLead({ deep: usedPerson }) + followUpsWritten);
         const confidence = attempt === 1 && avg >= 4.2 ? "high" : "medium";
         await store.setLeadStatus(lead.id, "done", { detail: null, confidence });
         return { outcome: "done", costUsd: totalCost(spent) };

@@ -40,8 +40,8 @@ export function anthropicCostEntry(step: CostEntry["step"], model: string, u: To
   };
 }
 
-export function firecrawlCostEntry(kind: "map" | "scrape", credits: number, usdPerCredit: number): CostEntry {
-  return { step: "scrape", model: `firecrawl-${kind}`, provider_units: credits, cost_usd: Math.round(credits * usdPerCredit * 1e6) / 1e6 };
+export function firecrawlCostEntry(kind: "map" | "scrape" | "search", credits: number, usdPerCredit: number): CostEntry {
+  return { step: kind === "search" ? "search" : "scrape", model: `firecrawl-${kind}`, provider_units: credits, cost_usd: Math.round(credits * usdPerCredit * 1e6) / 1e6 };
 }
 
 export function totalCost(entries: Pick<CostEntry, "cost_usd">[]): number {

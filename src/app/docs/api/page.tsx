@@ -109,7 +109,7 @@ export default function ApiDocs() {
           </li>
         </ul>
         <p>
-          <code>options.writer</code>: <code>pro</code> (default) or <code>lite</code>. Deep and Local research are not available in the API yet.
+          <code>options.writer</code>: <code>pro</code> (default) or <code>lite</code>. Deep research is not available in the API.
         </p>
 
         <H2 id="safety">4. Retries, limits and errors</H2>

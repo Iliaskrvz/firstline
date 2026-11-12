@@ -39,9 +39,14 @@ export const CopyInput = z.object({
 export const Options = z
   .object({
     writer: z.enum(["pro", "lite"]).default("pro"),
-    depth: z.object({ deep: z.boolean().default(false), local: z.boolean().default(false) }).default({ deep: false, local: false }),
+    depth: z
+      .object({
+        deep: z.boolean().default(false),
+        local: z.literal(false, "Local research isn't offered.").optional(),
+      })
+      .default({ deep: false }),
   })
-  .default({ writer: "pro", depth: { deep: false, local: false } });
+  .default({ writer: "pro", depth: { deep: false } });
 
 const source = {
   copy: CopyInput.optional(),

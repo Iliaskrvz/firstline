@@ -50,3 +50,12 @@ export function sanitiseFacts(facts: { id: string; text: string; src: string; ti
 }
 
 export const CompareSchema = z.object({ winner: z.enum(["a", "b", "tie"]), reason: z.string() });
+
+/** Deep research (off by default): match verdict and at most 2 facts about the contact's own work. */
+export const PERSON_KINDS = ["article", "talk", "podcast", "company_news"] as const;
+export const PersonFactsSchema = z.object({
+  same_person: z.enum(["yes", "unsure", "no"]),
+  reason: z.string(),
+  facts: z.array(z.object({ text: z.string(), src: z.string(), kind: z.enum(PERSON_KINDS), date: z.string().nullable() })),
+});
+export type PersonFactsOutput = z.infer<typeof PersonFactsSchema>;

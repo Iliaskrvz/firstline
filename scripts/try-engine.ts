@@ -64,7 +64,7 @@ async function main() {
   for (const [i, l] of leads.slice(0, limit).entries()) {
     const job: LeadJob = {
       lead: { id: `lead-${i + 1}`, workspace_id: "cli", campaign_id: "cli", status: "queued", ...l },
-      campaign: { id: "cli", writer: "pro", depth: { deep: false, local: false } },
+      campaign: { id: "cli", writer: "pro", depth: { deep: false } },
       template: { id: "cli", ...TEMPLATE_NL, slots: tpl.slots, style_rules: { language: "auto" }, examples: [] },
     };
     store.jobs.set(job.lead.id, job);

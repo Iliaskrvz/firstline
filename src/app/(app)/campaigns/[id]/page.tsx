@@ -14,7 +14,8 @@ import { queueConfigured } from "@/server/queue";
 import { WAITING_FOR_BATCH } from "@/engine/economy";
 import { detectLanguage } from "@/engine/language";
 import { defaultOptOutLine } from "@/lib/sender/messages";
-import { CampaignSettings, WriterSetting } from "./campaign-settings";
+import { CampaignSettings, DeepSetting, WriterSetting } from "./campaign-settings";
+import { deepEnabled } from "@/lib/deep-switch";
 import { PreviewButton } from "./preview-button";
 import { AutoRefresh } from "./preview/auto-refresh";
 import { ResumeButton } from "./resume-button";
@@ -186,12 +187,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
               <label className="flex items-center gap-2">
                 <input type="radio" checked readOnly className="accent-indigo-600" /> Standard: company website
               </label>
-              <label className="flex items-center gap-2 text-slate-400">
-                <input type="checkbox" disabled /> + Deep web search (+1 credit) <Badge>later</Badge>
-              </label>
-              <label className="flex items-center gap-2 text-slate-400">
-                <input type="checkbox" disabled /> + Local / Google reviews (+2) <Badge>later</Badge>
-              </label>
+              {deepEnabled() && <DeepSetting campaignId={c.id} deep={!!c.depth?.deep} locked={c.status === "running"} />}
             </div>
           </div>
           <div className="rounded-xl bg-indigo-50 p-4">
