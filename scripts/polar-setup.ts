@@ -96,6 +96,17 @@ async function main() {
 
   const packProducts: Record<string, string> = {};
   if (withPacks) {
+    // Polar wants a price in the organization's default currency on every product. Packs are priced
+    // in EUR (src/config/packs.ts), so the organization must default to EUR.
+    const orgs = await api<Page<{ id: string; slug: string; default_presentment_currency?: string }>>("GET", "/v1/organizations/?limit=10");
+    if (orgs.status >= 300) fail("Reading the organization", orgs.status, orgs.data);
+    const currency = orgs.data.items[0]?.default_presentment_currency?.toLowerCase();
+    if (currency && currency !== "eur") {
+      console.error(`✗ Your Polar organization's default currency is ${currency.toUpperCase()}, but FirstLine's packs are priced in EUR.`);
+      console.error("  Change it to EUR in the Polar dashboard (Settings → General / Payments: default currency), then run this again.");
+      console.error("  Nothing else was changed; the test product and anything already created are reused.");
+      process.exit(1);
+    }
     for (const pack of enabledPacks()) {
       let found = list.data.items.find((p) => !p.is_archived && p.metadata?.pack === pack.id);
       if (!found) {
