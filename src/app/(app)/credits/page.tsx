@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { requireWorkspace } from "@/lib/auth";
-import { euro, PACK_IDS, PACKS } from "@/lib/credits";
+import { enabledPacks, euro } from "@/lib/credits";
+import { isAdminRole } from "@/lib/team";
 import { formatDate, n } from "@/lib/format";
 import { kelviqConfigured } from "@/server/kelviq";
 import { AutoRefresh } from "../campaigns/[id]/preview/auto-refresh";
@@ -38,13 +39,19 @@ export default function CreditsPage(props: PageProps<"/credits">) {
 
 async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["searchParams"] }) {
   const { paid } = await searchParams;
-  const { supabase, workspace } = await requireWorkspace();
+  const { supabase, workspace, role } = await requireWorkspace();
+  const canBuy = isAdminRole(role);
+  const packs = enabledPacks();
+  const groups = [
+    { kind: "standard", title: "Credit packs", note: "For any campaign.", packs: packs.filter((p) => p.kind === "standard") },
+    { kind: "lite", title: "Lite packs", note: "Cheaper, for campaigns with the Lite writer only (shorter research, a smaller AI model).", packs: packs.filter((p) => p.kind === "lite") },
+  ].filter((g) => g.packs.length);
   const [{ data: bal }, { data: rows }, { data: camps }] = await Promise.all([
-    supabase.from("workspace_balance").select("available, reserved, spent").eq("workspace_id", workspace.id).maybeSingle(),
-    supabase.from("credit_ledger").select("id, type, amount, note, campaign_id, lead_id, stripe_event_id, source, created_at").order("created_at", { ascending: false }).limit(300),
-    supabase.from("campaigns").select("id, name"),
+    supabase.from("workspace_balance").select("available, reserved, spent, lite_available").eq("workspace_id", workspace.id).maybeSingle(),
+    supabase.from("credit_ledger").select("id, type, amount, note, campaign_id, lead_id, stripe_event_id, source, created_at").eq("workspace_id", workspace.id).order("created_at", { ascending: false }).limit(300),
+    supabase.from("campaigns").select("id, name").eq("workspace_id", workspace.id),
   ]);
-  const b = (bal ?? { available: 0, reserved: 0, spent: 0 }) as { available: number; reserved: number; spent: number };
+  const b = (bal ?? { available: 0, reserved: 0, spent: 0, lite_available: 0 }) as { available: number; reserved: number; spent: number; lite_available: number };
   const campaigns = new Map((camps ?? []).map((c) => [c.id, c.name as string]));
   const ledger = (rows ?? []) as { id: number; type: string; amount: number; note: string | null; campaign_id: string | null; lead_id: string | null; stripe_event_id: string | null; source: string | null; created_at: string }[];
   const justPaid = typeof paid === "string" && paid.length > 0;
@@ -80,30 +87,41 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
         </Card>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className={`grid grid-cols-1 gap-3 ${b.lite_available > 0 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Stat label="Available" value={n(b.available)} tone="green" />
+        {b.lite_available > 0 && <Stat label="Lite credits (Lite writer only)" value={n(b.lite_available)} tone="green" />}
         <Stat label="Reserved for running campaigns" value={n(b.reserved)} />
         <Stat label="Used so far" value={n(b.spent)} />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {PACK_IDS.map((id) => {
-          const p = PACKS[id];
-          return (
-            <Card key={id} className="space-y-3">
-              <div className="flex items-baseline justify-between">
-                <h2 className="text-base font-semibold text-slate-900">{p.name}</h2>
-                <span className="text-xs text-slate-500">{euro(Math.round((p.priceCents / p.credits) * 10) / 10)} / email</span>
-              </div>
-              <div>
-                <div className="text-2xl font-semibold text-slate-900">{n(p.credits)} credits</div>
-                <div className="text-sm text-slate-600">{euro(p.priceCents)} excl. VAT</div>
-              </div>
-              <BuyButton pack={id} label={`Buy ${p.name}`} disabled={!kelviqConfigured()} />
-            </Card>
-          );
-        })}
-      </div>
+      {groups.map((g) => (
+        <section key={g.kind} className="space-y-3">
+          {groups.length > 1 && (
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">{g.title}</h2>
+              <p className="text-sm text-slate-600">{g.note}</p>
+            </div>
+          )}
+          <div className="grid gap-4 md:grid-cols-3">
+            {g.packs.map((p) => (
+              <Card key={p.id} className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <h3 className="text-base font-semibold text-slate-900">{p.name}</h3>
+                  <span className="text-xs text-slate-500">{euro(Math.round((p.priceCents / p.credits) * 10) / 10)} / email</span>
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold text-slate-900">
+                    {n(p.credits)} {p.kind === "lite" ? "Lite credits" : "credits"}
+                  </div>
+                  <div className="text-sm text-slate-600">{euro(p.priceCents)} excl. VAT</div>
+                </div>
+                <BuyButton pack={p.id} label={`Buy ${p.name}`} disabled={!kelviqConfigured() || !canBuy} />
+              </Card>
+            ))}
+          </div>
+        </section>
+      ))}
+      {!canBuy && <p className="text-sm text-slate-600">Only the workspace owner or an admin can buy credits. Everyone in the workspace uses them.</p>}
       {!kelviqConfigured() && <p className="text-sm text-amber-800">Payments aren&apos;t set up on this server yet (KELVIQ_API_KEY).</p>}
       <p className="text-xs text-slate-500">
         Pay with iDEAL | Wero or card. Payments are handled by our reseller Kelviq, which adds VAT where it applies and sends the invoice. Why this price? We

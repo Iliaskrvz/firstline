@@ -21,7 +21,7 @@ export default function NewTemplatePage(props: PageProps<"/templates/new">) {
 async function Editor({ searchParams }: { searchParams: PageProps<"/templates/new">["searchParams"] }) {
   const sp = await searchParams;
   const campaignId = typeof sp.campaign === "string" && /^[0-9a-f-]{36}$/i.test(sp.campaign) ? sp.campaign : null;
-  const { supabase } = await requireWorkspace();
-  const ctx = await previewContext(supabase, campaignId);
+  const { supabase, workspace } = await requireWorkspace();
+  const ctx = await previewContext(supabase, campaignId, workspace.id);
   return <TemplateEditor template={null} campaignId={campaignId} {...ctx} />;
 }

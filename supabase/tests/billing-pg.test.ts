@@ -77,7 +77,7 @@ describe("credits", () => {
   it("a purchase is added once, however often Stripe sends the webhook", async () => {
     expect(await addPurchase(pool, { workspaceId: ws, credits: 5, key: "checkout:cs_1", note: "Starter" })).toBe(true);
     expect(await addPurchase(pool, { workspaceId: ws, credits: 5, key: "checkout:cs_1", note: "Starter" })).toBe(false);
-    expect(await balance(pool, ws)).toEqual({ available: 5, reserved: 0, spent: 0 });
+    expect(await balance(pool, ws)).toEqual({ available: 5, reserved: 0, spent: 0, lite_available: 0 });
   });
 
   it("refuses a run it can't pay for, without reserving anything", async () => {
@@ -89,21 +89,21 @@ describe("credits", () => {
   it("reserves, then the pipeline captures what a written lead used and releases the rest", async () => {
     const id = await lead("d@bos4.nl", "bakkerij.nl");
     expect(await reserveForRun(pool, { workspaceId: ws, leadIds: [id], perLead: 2 })).toEqual({ ok: true, reserved: 1, credits: 2 });
-    expect(await balance(pool, ws)).toEqual({ available: 3, reserved: 2, spent: 0 });
+    expect(await balance(pool, ws)).toEqual({ available: 3, reserved: 2, spent: 0, lite_available: 0 });
     // Reserving again (a retried run) charges nothing extra.
     expect(await reserveForRun(pool, { workspaceId: ws, leadIds: [id], perLead: 2 })).toEqual({ ok: true, reserved: 0, credits: 0 });
 
     const res = await processLead(id, { store: new PgStore(pool), reader, llm: new FakeLLM(), config: engineConfig({}) });
     expect(res.outcome).toBe("done");
     // 1 for the email (no personalised follow-ups); the second reserved credit comes back.
-    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1 });
+    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1, lite_available: 0 });
   });
 
   it("a lead without a website falls back for free", async () => {
     const id = await lead("e@nosite.nl", null);
     await reserveForRun(pool, { workspaceId: ws, leadIds: [id], perLead: 1 });
     expect((await processLead(id, { store: new PgStore(pool), reader, llm: new FakeLLM(), config: engineConfig({}) })).outcome).toBe("fallback");
-    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1 });
+    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1, lite_available: 0 });
   });
 
   it("stopping a run gives back every open reservation and skips leads not started", async () => {
@@ -111,11 +111,11 @@ describe("credits", () => {
     await reserveForRun(pool, { workspaceId: ws, leadIds: ids, perLead: 1 });
     expect((await balance(pool, ws)).reserved).toBe(2);
     expect(await stopRun(pool, ws, campaign)).toMatchObject({ released: 2 });
-    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1 });
+    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1, lite_available: 0 });
     expect((await pool.query("select status from public.leads where id = $1", [ids[0]])).rows[0].status).toBe("skipped");
     // A job that was already queued for it does nothing and costs nothing.
     expect((await processLead(ids[1], { store: new PgStore(pool), reader, llm: new FakeLLM(), config: engineConfig({}) })).outcome).toBe("skipped");
-    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1 });
+    expect(await balance(pool, ws)).toEqual({ available: 4, reserved: 0, spent: 1, lite_available: 0 });
   });
 });
 
@@ -170,7 +170,7 @@ describe("Kelviq", () => {
     expect(await handleKelviqEvent(pool, completed(), plans)).toEqual({ handled: true, added: 0 });
     expect((await balance(pool, ws)).available).toBe(before + 500);
     const note = (await pool.query("select note from public.credit_ledger where stripe_event_id = 'kelviq:cs_test_1'")).rows[0].note;
-    expect(note).toBe("Starter pack: 500 credits · Kelviq · 19.00 EUR paid (test)");
+    expect(note).toBe("Starter pack (starter): 500 credits · Kelviq · 19.00 EUR paid (test)");
   });
 
   it("falls back to the plan identifier; ignores other events, other products and unfinished checkouts", async () => {

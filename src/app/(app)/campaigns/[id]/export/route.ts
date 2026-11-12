@@ -11,7 +11,7 @@ export async function GET(_request: NextRequest, ctx: RouteContext<"/campaigns/[
   if (!/^[0-9a-f-]{36}$/i.test(id)) return new Response("Not found", { status: 404 });
   const { supabase, workspace } = await requireWorkspace();
   // RLS check: the campaign must be visible to this user.
-  const { data: campaign } = await supabase.from("campaigns").select("id, name, templates(subject, body)").eq("id", id).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, name, templates(subject, body)").eq("id", id).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) return new Response("Not found", { status: 404 });
 
   const pool = serverPool();

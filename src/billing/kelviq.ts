@@ -5,6 +5,7 @@ import { validateEvent, WebhookVerificationError } from "@kelviq/node-sdk";
 import type pg from "pg";
 import { PACKS, isPackId, type PackId } from "@/lib/credits";
 import { addPurchase } from "./db";
+import { logActivity } from "@/teams/db";
 
 /** The part of the Kelviq SDK we use (client.checkout). */
 export type KelviqCheckout = {
@@ -18,12 +19,9 @@ export type KelviqCheckout = {
 };
 
 /** One one-time plan per pack in the Kelviq dashboard; identifiers can be overridden with env vars. */
+/** Kelviq plan identifier per pack: KELVIQ_PLAN_<ID> (e.g. KELVIQ_PLAN_LITE_50K), else "firstline-<id>". */
 export function planIdentifiers(env: Record<string, string | undefined> = process.env): Record<PackId, string> {
-  return {
-    starter: env.KELVIQ_PLAN_STARTER?.trim() || "firstline-starter",
-    growth: env.KELVIQ_PLAN_GROWTH?.trim() || "firstline-growth",
-    agency: env.KELVIQ_PLAN_AGENCY?.trim() || "firstline-agency",
-  };
+  return Object.fromEntries(Object.keys(PACKS).map((id) => [id, env[`KELVIQ_PLAN_${id.toUpperCase().replace(/-/g, "_")}`]?.trim() || `firstline-${id}`]));
 }
 
 export async function createKelviqCheckout(
@@ -95,7 +93,11 @@ export async function handleKelviqEvent(pool: pg.Pool, event: KelviqEvent, plans
     workspaceId,
     credits: p.credits,
     key: `kelviq:${sessionId}`,
-    note: `${p.name} pack: ${p.credits.toLocaleString("en")} credits · Kelviq${paid}${event.test ? " (test)" : ""}`,
+    kind: p.kind,
+    note: `${p.name} pack (${p.id}): ${p.credits.toLocaleString("en")} ${p.kind === "lite" ? "Lite " : ""}credits · Kelviq${paid}${event.test ? " (test)" : ""}`,
   });
+  if (added) {
+    await logActivity(pool, { workspaceId, userId: null, actor: "Payment (Kelviq)", action: "credits.bought", target: `${p.name} pack`, details: { credits: p.credits, kind: p.kind } });
+  }
   return { handled: true, added: added ? p.credits : 0 };
 }

@@ -24,7 +24,7 @@ export default function RepliesPage() {
 type Send = { id: string; lead_id: string; campaign_id: string; inbox_id: string | null; step_no: number; status: string; status_detail: string | null; gmail_thread_id: string | null; replied_at: string | null; bounced_at: string | null; sent_at: string | null };
 
 async function Replies() {
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
   const [{ data: sendRows }, { data: suppressed }, { data: inboxRows }, { data: campaignRows }] = await Promise.all([
     supabase
       .from("sends")
@@ -32,9 +32,9 @@ async function Replies() {
       .not("sent_at", "is", null)
       .order("sent_at", { ascending: false })
       .limit(5000),
-    supabase.from("suppression").select("email, domain, reason, created_at").order("created_at", { ascending: false }).limit(1000),
-    supabase.from("inboxes").select("id, email"),
-    supabase.from("campaigns").select("id, name").eq("source", "app"),
+    supabase.from("suppression").select("email, domain, reason, created_at").eq("workspace_id", workspace.id).order("created_at", { ascending: false }).limit(1000),
+    supabase.from("inboxes").select("id, email").eq("workspace_id", workspace.id),
+    supabase.from("campaigns").select("id, name").eq("workspace_id", workspace.id).eq("source", "app"),
   ]);
   const sends = (sendRows ?? []) as Send[];
   const answered = sends.filter((s) => s.status === "replied" || s.status === "bounced");

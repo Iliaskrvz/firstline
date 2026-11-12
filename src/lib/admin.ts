@@ -22,12 +22,14 @@ export function usdToEur(usd: number, env: Record<string, string | undefined> = 
   return usd * (Number.isFinite(rate) && rate > 0 ? rate : 0.92);
 }
 
-/** Which pack a purchase was (from its ledger note "Starter pack: …"), for its price per credit. */
+/** Which pack a purchase was (ledger note "Lite 50k pack (lite-50k): …", or older "Starter pack: …"). */
 export function packFromNote(note: string | null): PackId | null {
+  const byId = /^.+ pack \(([\w-]+)\):/.exec(note ?? "");
+  if (byId && byId[1] in PACKS) return byId[1];
   const m = /^(\w+) pack:/.exec(note ?? "");
   if (!m) return null;
   const id = m[1].toLowerCase();
-  return id in PACKS ? (id as PackId) : null;
+  return id in PACKS ? id : null;
 }
 
 /**

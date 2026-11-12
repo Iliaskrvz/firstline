@@ -5,7 +5,19 @@ import { costDrift, margin, revenuePerCreditEur, usdToEur, type DriftAlert, type
 
 export type DayRow = { day: string; creditsUsed: number; emails: number; costUsd: number; m: Margin };
 export type CampaignRow = { id: string; name: string; workspace: string; creditsUsed: number; emails: number; fallbacks: number; costUsd: number; m: Margin };
-export type WorkspaceRow = { id: string; name: string; owner: string | null; available: number; spent: number; senderDisabled: boolean; personalShare: number | null; leads: number };
+export type WorkspaceRow = {
+  id: string;
+  name: string;
+  owner: string | null;
+  available: number;
+  spent: number;
+  senderDisabled: boolean;
+  personalShare: number | null;
+  leads: number;
+  /** Leads in progress at once: own setting (null = automatic from credits bought) and the automatic level. */
+  concurrencyLimit: number | null;
+  purchased: number;
+};
 
 export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; days: DayRow[]; campaigns: CampaignRow[]; workspaces: WorkspaceRow[]; drift: DriftAlert; totals: Margin }> {
   const [{ rows: purchases }, { rows: dayRows }, { rows: campRows }, { rows: wsRows }, { rows: driftRows }] = await Promise.all([
@@ -28,7 +40,7 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
         where c.status <> 'draft' order by c.created_at desc limit 100`,
     ),
     pool.query(
-      `select w.id, w.name, u.email owner, w.sender_disabled, b.available, b.spent,
+      `select w.id, w.name, u.email owner, w.sender_disabled, w.concurrency_limit, b.purchased, b.available, b.spent,
               (select count(*) from public.leads l where l.workspace_id = w.id)::int leads,
               (select avg(case when public.is_free_mail_domain(split_part(lower(l.email), '@', 2)) then 1.0 else 0.0 end)
                  from public.leads l where l.workspace_id = w.id)::float personal_share
@@ -73,6 +85,8 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
       available: r.available ?? 0,
       spent: r.spent ?? 0,
       senderDisabled: r.sender_disabled,
+      concurrencyLimit: r.concurrency_limit ?? null,
+      purchased: r.purchased ?? 0,
       personalShare: r.leads ? r.personal_share : null,
       leads: r.leads,
     })),

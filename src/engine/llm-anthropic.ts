@@ -10,7 +10,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { EngineConfig } from "./config";
 import { anthropicCostEntry } from "./costs";
-import { Semaphore } from "./limiter";
+import { Semaphore, type Gate } from "./limiter";
 import {
   LLMRefusalError,
   LLMUnavailableError,
@@ -41,11 +41,12 @@ export class AnthropicLLM implements LLM {
   readonly provider = "anthropic" as const;
   readonly extractorId: string;
   private client: Anthropic;
-  private gate: Semaphore;
+  private gate: Gate;
 
-  constructor(private config: EngineConfig) {
+  /** gate: shared across workers in production (requests per minute + at once); in-process by default. */
+  constructor(private config: EngineConfig, gate?: Gate) {
     this.client = new Anthropic({ apiKey: config.anthropicApiKey!, maxRetries: 4, timeout: 120_000 });
-    this.gate = new Semaphore(config.concurrency.anthropic);
+    this.gate = gate ?? new Semaphore(config.concurrency.anthropic);
     this.extractorId = `${config.models.extract}:${EXTRACT_VERSION}`;
   }
 

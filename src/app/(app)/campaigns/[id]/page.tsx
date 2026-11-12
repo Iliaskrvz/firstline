@@ -14,7 +14,7 @@ import { queueConfigured } from "@/server/queue";
 import { WAITING_FOR_BATCH } from "@/engine/economy";
 import { detectLanguage } from "@/engine/language";
 import { defaultOptOutLine } from "@/lib/sender/messages";
-import { CampaignSettings } from "./campaign-settings";
+import { CampaignSettings, WriterSetting } from "./campaign-settings";
 import { PreviewButton } from "./preview-button";
 import { AutoRefresh } from "./preview/auto-refresh";
 import { ResumeButton } from "./resume-button";
@@ -57,16 +57,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     { data: stepRows },
     { data: balanceRow },
   ] = await Promise.all([
-    supabase.from("campaigns").select("*").eq("id", id).maybeSingle(),
+    supabase.from("campaigns").select("*").eq("id", id).eq("workspace_id", workspace.id).maybeSingle(),
     supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
-    supabase.from("templates").select("id, name, subject, body").eq("source", "app").order("updated_at", { ascending: false }),
+    supabase.from("templates").select("id, name, subject, body").eq("workspace_id", workspace.id).eq("source", "app").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
     supabase.from("leads").select("id, status, status_detail, domain").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
-    supabase.from("inboxes").select("id, email").order("created_at"),
+    supabase.from("inboxes").select("id, email").eq("workspace_id", workspace.id).order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
-    supabase.from("workspace_balance").select("available").maybeSingle(),
+    supabase.from("workspace_balance").select("available, lite_available").eq("workspace_id", workspace.id).maybeSingle(),
   ]);
   const previewCount = previewCountRaw ?? 0;
   if (!campaign) notFound();
@@ -179,6 +179,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
 
         <Card className="space-y-5 lg:self-start">
           <CampaignSettings campaignId={c.id} templateId={c.template_id} templates={tpls.map((t) => ({ id: t.id, name: t.name }))} />
+          <WriterSetting campaignId={c.id} writer={c.writer} locked={c.status === "running"} />
           <div>
             <div className="text-sm font-medium text-slate-700">Research depth</div>
             <div className="mt-2 space-y-2 text-sm">
@@ -229,7 +230,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                 c.depth,
                 steps.filter((s) => s.kind === "personalised").length,
               )}
-              available={(balanceRow as { available: number } | null)?.available ?? 0}
+              available={((balanceRow as { available: number; lite_available: number } | null)?.available ?? 0) + (c.writer === "lite" ? ((balanceRow as { lite_available: number } | null)?.lite_available ?? 0) : 0)}
               mode={c.mode}
               waitingForBatch={waitingForBatch}
             />

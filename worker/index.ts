@@ -11,7 +11,9 @@ import { Pool } from "pg";
 import { PgBoss } from "pg-boss";
 import { engineConfig } from "@/engine/config";
 import { createFirecrawl } from "@/engine/firecrawl";
-import { effectiveConcurrency, Semaphore } from "@/engine/limiter";
+import { chainGates, effectiveConcurrency } from "@/engine/limiter";
+import { acquireWorkspaceSlot, asSingleton, PgRateGate, PgSlotGate, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
+import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 import { selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
@@ -30,6 +32,8 @@ import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 
 const VERSION = process.env.npm_package_version ?? "dev";
 const WORKER_ID = `${hostname()}-${process.pid}`;
+/** pm2 numbers instances 0, 1, … when WORKER_INSTANCES > 1. */
+const INSTANCE = Number(process.env.NODE_APP_INSTANCE ?? 0) || 0;
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
 
 async function main() {
@@ -39,13 +43,18 @@ async function main() {
     process.exit(1);
   }
   const config = engineConfig();
-  const llm = await selectLLM(config);
+  const conn = dbConnection(process.env.DATABASE_URL!);
+  const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 4 });
+  // Provider limits are shared by every worker process (Postgres), so adding workers can't exceed a plan.
+  const anthropicGate = chainGates(
+    new PgRateGate(pool, "anthropic", config.concurrency.anthropicPerMinute),
+    new PgSlotGate(pool, "anthropic", config.concurrency.anthropic),
+  );
+  const llm = await selectLLM(config, { anthropicGate });
   if (config.llmProvider === "anthropic" && !config.anthropicApiKey) {
     log("⚠ LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing: research runs, AI steps will show 'Anthropic key missing'.");
   }
 
-  const conn = dbConnection(process.env.DATABASE_URL!);
-  const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 2 });
   const store = new PgStore(pool);
   const reader = createFirecrawl(config.firecrawlApiKey!);
   const planLimit = (await reader.planConcurrency?.()) ?? null;
@@ -53,9 +62,9 @@ async function main() {
   if (firecrawlSlots < config.concurrency.firecrawl) {
     log(`Firecrawl plan allows ${planLimit} requests at once: using ${firecrawlSlots} (FIRECRAWL_CONCURRENCY=${config.concurrency.firecrawl}).`);
   }
-  const firecrawlGate = new Semaphore(firecrawlSlots);
+  const firecrawlGate = new PgSlotGate(pool, "firecrawl", firecrawlSlots);
 
-  const stats = { jobsDone: 0, jobsFailed: 0, lastHeartbeatAt: null as Date | null, lastHeartbeatError: null as string | null, startedAt: new Date() };
+  const stats = { jobsDone: 0, jobsFailed: 0, deferred: 0, lastHeartbeatAt: null as Date | null, lastHeartbeatError: null as string | null, startedAt: new Date() };
 
   // Skill versions (§6), from code into skill_versions (the Quality Lab references them).
   await upsertSkills(pool, LIVE_SKILL_VERSION);
@@ -101,8 +110,9 @@ async function main() {
   if (!mailer) log("RESEND_API_KEY not set: offline inboxes show in the app, but no alert emails are sent.");
   const inboxCheck = async () => {
     try {
-      const r = await checkInboxHealth(pool, mailer, { appUrl: process.env.PUBLIC_APP_URL?.trim() || null, log });
-      if (r.alerted.length) log(`Offline inbox alert: ${r.alerted.join(", ")}`);
+      // One worker at a time, so an offline inbox gets one alert email, not one per worker.
+      const r = await asSingleton(pool, "inbox-health", () => checkInboxHealth(pool, mailer, { appUrl: process.env.PUBLIC_APP_URL?.trim() || null, log }));
+      if (r?.alerted.length) log(`Offline inbox alert: ${r.alerted.join(", ")}`);
     } catch (e) {
       log("inbox health check failed:", (e as Error).message);
     }
@@ -124,8 +134,10 @@ async function main() {
     if (economyBusy) return;
     economyBusy = true;
     try {
-      await collectFinished(pool, llm, enqueueLeads, { log });
-      await submitPending(pool, llm, enqueueLeads, { log });
+      await asSingleton(pool, "economy", async () => {
+        await collectFinished(pool, llm, enqueueLeads, { log });
+        await submitPending(pool, llm, enqueueLeads, { log });
+      });
     } catch (e) {
       log("economy tick failed:", (e as Error).message);
     } finally {
@@ -140,9 +152,11 @@ async function main() {
     if (labBusy) return;
     labBusy = true;
     try {
-      while ((await runQueuedEval(pool, { store, reader, llm, config }, log)) != null) {
-        /* next queued run */
-      }
+      await asSingleton(pool, "quality-lab", async () => {
+        while ((await runQueuedEval(pool, { store, reader, llm, config }, log)) != null) {
+          /* next queued run */
+        }
+      });
     } catch (e) {
       log("quality lab tick failed:", (e as Error).message);
     } finally {
@@ -171,8 +185,8 @@ async function main() {
     pushBusy = true;
     try {
       for (const id of await pushesToResume(pool)) await runOnePush(id);
-      const p = await pollIntegrations(pool, pushDeps);
-      if (p.applied) log(`integrations: ${p.applied} status update(s) from polling`);
+      const p = await asSingleton(pool, "integration-poll", () => pollIntegrations(pool, pushDeps!));
+      if (p?.applied) log(`integrations: ${p.applied} status update(s) from polling`);
     } catch (e) {
       log("push tick failed:", (e as Error).message);
     } finally {
@@ -206,8 +220,11 @@ async function main() {
   // Data retention (§11): end idle campaigns and delete lead data 30 days after a campaign ended.
   const retention = async () => {
     try {
-      await apiHousekeeping(pool);
-      const r = await runRetention(pool);
+      const r = await asSingleton(pool, "retention", async () => {
+        await apiHousekeeping(pool);
+        return runRetention(pool);
+      });
+      if (!r) return;
       if (r.ended || r.purged) log(`retention: ${r.ended} campaign(s) ended, ${r.purged} purged (${r.leadsDeleted} leads deleted)`);
     } catch (e) {
       log("retention failed:", (e as Error).message);
@@ -216,17 +233,35 @@ async function main() {
   await retention();
   const retentionTimer = setInterval(retention, 6 * 60 * 60_000);
 
+  // Leads in progress per workspace (Phase 10): the workspace's own limit (set on /admin, or by credits
+  // bought), counted across every worker in Postgres. pg-boss only enforces the hard maximum.
+  const limits = new Map<string, { limit: number; at: number }>();
+  const limitFor = async (ws: string) => {
+    const hit = limits.get(ws);
+    if (hit && Date.now() - hit.at < 30_000) return hit.limit;
+    const limit = Math.min(MAX_WORKSPACE_CONCURRENCY, await workspaceLimit(pool, ws, concurrencyLevel));
+    limits.set(ws, { limit, at: Date.now() });
+    return limit;
+  };
+
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
       localConcurrency: config.concurrency.perWorker, // jobs at once on this worker
-      groupConcurrency: config.concurrency.perWorkspace, // per workspace, across all workers
+      groupConcurrency: MAX_WORKSPACE_CONCURRENCY, // hard cap per workspace; the real limit is below
       includeMetadata: true,
       pollingIntervalSeconds: 2,
     },
     async ([job]) => {
-      const { leadId, preview, force } = job.data;
+      const { leadId, preview, force, workspaceId } = job.data;
       const t0 = Date.now();
+      const slot = await acquireWorkspaceSlot(pool, { workspaceId, leadId, workerId: WORKER_ID, limit: await limitFor(workspaceId) });
+      if (!slot) {
+        // At its limit: try again in a few seconds (a new job; this one finishes without doing anything).
+        stats.deferred++;
+        await boss.send(LEAD_QUEUE, job.data, { startAfter: 3, group: { id: workspaceId } });
+        return { outcome: "deferred" };
+      }
       try {
         const res = await processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force });
         stats.jobsDone++;
@@ -244,12 +279,14 @@ async function main() {
           await completeJobsFor(pool, leadId).catch(() => {});
         }
         throw e; // pg-boss retries with backoff
+      } finally {
+        await releaseWorkspaceSlot(pool, leadId);
       }
     },
   );
 
   // /health for uptime checks (and the VPS later).
-  const port = Number(process.env.WORKER_HEALTH_PORT ?? 8787);
+  const port = Number(process.env.WORKER_HEALTH_PORT ?? 8787) + INSTANCE;
   const server = createServer(async (req, res) => {
     if (req.url !== "/health") {
       res.writeHead(404).end();
@@ -272,6 +309,8 @@ async function main() {
       last_heartbeat_error: stats.lastHeartbeatError,
       jobs_done: stats.jobsDone,
       jobs_failed: stats.jobsFailed,
+      deferred_by_workspace_limit: stats.deferred,
+      gates: { firecrawl: firecrawlGate.stats },
       queue,
     };
     res.writeHead(stale ? 503 : 200, { "Content-Type": "application/json" }).end(JSON.stringify(body, null, 2));

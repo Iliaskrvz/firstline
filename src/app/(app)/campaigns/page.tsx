@@ -28,10 +28,11 @@ export default function CampaignsPage() {
 }
 
 async function CampaignList() {
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
   const { data, error } = await supabase
     .from("campaigns")
     .select("id, name, status, counts, created_at, templates(name)")
+    .eq("workspace_id", workspace.id)
     .eq("source", "app")
     .order("created_at", { ascending: false });
   if (error) throw error;

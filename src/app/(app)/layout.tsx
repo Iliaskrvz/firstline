@@ -4,6 +4,7 @@ import { Logo } from "@/components/ui";
 import { NavLinks, NavLinksFallback } from "@/components/nav-links";
 import { isAdmin } from "@/lib/admin";
 import { requireWorkspace } from "@/lib/auth";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
@@ -29,11 +30,15 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 }
 
 async function UserMenu() {
-  const { user, workspace } = await requireWorkspace();
+  const { user, workspace, memberships } = await requireWorkspace();
   return (
     <div className="flex items-center gap-3 text-sm">
       <div className="hidden text-right sm:block">
-        <div className="font-medium leading-tight text-slate-800">{workspace.name}</div>
+        {memberships.length > 1 ? (
+          <WorkspaceSwitcher current={workspace.id} options={memberships} />
+        ) : (
+          <div className="font-medium leading-tight text-slate-800">{workspace.name}</div>
+        )}
         <div className="text-xs leading-tight text-slate-500">{user.email}</div>
       </div>
       {isAdmin(user.email) && (

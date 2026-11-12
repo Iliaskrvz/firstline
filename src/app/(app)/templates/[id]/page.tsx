@@ -23,9 +23,9 @@ export default function EditTemplatePage(props: PageProps<"/templates/[id]">) {
 async function Editor({ params }: { params: PageProps<"/templates/[id]">["params"] }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
   const { data } = await supabase.from("templates").select("*").eq("id", id).maybeSingle();
   if (!data) notFound();
-  const ctx = await previewContext(supabase, null);
+  const ctx = await previewContext(supabase, null, workspace.id);
   return <TemplateEditor template={data as TemplateRow} campaignId={null} {...ctx} />;
 }

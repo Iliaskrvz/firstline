@@ -8,6 +8,8 @@ import { n } from "@/lib/format";
 import { loadAdmin } from "@/billing/admin-db";
 import { serverPool } from "@/server/db";
 import { SenderSwitch } from "./sender-switch";
+import { ConcurrencyField } from "./concurrency-field";
+import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -144,6 +146,7 @@ async function Admin() {
                   {n(w.available)} available · {n(w.spent)} used · {n(w.leads)} leads
                   {w.personalShare != null && ` · ${Math.round(w.personalShare * 100)}% personal addresses`}
                 </span>
+                <ConcurrencyField workspaceId={w.id} value={w.concurrencyLimit} automatic={concurrencyLevel(w.purchased)} max={MAX_WORKSPACE_CONCURRENCY} />
                 {w.senderDisabled && <Badge tone="red">sending off</Badge>}
                 <SenderSwitch workspaceId={w.id} disabled={w.senderDisabled} />
               </span>

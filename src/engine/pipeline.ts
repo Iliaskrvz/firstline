@@ -13,7 +13,7 @@ import { fallbackSlots, FALLBACK_REASONS, type FallbackReason } from "./fallback
 import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
-import type { Semaphore } from "./limiter";
+import type { Gate } from "./limiter";
 import { LIVE_SKILL_VERSION as SKILL_VERSION } from "./skills";
 import { researchDomain } from "./research";
 import type { CachedResearch, EngineStore } from "./store";
@@ -24,7 +24,7 @@ export type PipelineDeps = {
   reader: WebReader;
   llm: LLM;
   config: EngineConfig;
-  firecrawlGate?: Semaphore;
+  firecrawlGate?: Gate;
   now?: () => Date;
 };
 

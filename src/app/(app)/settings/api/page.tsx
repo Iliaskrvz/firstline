@@ -6,6 +6,7 @@ import { listApiKeys } from "@/api/core-pg";
 import { MAX_BATCH, RATE_LIMIT_PER_MIN } from "@/api/schemas";
 import { listEndpoints } from "@/api/webhooks-pg";
 import { requireWorkspace } from "@/lib/auth";
+import { isAdminRole } from "@/lib/team";
 import { formatDate } from "@/lib/format";
 import { encryptionConfigured } from "@/lib/secret-box";
 import { serverPool } from "@/server/db";
@@ -36,17 +37,16 @@ export default function ApiSettingsPage() {
 }
 
 async function Settings() {
-  const { workspace, user } = await requireWorkspace();
+  const { workspace, role } = await requireWorkspace();
   if (!queueConfigured() || !encryptionConfigured()) {
     return <Card className="text-sm text-slate-600">The API needs DATABASE_URL and INTEGRATIONS_ENCRYPTION_KEY in .env.local (see the README).</Card>;
   }
   const pool = serverPool();
-  const [{ rows: own }, keys, hooks] = await Promise.all([
-    pool.query("select 1 from public.workspaces where id = $1 and owner_id = $2", [workspace.id, user.id]),
+  const [keys, hooks] = await Promise.all([
     listApiKeys(pool, workspace.id),
     listEndpoints(pool, workspace.id),
   ]);
-  const isOwner = !!own[0];
+  const isOwner = isAdminRole(role);
   return (
     <div className="space-y-6">
       <Card className="space-y-4">
@@ -70,7 +70,7 @@ async function Settings() {
             ))}
           </ul>
         )}
-        {isOwner ? <NewKey /> : <p className="text-sm text-slate-500">Only the workspace owner can create keys.</p>}
+        {isOwner ? <NewKey /> : <p className="text-sm text-slate-500">Only the owner or an admin can create keys.</p>}
       </Card>
 
       <Card className="space-y-4">

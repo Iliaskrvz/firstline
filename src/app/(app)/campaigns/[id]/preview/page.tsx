@@ -63,9 +63,9 @@ function ago(seconds: number | null | undefined) {
 async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview">["params"] }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
 
-  const { data: campaign } = await supabase.from("campaigns").select("id, name, templates(subject, body)").eq("id", id).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, name, templates(subject, body)").eq("id", id).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) notFound();
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
 

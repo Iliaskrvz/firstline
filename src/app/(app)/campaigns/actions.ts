@@ -12,6 +12,7 @@ import { reserveForRun, stopRun } from "@/billing/db";
 import { endCampaign } from "@/billing/retention";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
+import { logCampaignAction } from "@/server/activity";
 import { serverPool } from "@/server/db";
 import { resumeSend, setCampaignSendState, startSending, type StartResult } from "@/sender/db";
 
@@ -22,7 +23,7 @@ export async function runPreview(campaignId: string): Promise<{ error: string } 
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
   const { supabase, workspace } = await requireWorkspace();
 
-  const { data: campaign } = await supabase.from("campaigns").select("id, template_id, templates(subject, body)").eq("id", campaignId).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, template_id, templates(subject, body)").eq("id", campaignId).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
   if (!tpl) return { error: "Pick a template first." };
@@ -114,6 +115,16 @@ const SettingsInput = z.object({
   template_id: z.uuid().nullable(),
 });
 
+export async function updateCampaignWriter(campaignId: string, writer: "pro" | "lite"): Promise<{ error: string } | { ok: true }> {
+  if (!z.uuid().safeParse(campaignId).success || (writer !== "pro" && writer !== "lite")) return { error: "Invalid setting." };
+  const { supabase } = await requireWorkspace();
+  const { data, error } = await supabase.from("campaigns").update({ writer }).eq("id", campaignId).neq("status", "running").select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Can't change the writer while the campaign is running." };
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
+}
+
 export async function updateCampaignSettings(input: z.input<typeof SettingsInput>) {
   const parsed = SettingsInput.safeParse(input);
   if (!parsed.success) return { error: "Invalid settings." };
@@ -144,8 +155,9 @@ export async function deleteCampaign(id: string) {
 export async function runCampaign(campaignId: string, sendFallbacks: boolean, mode: "now" | "economy" = "now"): Promise<{ error: string } | undefined> {
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
   if (mode !== "now" && mode !== "economy") return { error: "Invalid speed." };
-  const { supabase, workspace } = await requireWorkspace();
-  const { data: campaign } = await supabase.from("campaigns").select("id, status, depth, templates(subject, body)").eq("id", campaignId).maybeSingle();
+  const w = await requireWorkspace();
+  const { supabase, workspace } = w;
+  const { data: campaign } = await supabase.from("campaigns").select("id, status, depth, templates(subject, body)").eq("id", campaignId).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
   if (!tpl) return { error: "Pick a template first." };
@@ -184,6 +196,7 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean, mo
   } catch (e) {
     return { error: `Couldn't reach the job queue: ${(e as Error).message}. Your credits stay reserved; run again to retry.` };
   }
+  await logCampaignAction(w, "campaign.run", campaignId, { leads: todo.length, credits_reserved: reserved.credits, mode });
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/credits");
 }
@@ -191,8 +204,9 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean, mo
 /** Stop a running campaign: leads not started are skipped and their reserved credits come back. */
 export async function stopCampaignRun(campaignId: string): Promise<{ error: string } | { released: number }> {
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
-  const { workspace } = await requireWorkspace();
-  const { released } = await stopRun(serverPool(), workspace.id, campaignId);
+  const w = await requireWorkspace();
+  const { released } = await stopRun(serverPool(), w.workspace.id, campaignId);
+  await logCampaignAction(w, "campaign.stopped", campaignId, { credits_released: released });
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/credits");
   return { released };
@@ -210,8 +224,9 @@ export async function startCampaignSending(
   const parsed = StartSending.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   if (!queueConfigured()) return { error: "Sending needs the database connection (DATABASE_URL in .env.local)." };
-  const { supabase, workspace } = await requireWorkspace();
-  const { data: c } = await supabase.from("campaigns").select("id").eq("id", parsed.data.campaignId).maybeSingle();
+  const w = await requireWorkspace();
+  const { supabase, workspace } = w;
+  const { data: c } = await supabase.from("campaigns").select("id").eq("id", parsed.data.campaignId).eq("workspace_id", workspace.id).maybeSingle();
   if (!c) return { error: "Campaign not found." };
   try {
     const res = await startSending(serverPool(), {
@@ -220,6 +235,7 @@ export async function startCampaignSending(
       inboxIds: parsed.data.inboxIds,
       optOutLine: parsed.data.optOutLine || null,
     });
+    await logCampaignAction(w, "sending.started", parsed.data.campaignId, { inboxes: parsed.data.inboxIds.length });
     revalidatePath(`/campaigns/${parsed.data.campaignId}`);
     return res;
   } catch (e) {
@@ -265,7 +281,7 @@ export async function saveSequence(input: z.input<typeof SequenceInput>): Promis
   const { campaignId, steps } = parsed.data;
   const { supabase, workspace } = await requireWorkspace();
 
-  const { data: campaign } = await supabase.from("campaigns").select("id, status, column_map").eq("id", campaignId).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, status, column_map").eq("id", campaignId).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
   const { count: sent } = await supabase.from("sends").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId);
   if (sent) return { error: "The sequence is locked once sending has started." };
@@ -299,8 +315,9 @@ export async function saveSequence(input: z.input<typeof SequenceInput>): Promis
 /** End a campaign (§11): sending stops, open credits come back, lead data is deleted 30 days later. */
 export async function endCampaignAction(campaignId: string): Promise<{ error: string } | undefined> {
   if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
-  const { workspace } = await requireWorkspace();
-  await endCampaign(serverPool(), workspace.id, campaignId);
+  const w = await requireWorkspace();
+  await endCampaign(serverPool(), w.workspace.id, campaignId);
+  await logCampaignAction(w, "campaign.ended", campaignId);
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/campaigns");
   revalidatePath("/credits");

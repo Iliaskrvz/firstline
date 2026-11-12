@@ -1,6 +1,20 @@
-// In-process concurrency limiter (global limit per provider, e.g. Firecrawl/Anthropic).
+// Concurrency limiters for providers (Firecrawl, Anthropic). Gate is what the engine needs; Semaphore is
+// the in-process one, PgSlotGate / PgRateGate (limiter-pg.ts) are shared by every worker process.
 
-export class Semaphore {
+export interface Gate {
+  run<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+/** Apply several gates in order (e.g. requests per minute, then requests at once). */
+export function chainGates(...gates: Gate[]): Gate {
+  return {
+    run<T>(fn: () => Promise<T>): Promise<T> {
+      return gates.reduceRight<() => Promise<T>>((next, g) => () => g.run(next), fn)();
+    },
+  };
+}
+
+export class Semaphore implements Gate {
   private active = 0;
   private queue: (() => void)[] = [];
   constructor(private readonly max: number) {}

@@ -3,7 +3,7 @@ import { cleanMarkdown, hashText } from "./clean";
 import type { EngineConfig } from "./config";
 import { firecrawlCostEntry } from "./costs";
 import type { WebReader } from "./firecrawl";
-import { Semaphore } from "./limiter";
+import { Semaphore, type Gate } from "./limiter";
 import { isAllowed, parseRobots } from "./robots";
 import type { CostEntry, PickedPage, ResearchStatus, ScrapedPage } from "./types";
 import { pickPages, urlLang } from "./urls";
@@ -20,7 +20,7 @@ const MIN_CHARS = 150;
 
 export async function researchDomain(
   domain: string,
-  opts: { reader: WebReader; config: EngineConfig; lite?: boolean; gate?: Semaphore; website?: string | null },
+  opts: { reader: WebReader; config: EngineConfig; lite?: boolean; gate?: Gate; website?: string | null },
 ): Promise<ResearchResult> {
   const { reader, config } = opts;
   const gate = opts.gate ?? new Semaphore(config.concurrency.firecrawl);

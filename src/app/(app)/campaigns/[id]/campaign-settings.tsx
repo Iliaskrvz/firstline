@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Field, inputClass } from "@/components/ui";
-import { updateCampaignSettings } from "../actions";
+import { updateCampaignSettings, updateCampaignWriter } from "../actions";
 
 export function CampaignSettings({
   campaignId,
@@ -53,6 +53,36 @@ export function CampaignSettings({
           </option>
         ))}
       </select>
+      {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
+    </Field>
+  );
+}
+
+/** Pro (Sonnet writes, 3–4 pages read) or Lite (Haiku writes, 2 pages). Lite runs use Lite credits first. */
+export function WriterSetting({ campaignId, writer, locked }: { campaignId: string; writer: "pro" | "lite"; locked: boolean }) {
+  const [value, setValue] = useState(writer);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  return (
+    <Field label="Writer" hint={value === "lite" ? "Shorter research and a smaller AI model. Uses Lite credits first, then normal credits." : "The best quality. Uses normal credits."}>
+      <select
+        className={inputClass}
+        value={value}
+        disabled={pending || locked}
+        onChange={(e) => {
+          const v = e.target.value as "pro" | "lite";
+          setValue(v);
+          setError(null);
+          startTransition(async () => {
+            const res = await updateCampaignWriter(campaignId, v);
+            if (res && "error" in res) setError(res.error);
+          });
+        }}
+      >
+        <option value="pro">Pro</option>
+        <option value="lite">Lite</option>
+      </select>
+      {locked && <p className="mt-1 text-xs text-slate-500">Can&apos;t change while the campaign is running.</p>}
       {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
     </Field>
   );

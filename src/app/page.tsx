@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { buttonClass, Logo } from "@/components/ui";
-import { euro, PACK_IDS, PACKS } from "@/lib/credits";
+import { enabledPacks, euro } from "@/lib/credits";
 
 const STEPS = [
   { title: "Upload your leads", text: "A CSV with names, companies and websites. We clean domains and remove duplicates." },
@@ -25,7 +25,8 @@ const FAQ = [
 ];
 
 export default function Home() {
-  const perEmail = (id: (typeof PACK_IDS)[number]) => euro(Math.round((PACKS[id].priceCents / PACKS[id].credits) * 10) / 10);
+  const packs = enabledPacks().filter((p) => p.kind === "standard").slice(0, 3);
+  const perEmail = (p: (typeof packs)[number]) => euro(Math.round((p.priceCents / p.credits) * 10) / 10);
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-5xl px-6">
@@ -93,12 +94,12 @@ export default function Home() {
           <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Simple pricing</h2>
           <p className="mt-2 text-slate-600">Prepaid credits that never expire. 1 credit = 1 personalised email. Sending from Gmail and plain follow-ups are free.</p>
           <div className="mt-8 grid gap-6 sm:grid-cols-3">
-            {PACK_IDS.map((id) => (
-              <div key={id} className={`rounded-xl border p-6 ${id === "growth" ? "border-indigo-600 ring-1 ring-indigo-600" : "border-slate-200"}`}>
-                <h3 className="font-semibold text-slate-900">{PACKS[id].name}</h3>
-                <p className="mt-3 text-3xl font-semibold text-slate-900">{euro(PACKS[id].priceCents)}</p>
+            {packs.map((p) => (
+              <div key={p.id} className={`rounded-xl border p-6 ${p.id === "growth" ? "border-indigo-600 ring-1 ring-indigo-600" : "border-slate-200"}`}>
+                <h3 className="font-semibold text-slate-900">{p.name}</h3>
+                <p className="mt-3 text-3xl font-semibold text-slate-900">{euro(p.priceCents)}</p>
                 <p className="mt-1 text-sm text-slate-500">excl. VAT</p>
-                <p className="mt-4 text-sm text-slate-700">{PACKS[id].credits.toLocaleString("en-US")} emails · {perEmail(id)} each</p>
+                <p className="mt-4 text-sm text-slate-700">{p.credits.toLocaleString("en-US")} emails · {perEmail(p)} each</p>
               </div>
             ))}
           </div>

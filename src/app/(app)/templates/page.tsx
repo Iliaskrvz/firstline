@@ -28,10 +28,11 @@ export default function TemplatesPage() {
 }
 
 async function TemplateList() {
-  const { supabase } = await requireWorkspace();
+  const { supabase, workspace } = await requireWorkspace();
   const { data, error } = await supabase
     .from("templates")
     .select("id, name, subject, slots, updated_at")
+    .eq("workspace_id", workspace.id)
     .eq("source", "app")
     .order("updated_at", { ascending: false });
   if (error) throw error;

@@ -3,11 +3,12 @@
 // functions are service-only). Capture/release happen in the engine (PgStore).
 import type pg from "pg";
 
-export type Balance = { available: number; reserved: number; spent: number };
+/** available = standard credits (any run); lite_available = Lite credits (Lite runs only). */
+export type Balance = { available: number; reserved: number; spent: number; lite_available: number };
 
 export async function balance(pool: pg.Pool | pg.PoolClient, workspaceId: string): Promise<Balance> {
-  const { rows } = await pool.query("select available, reserved, spent from public.workspace_balance where workspace_id = $1", [workspaceId]);
-  return rows[0] ?? { available: 0, reserved: 0, spent: 0 };
+  const { rows } = await pool.query("select available, reserved, spent, lite_available from public.workspace_balance where workspace_id = $1", [workspaceId]);
+  return rows[0] ?? { available: 0, reserved: 0, spent: 0, lite_available: 0 };
 }
 
 export type ReserveResult = { ok: true; reserved: number; credits: number } | { ok: false; need: number; available: number };
@@ -25,7 +26,10 @@ export async function reserveForRun(pool: pg.Pool, input: { leadIds: string[]; p
   const already = new Set(had.map((r) => r.lead_id as string));
   const fresh = input.leadIds.filter((id) => !already.has(id));
   const need = fresh.length * input.perLead;
-  const { available } = await balance(pool, input.workspaceId);
+  // Lite runs may also use Lite credits (reserve_credits picks the kind per lead).
+  const { rows: w } = await pool.query("select c.writer from public.leads l join public.campaigns c on c.id = l.campaign_id where l.id = $1", [input.leadIds[0]]);
+  const b = await balance(pool, input.workspaceId);
+  const available = b.available + (w[0]?.writer === "lite" ? b.lite_available : 0);
   if (available < need) return { ok: false, need, available };
 
   const done: string[] = [];
@@ -33,7 +37,8 @@ export async function reserveForRun(pool: pg.Pool, input: { leadIds: string[]; p
     const { rows } = await pool.query("select public.reserve_credits($1, $2) ok", [id, input.perLead]);
     if (!rows[0].ok) {
       for (const d of done) await pool.query("select public.release_credits($1)", [d]);
-      return { ok: false, need, available: (await balance(pool, input.workspaceId)).available };
+      const after = await balance(pool, input.workspaceId);
+      return { ok: false, need, available: after.available + (w[0]?.writer === "lite" ? after.lite_available : 0) };
     }
     done.push(id);
   }
@@ -72,7 +77,7 @@ export async function stopRun(pool: pg.Pool, workspaceId: string, campaignId: st
  * A paid purchase. Idempotent on `key` (e.g. "kelviq:<checkout session id>"), so a repeated webhook adds
  * nothing. The key is stored in credit_ledger.stripe_event_id, the ledger's unique payment-reference column.
  */
-export async function addPurchase(pool: pg.Pool, input: { workspaceId: string; credits: number; key: string; note: string }): Promise<boolean> {
-  const { rows } = await pool.query("select public.add_purchase($1, $2, $3, $4) added", [input.workspaceId, input.credits, input.key, input.note]);
+export async function addPurchase(pool: pg.Pool, input: { workspaceId: string; credits: number; key: string; note: string; kind?: "standard" | "lite" }): Promise<boolean> {
+  const { rows } = await pool.query("select public.add_purchase($1, $2, $3, $4, $5) added", [input.workspaceId, input.credits, input.key, input.note, input.kind ?? "standard"]);
   return rows[0].added;
 }

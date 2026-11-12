@@ -101,6 +101,14 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
 - Outcome rows (`outcomes`): one per email that left FirstLine (Gmail, CSV, push), with skill version, writer, slot types and fact tiers, no personal data. The Quality Lab shows reply rate per version from them.
 - No account? Use the key `fake-instantly` (or `fake-instantly-nohooks`) outside production.
 
+## Teams and scale (Phase 10)
+
+- **Roles:** owner, admin, member (`src/lib/team.ts`). Owners and admins buy credits and manage integrations, API keys and the team; members do everything else. Seats are free. Settings → Team: invite by email (a 7-day link; emailed when RESEND_API_KEY is set, otherwise copy the link), remove, change role, transfer ownership. Settings → Activity: who ran, pushed, bought or changed what.
+- **Several workspaces per person:** the current one is in the `fl_ws` cookie, checked against the memberships on every request; switch at the top right. Every list query filters on the current workspace.
+- **Leads at once per workspace:** set on /admin, or automatic from credits bought (`src/lib/concurrency.ts`). Enforced across all workers with `workspace_slots`.
+- **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and Anthropic's requests per minute are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
+- **Packs:** `src/config/packs.ts`. Lite credits pay for Lite-writer campaigns only. Load test: `npx tsx scripts/load-test.ts 5000`.
+
 ## Running on the VPS
 
 `bash deploy/deploy.sh` (from this Mac) sets up the server and deploys: Node 22, pm2 and Caddy (automatic HTTPS) on

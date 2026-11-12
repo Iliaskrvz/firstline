@@ -95,12 +95,12 @@ export class MissingKeyLLM implements LLM {
   }
 }
 
-export async function selectLLM(config: EngineConfig): Promise<LLM> {
+export async function selectLLM(config: EngineConfig, opts: { anthropicGate?: import("./limiter").Gate } = {}): Promise<LLM> {
   if (config.llmProvider === "fake") {
     const { FakeLLM } = await import("./llm-fake");
     return new FakeLLM();
   }
   if (!config.anthropicApiKey) return new MissingKeyLLM();
   const { AnthropicLLM } = await import("./llm-anthropic");
-  return new AnthropicLLM(config);
+  return new AnthropicLLM(config, opts.anthropicGate);
 }

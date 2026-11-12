@@ -12,6 +12,7 @@ import { parseTemplate } from "@/lib/template";
 import { serverPool } from "@/server/db";
 import { encryptionConfigured } from "@/server/integrations";
 import { enqueuePush, queueConfigured } from "@/server/queue";
+import { logCampaignAction } from "@/server/activity";
 
 const NOT_READY = "Pushing needs DATABASE_URL and INTEGRATIONS_ENCRYPTION_KEY in .env.local.";
 
@@ -51,7 +52,7 @@ export async function startPush(input: z.input<typeof Start>): Promise<{ error: 
   const o = await ownedSecret(p.data.integrationId);
   if (!o) return { error: "Connect the tool on the Integrations page first." };
   // RLS check: the campaign must be visible to this user.
-  const { data: campaign } = await (await requireWorkspace()).supabase.from("campaigns").select("id, templates(subject, body)").eq("id", p.data.campaignId).maybeSingle();
+  const { data: campaign } = await (await requireWorkspace()).supabase.from("campaigns").select("id, templates(subject, body)").eq("id", p.data.campaignId).eq("workspace_id", o.workspace.id).maybeSingle();
   if (!campaign) return { error: "Campaign not found." };
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
   const slotKeys = tpl ? parseTemplate(tpl).slots.map((s) => s.key) : [];
@@ -73,6 +74,7 @@ export async function startPush(input: z.input<typeof Start>): Promise<{ error: 
   });
   if ("error" in r) return r;
   await enqueuePush(r.push.id).catch(() => {}); // the worker also picks up queued pushes on its own
+  await logCampaignAction(o, p.data.kind === "dry_run" ? "push.dry_run" : "push.started", p.data.campaignId, { tool: r.push.provider, tool_campaign: p.data.toolCampaignName ?? p.data.toolCampaignId, leads: r.push.total });
   revalidatePath(`/campaigns/${p.data.campaignId}`);
   return { ok: true };
 }
