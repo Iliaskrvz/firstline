@@ -1,12 +1,27 @@
 // Sign-in helpers shared by the login, sign-up and account screens. Pure, tested.
 
 export const MIN_PASSWORD = 10;
+/** Supabase stores passwords with bcrypt, which reads at most 72 bytes. */
+export const MAX_PASSWORD_BYTES = 72;
+
+/**
+ * Every character is allowed: letters with accents (é, ü, ø), other scripts, spaces, symbols and emoji.
+ * The same password can arrive as different byte sequences (é typed as one character on one keyboard,
+ * e + accent on another), so it's normalised to NFC everywhere before it reaches Supabase.
+ */
+export function normalisePassword(password: string): string {
+  return password.normalize("NFC");
+}
 
 /** A short reason the password isn't good enough, or null. (Supabase enforces its own minimum too.) */
-export function passwordProblem(password: string, email = ""): string | null {
-  if (password.length < MIN_PASSWORD) return `Use at least ${MIN_PASSWORD} characters.`;
-  if (password.length > 72) return "Use at most 72 characters.";
-  if (/^(.)\1+$/.test(password)) return "Don't repeat one character.";
+export function passwordProblem(raw: string, email = ""): string | null {
+  const password = normalisePassword(raw);
+  const chars = [...password].length; // an emoji or accented letter counts as one character
+  if (chars < MIN_PASSWORD) return `Use at least ${MIN_PASSWORD} characters.`;
+  if (new TextEncoder().encode(password).length > MAX_PASSWORD_BYTES) {
+    return "That password is too long. Use fewer characters (accented letters, symbols and emoji count extra).";
+  }
+  if (new Set(password).size === 1) return "Don't repeat one character.";
   const local = email.split("@")[0]?.toLowerCase();
   if (local && local.length >= 4 && password.toLowerCase().includes(local)) return "Don't use your email address in the password.";
   if (["password12", "1234567890", "qwertyuiop", "firstline1"].some((w) => password.toLowerCase().startsWith(w))) return "That password is too easy to guess.";

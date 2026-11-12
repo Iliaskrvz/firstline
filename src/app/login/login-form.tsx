@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 import { Button, inputClass } from "@/components/ui";
-import { friendlyAuthError, noSubscribe, passkeysSupported, passkeysSupportedOnServer } from "@/lib/auth-messages";
+import { friendlyAuthError, normalisePassword, noSubscribe, passkeysSupported, passkeysSupportedOnServer } from "@/lib/auth-messages";
 import type { SignInOptions } from "@/lib/auth-options";
 import { createClient } from "@/lib/supabase/client";
 
@@ -70,7 +70,7 @@ export function LoginForm({ initialError, next, options }: { initialError: strin
       } else setState("link-sent");
       return;
     }
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: normalisePassword(password) });
     if (error) {
       setError(friendlyAuthError(error));
       setState(error.code === "email_not_confirmed" ? "unconfirmed" : "idle");

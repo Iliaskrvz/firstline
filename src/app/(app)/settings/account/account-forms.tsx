@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Button, inputClass } from "@/components/ui";
-import { friendlyAuthError, MIN_PASSWORD, noSubscribe, passkeysSupported, passkeysSupportedOnServer, passwordProblem } from "@/lib/auth-messages";
+import { friendlyAuthError, MIN_PASSWORD, normalisePassword, noSubscribe, passkeysSupported, passkeysSupportedOnServer, passwordProblem } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/client";
 
 export function PasswordForm({ email, highlight }: { email: string; highlight: boolean }) {
@@ -20,7 +20,7 @@ export function PasswordForm({ email, highlight }: { email: string; highlight: b
     if (password !== again) return setMsg({ ok: false, text: "The two passwords don't match." });
     setBusy(true);
     setMsg(null);
-    const { error } = await createClient().auth.updateUser({ password });
+    const { error } = await createClient().auth.updateUser({ password: normalisePassword(password) });
     setBusy(false);
     if (error) return setMsg({ ok: false, text: friendlyAuthError(error) });
     setPassword("");

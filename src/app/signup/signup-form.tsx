@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Button, inputClass } from "@/components/ui";
-import { friendlyAuthError, MIN_PASSWORD, passwordProblem } from "@/lib/auth-messages";
+import { friendlyAuthError, MIN_PASSWORD, normalisePassword, passwordProblem } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/client";
 import { Divider, GoogleButton } from "../login/login-form";
 
@@ -22,7 +22,7 @@ export function SignupForm({ next, google }: { next: string | null; google: bool
     setState("busy");
     const u = new URL("/auth/callback", window.location.origin);
     if (next) u.searchParams.set("next", next);
-    const { error } = await createClient().auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: u.toString() } });
+    const { error } = await createClient().auth.signUp({ email: email.trim(), password: normalisePassword(password), options: { emailRedirectTo: u.toString() } });
     // An existing address gets the same answer, so nobody can find out who has an account.
     if (error && error.code !== "user_already_exists") {
       setError(friendlyAuthError(error));
