@@ -1,22 +1,29 @@
 // One-time Polar setup on the account the token belongs to (POLAR_SERVER: production by default).
-//   npx tsx scripts/polar-setup.ts [https://your-public-address]
+//   npx tsx scripts/polar-setup.ts [https://your-public-address] [--packs]
 // 1. Checks POLAR_ACCESS_TOKEN works (never prints it).
-// 2. If there's no active product: creates "Test Product", one-time $10.
+// 2. Creates "Test Product" (one-time $10) if it doesn't exist. With --packs: one one-time product per
+//    pack on sale (src/config/packs.ts, PACKS_ENABLED), priced from the config in EUR excl. VAT, and
+//    saves each id in .env.local as POLAR_PRODUCT_<PACK> (ids aren't secret).
 // 3. If an address is given and no webhook endpoint points at <address>/api/webhook/polar yet:
 //    creates one (format raw, order + customer state events) and saves its signing secret in
 //    .env.local as POLAR_WEBHOOK_SECRET, without printing it.
-// 4. Creates a single-use 100%-off code for the test product, to test checkout without paying.
+// 4. Creates a single-use 100%-off code for the Starter pack (or the test product without --packs),
+//    to test checkout and crediting without paying.
 // Safe to run again: it reuses what exists. No organization_id is sent (the token already has one).
 import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { config as loadEnv } from "dotenv";
+import { polarProductEnvName } from "../src/billing/polar";
+import { enabledPacks } from "../src/lib/credits";
 
 loadEnv({ path: ".env.local", override: true, quiet: true });
 
 const token = process.env.POLAR_ACCESS_TOKEN?.trim();
 const server = process.env.POLAR_SERVER?.trim() === "sandbox" ? "sandbox" : "production";
 const API = server === "sandbox" ? "https://sandbox-api.polar.sh" : "https://api.polar.sh";
-const publicUrl = process.argv[2]?.replace(/\/+$/, "");
+const args = process.argv.slice(2);
+const withPacks = args.includes("--packs");
+const publicUrl = args.find((a) => a.startsWith("http"))?.replace(/\/+$/, "");
 const WEBHOOK_EVENTS = ["order.created", "order.paid", "order.updated", "order.refunded", "customer.state_changed"];
 
 if (!token || token === "fake-polar") {
@@ -58,7 +65,7 @@ function saveEnv(name: string, value: string) {
   chmodSync(file, 0o600);
 }
 
-type Product = { id: string; name: string; is_archived: boolean };
+type Product = { id: string; name: string; is_archived: boolean; metadata?: Record<string, unknown> };
 type Page<T> = { items: T[]; pagination: { total_count: number } };
 type Endpoint = { id: string; url: string; secret?: string };
 
@@ -70,21 +77,45 @@ async function main() {
   if (check.status < 200 || check.status >= 300) fail("Token check", check.status, check.data);
   console.log("✓ Token works");
 
-  // 2. Product
+  // 2. Products
   const list = await api<Page<Product>>("GET", "/v1/products/?limit=100&is_archived=false");
   if (list.status >= 300) fail("Listing products", list.status, list.data);
-  let product = list.data.items.find((p) => !p.is_archived && p.name === "Test Product") ?? list.data.items.find((p) => !p.is_archived);
+  let product = list.data.items.find((p) => !p.is_archived && p.name === "Test Product");
   if (product) {
-    console.log(`✓ Product exists: ${product.name} (${product.id})`);
+    console.log(`✓ Test Product exists (${product.id})`);
   } else {
     const created = await api<Product>("POST", "/v1/products/", {
       name: "Test Product",
-      visibility: "public",
+      visibility: "private",
       prices: [{ amount_type: "fixed", price_amount: 1000, price_currency: "usd" }],
     });
     if (created.status >= 300) fail("Creating the test product", created.status, created.data);
     product = created.data;
     console.log(`✓ Created Test Product, one-time $10 (${product.id})`);
+  }
+
+  const packProducts: Record<string, string> = {};
+  if (withPacks) {
+    for (const pack of enabledPacks()) {
+      let found = list.data.items.find((p) => !p.is_archived && p.metadata?.pack === pack.id);
+      if (!found) {
+        const created = await api<Product>("POST", "/v1/products/", {
+          name: `FirstLine ${pack.name}`,
+          description: `${pack.credits.toLocaleString("en")} ${pack.kind === "lite" ? "Lite credits (Lite writer only)" : "credits"} for FirstLine. 1 credit = 1 personalised email. Credits never expire.`,
+          visibility: "public",
+          prices: [{ amount_type: "fixed", price_amount: pack.priceCents, price_currency: "eur", tax_behavior: "exclusive" }],
+          metadata: { pack: pack.id, credits: pack.credits },
+        });
+        if (created.status >= 300) fail(`Creating the ${pack.name} product`, created.status, created.data);
+        found = created.data;
+        console.log(`✓ Created FirstLine ${pack.name}: €${(pack.priceCents / 100).toFixed(2)} excl. VAT (${found.id})`);
+      } else {
+        console.log(`✓ ${pack.name} product exists (${found.id})`);
+      }
+      packProducts[pack.id] = found.id;
+      saveEnv(polarProductEnvName(pack.id), found.id);
+    }
+    console.log(`✓ Saved ${Object.keys(packProducts).map(polarProductEnvName).join(", ")} in .env.local`);
   }
 
   // 3. Webhook endpoint
@@ -110,7 +141,7 @@ async function main() {
     console.log("• No public address given: webhook endpoint skipped. Run again with the address to add it.");
   }
 
-  // 4. 100% test discount (single use, test product only)
+  // 4. 100% test discount (single use): the Starter pack when there is one, so crediting is tested too
   const code = `FLTEST${randomBytes(4).toString("hex").toUpperCase()}`;
   const disc = await api<{ id: string }>("POST", "/v1/discounts/", {
     name: "Test checkout (100% off, single use)",
@@ -119,17 +150,19 @@ async function main() {
     duration: "once",
     code,
     max_redemptions: 1,
-    products: [product.id],
+    products: [packProducts.starter ?? product.id],
   });
   if (disc.status >= 300) {
     console.log(`• Test discount not created (HTTP ${disc.status}). Add the discounts scope to the token, or make a 100% code in the dashboard.`);
   } else {
-    console.log(`✓ Test discount code ${code} (single use, 100% off the test product, id ${disc.data.id})`);
+    console.log(`✓ Test discount code ${code} (single use, 100% off ${packProducts.starter ? "the Starter pack" : "the test product"}, id ${disc.data.id})`);
   }
 
   console.log("");
-  console.log(`Checkout link (local):  http://localhost:3000/checkout?products=${product.id}`);
-  if (publicUrl) console.log(`Checkout link (live):   ${publicUrl}/checkout?products=${product.id}`);
+  const first = packProducts.starter ?? product.id;
+  console.log(`Checkout link (local):  http://localhost:3000/checkout?products=${first}`);
+  if (publicUrl) console.log(`Checkout link (live):   ${publicUrl}/checkout?products=${first}`);
+  if (withPacks) console.log("Deploy so the server gets the POLAR_PRODUCT_* settings; then the Credits page sells through Polar.");
 }
 
 main().catch((e) => {

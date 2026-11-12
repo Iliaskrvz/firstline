@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { enabledPacks, isPackId, PACKS } from "@/lib/credits";
 import { packFromNote, revenuePerCreditEur } from "@/lib/admin";
-import { planIdentifiers } from "@/billing/kelviq";
+import { packForProduct, polarProductIds } from "@/billing/polar";
 import { PACK_CONFIG } from "./packs";
 
 describe("pack config", () => {
@@ -20,16 +20,17 @@ describe("pack config", () => {
     expect(isPackId("nope")).toBe(false);
   });
 
-  it("each pack has a Kelviq plan id, overridable per pack", () => {
-    const plans = planIdentifiers({ KELVIQ_PLAN_LITE_50K: "my-lite-plan" });
-    expect(plans.starter).toBe("firstline-starter");
-    expect(plans["lite-50k"]).toBe("my-lite-plan");
-    expect(Object.keys(plans)).toHaveLength(PACK_CONFIG.length);
+  it("each pack maps to its Polar product through POLAR_PRODUCT_<ID>", () => {
+    const products = polarProductIds({ POLAR_PRODUCT_STARTER: " prod-starter ", POLAR_PRODUCT_LITE_50K: "prod-lite", POLAR_PRODUCT_GROWTH: "" });
+    expect(products).toEqual({ starter: "prod-starter", "lite-50k": "prod-lite" });
+    expect(packForProduct(products, "prod-lite")).toBe("lite-50k");
+    expect(packForProduct(products, "other")).toBeNull();
+    expect(packForProduct(products, undefined)).toBeNull();
   });
 
   it("purchases are recognised from old and new ledger notes", () => {
     expect(packFromNote("Starter pack: 500 credits · Kelviq")).toBe("starter");
-    expect(packFromNote("Lite 50k pack (lite-50k): 50,000 Lite credits · Kelviq")).toBe("lite-50k");
+    expect(packFromNote("Lite 50k pack (lite-50k): 50,000 Lite credits · Polar · 569.00 EUR paid")).toBe("lite-50k");
     expect(revenuePerCreditEur([{ credits: 50_000, note: "Lite 50k pack (lite-50k): x" }])).toBeCloseTo(PACKS["lite-50k"].priceCents / 50_000 / 100);
   });
 });

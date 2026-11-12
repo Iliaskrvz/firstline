@@ -94,3 +94,24 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
     totals: margin(all, perCreditEur),
   };
 }
+
+export type RefundRow = { at: string; workspaceId: string; workspace: string; pack: string | null; refunded: string | null; order: string | null; credits: number | null };
+
+/** Polar refunds in the last 90 days (from the activity log). Credits are not taken back automatically. */
+export async function loadRefunds(pool: pg.Pool): Promise<RefundRow[]> {
+  const { rows } = await pool.query(
+    `select a.created_at, a.workspace_id, w.name, a.target, a.details
+       from public.activity_log a join public.workspaces w on w.id = a.workspace_id
+      where a.action = 'payment.refunded' and a.created_at > now() - interval '90 days'
+      order by a.created_at desc limit 50`,
+  );
+  return rows.map((r) => ({
+    at: new Date(r.created_at).toISOString(),
+    workspaceId: r.workspace_id,
+    workspace: r.name,
+    pack: r.target,
+    refunded: r.details?.refunded ?? null,
+    order: r.details?.order ?? null,
+    credits: r.details?.credits ?? null,
+  }));
+}

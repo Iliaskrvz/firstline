@@ -29,7 +29,7 @@ export default function Terms() {
 
       <h2>4. Credits and payment</h2>
       <ul>
-        <li>You buy credit packs in advance. Prices are shown before you pay. Payments are processed by Kelviq, our merchant of record, which also issues the invoice.</li>
+        <li>You buy credit packs in advance. Prices are shown before you pay. Payments are processed by Polar, our merchant of record, which also issues the invoice.</li>
         <li>Credits are reserved when a run starts and only used for leads that get a finished email. Leads without usable facts and stopped runs are returned to your balance.</li>
         <li>Credits never expire. They are not refundable, except where the law requires it or when the service fails on our side.</li>
       </ul>

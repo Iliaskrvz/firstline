@@ -13,10 +13,10 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
   several inboxes per campaign (round robin, each lead stays in one inbox), offline alerts by email (Resend),
   Replies page with reply/bounce rates and the do-not-contact list.
 - **Phase 5** (in progress): credits wired into runs (reserve → capture/release, fallbacks free, stop a run),
-  25 welcome credits, credit packs through **Kelviq** (merchant of record: it charges VAT and sends invoices;
-  iDEAL|Wero + card) with a signature-checked, idempotent webhook, Credits page, CSV export with `fl_` columns.
-  Spec change: Kelviq instead of Stripe (the user's choice); auto top-up is off until Kelviq confirms how a
-  one-time purchase saves a payment method for later charges.
+  25 welcome credits, credit packs through **Polar** (merchant of record: it charges VAT and sends invoices)
+  with a signature-checked, idempotent webhook (`/api/webhook/polar`, one ledger entry per order), Credits page,
+  CSV export with `fl_` columns. Spec change: Polar instead of Stripe (the user's choice; Kelviq before that,
+  removed 2026-11-12). Auto top-up is off. Setup and checklist: POLAR_SETUP.md.
 
 ## Setup
 

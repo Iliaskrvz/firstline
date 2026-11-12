@@ -5,7 +5,7 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { PRICE_MULTIPLE, TARGET_COST_EUR } from "@/lib/admin";
 import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
-import { loadAdmin } from "@/billing/admin-db";
+import { loadAdmin, loadRefunds } from "@/billing/admin-db";
 import { anthropicBudget, firecrawlBudget } from "@/billing/budgets";
 import { createFirecrawl } from "@/engine/firecrawl";
 import { serverPool } from "@/server/db";
@@ -43,10 +43,11 @@ async function Admin() {
   await requireAdmin();
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
-  const [a, fcBudget, anBudget] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     anthropicBudget(pool),
+    loadRefunds(pool),
   ]);
   const budgets = [fcBudget, anBudget];
   const flagged = a.workspaces.filter((w) => (w.personalShare ?? 0) > 0.5 && w.leads >= 200);
@@ -81,6 +82,21 @@ async function Admin() {
           })}
         </div>
       </Card>
+      {refunds.length > 0 && (
+        <Card className="space-y-2 bg-amber-50 text-sm text-amber-900">
+          <p className="font-medium">Refunds in Polar (last 90 days): credits were not taken back automatically.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {refunds.map((r) => (
+              <li key={`${r.order}-${r.at}`}>
+                {r.at.slice(0, 10)} · {r.workspace} · {r.pack ?? "pack"}
+                {r.refunded ? ` · ${r.refunded} refunded` : ""}
+                {r.credits ? ` · ${n(r.credits)} credits given` : ""}
+                {r.order ? ` · order ${r.order}` : ""}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {a.drift.level === "warn" && <Card className="bg-amber-50 text-sm text-amber-900">Cost alert: {a.drift.message}</Card>}
       {flagged.length > 0 && (
         <Card className="bg-amber-50 text-sm text-amber-900">

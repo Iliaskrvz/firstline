@@ -1,8 +1,11 @@
 // The webhook route itself: status codes Polar acts on (403 bad signature, 202 handled/unknown).
 import { createHmac } from "node:crypto";
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { POST } from "./route";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
+// Orders for products that aren't a pack never reach the database.
+vi.mock("@/server/db", () => ({ serverPool: () => ({ query: vi.fn(async () => { throw new Error("no database in this test"); }) }) }));
+const { POST } = await import("./route");
 
 const SECRET = "test-only-not-a-real-secret";
 const post = (body: string, secret = SECRET, ts = Math.floor(Date.now() / 1000)) =>

@@ -24,7 +24,7 @@ export default function Privacy() {
       <h2>What we collect about you</h2>
       <ul>
         <li>Account: email address, name if you give it, workspace settings.</li>
-        <li>Billing: credit purchases and usage. Payments are handled by Kelviq as merchant of record; we never see your card or bank details.</li>
+        <li>Billing: credit purchases and usage. Payments are handled by Polar as merchant of record; we never see your card or bank details.</li>
         <li>Usage and logs: what you run, costs per run, error logs, IP address in server logs.</li>
         <li>Connected inboxes: the Gmail address you connect and a per-inbox key. We never receive your Google password or access to your mailbox; the Google Sheet you install sends the emails and reports back which were sent, replied to or bounced.</li>
       </ul>

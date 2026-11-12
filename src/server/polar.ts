@@ -2,7 +2,8 @@
 // (default) or sandbox; POLAR_ACCESS_TOKEN must come from that same environment.
 import "server-only";
 import { createPolar } from "@polar-sh/sdk/2026-10";
-import { fakePolarCheckouts, polarEnvironment, type PolarCheckouts } from "@/billing/polar";
+import { fakePolarCheckouts, polarEnvironment, polarProductIds, type PolarCheckouts } from "@/billing/polar";
+import { PACKS, type PackId } from "@/lib/credits";
 
 let client: ReturnType<typeof createPolar> | null = null;
 
@@ -23,4 +24,10 @@ export function polarClient(): ReturnType<typeof createPolar> {
 
 export function polarCheckouts(origin: string): PolarCheckouts {
   return polarFake() ? fakePolarCheckouts(origin) : polarClient().checkouts;
+}
+
+/** Polar product per pack (POLAR_PRODUCT_<PACK>). In fake mode every pack gets a stand-in id. */
+export function polarProducts(): Partial<Record<PackId, string>> {
+  const real = polarProductIds();
+  return polarFake() ? { ...Object.fromEntries(Object.keys(PACKS).map((id) => [id, `fake-product-${id}`])), ...real } : real;
 }

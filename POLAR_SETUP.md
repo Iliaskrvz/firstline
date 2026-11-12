@@ -1,94 +1,83 @@
 # Polar setup
 
-Polar (polar.sh) replaces Kelviq as merchant of record: it sells, charges, handles VAT and sends invoices. It's built on `@polar-sh/sdk` 1.1 (API version `2026-10`). There's no framework adapter. Organization: `first-line`.
+Polar (polar.sh) is FirstLine's merchant of record: it sells the credit packs, charges, handles VAT and sends invoices. It's built on `@polar-sh/sdk` 1.1 (API version `2026-10`) with no framework adapter. Kelviq was removed on 2026-11-12. Organization: `first-line`.
 
 **This runs against the live production environment.** Real cards are charged. To test without paying, use the single-use 100% code from `scripts/polar-setup.ts`.
 
-## Status
+## How a purchase works
 
-| Step | State |
-|---|---|
-| SDK, client, `/checkout`, `/api/webhook/polar` | Built and tested with a fake client and signed test payloads |
-| Access token | **You:** create it and save it in `.env.local` |
-| Test product, webhook endpoint, test discount | **You:** run `scripts/polar-setup.ts` once the token is saved |
-| Paid orders → credits | **Not built yet.** The webhook verifies events and acknowledges them, but credits nothing (TODO stubs). See "Proposed mapping" below. |
-| Kelviq | Still in the code and on the Credits page until the mapping is approved; then it gets removed |
+1. Credits page → "Buy Growth" (workspace owners and admins only). The checkout is created with:
+   - the pack's Polar product (`POLAR_PRODUCT_GROWTH`)
+   - the workspace id as `external_customer_id`
+   - metadata `{ workspace_id, pack, credits }`
+   - success URL `/credits?paid=1`
+2. The customer pays on Polar's hosted checkout.
+3. Polar sends `order.paid` to `/api/webhook/polar`. The signature is checked (a bad one gets 403), then the pack's credits go into the ledger **once per order**. The ledger key is `polar:<order id>`, so retries and repeated deliveries add nothing. The workspace activity log shows "Payment (Polar) · credits.bought".
+   - If the metadata is missing, the workspace comes from `customer.external_id` and the pack from `product_id`.
+   - Orders for other products, unknown workspaces and unpaid orders are acknowledged (202) and ignored. They never cause errors that would make Polar disable the endpoint.
+4. `order.refunded` is logged for the workspace and listed on /admin. Credits are **not** taken back automatically; you decide.
+
+`/checkout?products=<id>` still exists for links outside the app. It requires sign-in as a workspace owner or admin, and that workspace is the customer.
+
+Fake mode: with `POLAR_ACCESS_TOKEN=fake-polar`, or no token outside production, no network calls are made and every pack has a stand-in product.
 
 ## Files
 
-New:
-- `src/billing/polar.ts`: environment from `POLAR_SERVER`, product-id parsing, checkout creation, fake checkout client, webhook verification, and event handler stubs.
-- `src/billing/polar.test.ts`: 6 tests. They cover checkout calls, signature checks (wrong secret, changed body, old timestamp) and unknown event types.
-- `src/server/polar.ts`: one SDK client per process (`createPolar`). Fake mode applies when `POLAR_ACCESS_TOKEN=fake-polar`, or when there's no token outside production.
-- `src/app/checkout/route.ts`: `GET /checkout?products=<id>` redirects to Polar's hosted checkout. A signed-in user is passed as `external_customer_id`. No success URL is set: Polar shows its own confirmation.
-- `src/app/api/webhook/polar/route.ts`: `POST /api/webhook/polar`. Response codes:
-  - 403: bad signature
-  - 202: handled, or an unknown event type (so Polar stops retrying)
-  - 500: a handler error, so Polar retries
-- `scripts/polar-setup.ts`: the one-time provisioning script (below).
-
-Changed:
-- `src/proxy.ts`: the session middleware skips `/api/webhook/*`.
-- `scripts/secret-scan.sh`: now also catches Polar tokens and secrets (`polar_oat_…`, `polar_whs_…` and similar).
-- `.env.example`, `package.json`.
+- `src/billing/polar.ts` has:
+  - the environment setting
+  - pack ↔ product mapping (`POLAR_PRODUCT_<PACK>`)
+  - pack checkout and generic checkout
+  - the fake checkout client
+  - webhook verification
+  - `handlePolarEvent` (crediting, refunds)
+- `src/server/polar.ts`: the SDK client (`createPolar`), fake mode, products per pack
+- `src/app/(app)/credits/actions.ts`: `buyPack` uses Polar
+- `src/app/checkout/route.ts`: `GET /checkout?products=<id>`
+- `src/app/api/webhook/polar/route.ts`: `POST /api/webhook/polar`
+- `src/billing/admin-db.ts`: `loadRefunds`, shown on /admin
+- `scripts/polar-setup.ts`: provisioning (below)
+- Tests:
+  - `src/billing/polar.test.ts`
+  - `src/app/api/webhook/polar/route.test.ts`
+  - `supabase/tests/billing-pg.test.ts` → "Polar", on a real Postgres: exactly-once crediting, fallbacks, ignored orders, refunds
+- Removed: `@kelviq/node-sdk`, `src/billing/kelviq.ts`, `src/server/kelviq.ts`, `/api/kelviq/webhook`, and the KELVIQ_* settings from `.env.example`
 
 ## Env keys (in `.env.local`; the deploy copies it to the server)
 
 - `POLAR_ACCESS_TOKEN`: organization access token, production.
-- `POLAR_WEBHOOK_SECRET`: written by `scripts/polar-setup.ts`.
+- `POLAR_WEBHOOK_SECRET`: written by the script.
 - `POLAR_SERVER`: `production` (or `sandbox`).
+- `POLAR_PRODUCT_STARTER`, `POLAR_PRODUCT_GROWTH`, `POLAR_PRODUCT_AGENCY` (one per pack on sale): written by `--packs`.
+- The old `KELVIQ_*` lines in `.env.local` are no longer read and can be deleted.
 
 ## Provisioning
 
 ```bash
-npx tsx scripts/polar-setup.ts https://firstline.46-17-99-33.sslip.io
+npx tsx scripts/polar-setup.ts https://firstline.46-17-99-33.sslip.io --packs
 ```
 
 The script:
-1. Checks the token (prints nothing secret).
-2. Creates "Test Product" (one-time, $10) if no active product exists.
-3. Creates the webhook endpoint `https://firstline.46-17-99-33.sslip.io/api/webhook/polar` for these events: `order.created`, `order.paid`, `order.updated`, `order.refunded` and `customer.state_changed`. It saves the signing secret to `.env.local` without printing it.
-4. Makes a single-use 100%-off code for the test product.
-5. Prints the product id, endpoint id, discount code and checkout links.
+1. Checks the token.
+2. Creates a private "Test Product" ($10).
+3. With `--packs`, creates one product per pack on sale. Prices come from `src/config/packs.ts` in EUR, excl. VAT: Starter €19, Growth €69, Agency €299.
+4. Registers the webhook (order.created, order.paid, order.updated, order.refunded, customer.state_changed) and saves its secret without printing it.
+5. Makes a single-use 100%-off code for the Starter pack.
 
-It's safe to run again: it reuses what already exists.
+It's safe to run again: it reuses existing products (matched by `metadata.pack`) and the existing endpoint. If you change pack prices later, change them in Polar too (or archive the product and run the script again).
 
 Record the ids it prints here:
-- Test product id: `…`
+- Starter / Growth / Agency product ids: `…`
 - Webhook endpoint id: `…`
 
 ## Customer portal
 
-Polar hosts the customer portal and emails customers the link, so no app code is needed. An in-app "Manage billing" link can come later.
-
-## Proposed mapping: paid order → credits (needs your OK)
-
-This is the same model as Kelviq today: a workspace buys a credit pack once, and credits land in the ledger exactly once.
-
-1. **One Polar product per pack.** Each pack in `src/config/packs.ts` that's on sale gets a one-time Polar product at that pack's price, for example "FirstLine Starter". The mapping is pack id → Polar product id, stored in env as `POLAR_PRODUCT_<PACK>`, following the old `KELVIQ_PLAN_<PACK>` pattern. The script can create these products once you've decided the prices.
-2. **Checkout from the Credits page.** The `buyPack` action calls `polar.checkouts.create` with:
-   - `products: [productId]`
-   - `external_customer_id: <workspace id>`, so the workspace is the paying customer, as with Kelviq
-   - `metadata: { workspace_id, pack, credits }`
-   - `success_url: <app>/credits?paid=1`
-
-   The bare `/checkout` route stays available for links.
-3. **`order.paid` → `addPurchase`** with these rules:
-   - The ledger key is `polar:<order id>`, so retries and both `order.created` and `order.paid` events add credits only once.
-   - The workspace comes from `metadata.workspace_id`, falling back to `customer.external_id`.
-   - The pack comes from `metadata.pack`, falling back to `product_id`.
-   - Then an activity log entry, "Payment (Polar)".
-   - Unknown products are acknowledged and ignored.
-4. **`order.refunded`:** log it and alert you on /admin. Credits are not taken back automatically; same as Kelviq today.
-5. **Kelviq is removed:** the SDK, routes, env keys and docs.
-6. Embedded-Postgres tests cover exactly-once crediting, retries, unknown products and refunds, the same way as the Kelviq tests.
+Polar hosts it and emails customers the link (receipts, invoices). No app code is needed.
 
 ## Check before going live
 
 - [ ] Token created in **production** with read+write on products, checkouts, webhooks and discounts
-- [ ] `scripts/polar-setup.ts` ran clean; ids recorded above
-- [ ] Deployed (`SSH_KEY=~/.ssh/sbd_hostkey bash deploy/deploy.sh`), so the server has the new routes and `.env.local`
-- [ ] Polar dashboard → Webhooks: a delivery to `/api/webhook/polar` shows 202
-- [ ] A checkout with the 100% code completes, and an `order.paid` delivery arrives
-- [ ] Mapping above approved and built, then a real pack purchase gives credits once
-- [ ] Polar organization fully set up for payouts (identity, bank details); Polar won't take live payments before that
+- [ ] Polar account fully set up for payouts (identity, bank details)
+- [ ] `scripts/polar-setup.ts … --packs` ran clean; ids recorded above
+- [ ] Deployed (`SSH_KEY=~/.ssh/sbd_hostkey bash deploy/deploy.sh`), so the server has the routes and the `POLAR_*` settings
+- [ ] Credits page → Buy Starter → enter the 100% code → paid. Then the Credits page shows +500, and Polar → Webhooks shows the delivery with 202
+- [ ] Legal: the sub-processor list, privacy and terms now name Polar (Polar Software, Inc., US). Have the lawyer confirm the entity and the data-transfer basis.

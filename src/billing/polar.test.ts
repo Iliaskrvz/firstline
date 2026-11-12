@@ -7,6 +7,7 @@ import { createPolarCheckout, fakePolarCheckouts, handlePolarEvent, parseProduct
 
 const PRODUCT = "3f0c2a52-6a1e-4d6b-9a55-0c8f6c1b2d11";
 const SECRET = "test-only-not-a-real-secret";
+const NO_DB = {} as unknown as import("pg").Pool;
 
 // Shape of an order.paid delivery (API 2026-10), trimmed to the fields we read. Ids are made up.
 const ORDER_PAID = {
@@ -42,11 +43,11 @@ describe("Polar checkout", () => {
     expect(parseProductIds([Array.from({ length: 11 }, () => PRODUCT).join(",")])).toBeNull();
   });
 
-  it("creates a checkout with the signed-in user as external customer, and returns Polar's url", async () => {
+  it("creates a checkout with the workspace as external customer, and returns Polar's url", async () => {
     const fake = fakePolarCheckouts("https://app.example");
-    const url = await createPolarCheckout(fake, { products: [PRODUCT], userId: "user-1", email: "me@example.com", ip: "203.0.113.9" });
+    const url = await createPolarCheckout(fake, { products: [PRODUCT], workspaceId: "ws-1", email: "me@example.com", ip: "203.0.113.9" });
     expect(url).toBe("https://app.example/credits?fake_checkout=fake_1");
-    expect(fake.calls).toEqual([{ products: [PRODUCT], external_customer_id: "user-1", customer_email: "me@example.com", customer_ip_address: "203.0.113.9" }]);
+    expect(fake.calls).toEqual([{ products: [PRODUCT], external_customer_id: "ws-1", customer_email: "me@example.com", customer_ip_address: "203.0.113.9" }]);
     await createPolarCheckout(fake, { products: [PRODUCT] });
     expect(fake.calls[1]).toEqual({ products: [PRODUCT] }); // guests: no customer fields, no success URL
   });
@@ -64,7 +65,8 @@ describe("Polar webhooks", () => {
   it("accepts a correctly signed delivery", async () => {
     const event = await verifyPolarWebhook(body, sign(body), SECRET);
     expect(event.type).toBe("order.paid");
-    expect(await handlePolarEvent(event)).toEqual({ type: "order.paid", handled: false, note: `order ${ORDER_PAID.data.id} paid: not credited yet (TODO)` });
+    // No pack product configured: acknowledged without touching the database.
+    expect(await handlePolarEvent(NO_DB, event, {})).toEqual({ type: "order.paid", handled: false, added: 0, note: "not a FirstLine credit pack" });
   });
 
   it("rejects a wrong secret, a changed body and an old timestamp", async () => {
@@ -74,10 +76,10 @@ describe("Polar webhooks", () => {
     await expect(verifyPolarWebhook(body, sign(body, "msg_1", old), SECRET)).rejects.toBeInstanceOf(webhooks.PolarWebhookVerificationError);
   });
 
-  it("knows customer.state_changed and flags unknown event types", async () => {
+  it("acknowledges customer.state_changed and flags unknown event types", async () => {
     const state = JSON.stringify({ type: "customer.state_changed", timestamp: "2026-11-12T20:00:00Z", api_version: "2026-10", data: { id: "c1", external_id: null, active_subscriptions: [], granted_benefits: [], active_meters: [] } });
     const event = await verifyPolarWebhook(state, sign(state), SECRET);
-    expect((await handlePolarEvent(event)).note).toMatch(/nothing to sync/);
+    expect((await handlePolarEvent(NO_DB, event, {})).note).toBe("ignored event type");
     const odd = JSON.stringify({ type: "something.new", data: {} });
     await expect(verifyPolarWebhook(odd, sign(odd), SECRET)).rejects.toBeInstanceOf(webhooks.PolarWebhookUnknownTypeError);
   });

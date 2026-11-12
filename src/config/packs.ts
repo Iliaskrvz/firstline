@@ -1,6 +1,6 @@
 // Credit packs (§9, Phase 10). Edit here, not in the pages. Prices in euro cents excl. VAT.
 // enabled: shown and buyable. Proposed packs stay off until the owner approves them and the matching
-// Kelviq plan exists (Kelviq plan id: firstline-<id>, or KELVIQ_PLAN_<ID> in .env.local).
+// Polar product exists (POLAR_PRODUCT_<ID> in .env.local; scripts/polar-setup.ts --packs creates them).
 // PACKS_ENABLED=starter,growth,agency,scale-50k in .env.local overrides "enabled" without a code change.
 //
 // Lite credits (kind "lite") only pay for campaigns with the Lite writer (Haiku writes, 2 pages read);

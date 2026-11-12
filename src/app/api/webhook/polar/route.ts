@@ -3,7 +3,8 @@
 // endpoint after 10 failures in a row, so unknown event types are acknowledged too.
 import { NextResponse, type NextRequest } from "next/server";
 import { webhooks } from "@polar-sh/sdk/2026-10";
-import { handlePolarEvent, verifyPolarWebhook, type PolarEvent } from "@/billing/polar";
+import { handlePolarEvent, polarProductIds, verifyPolarWebhook, type PolarEvent } from "@/billing/polar";
+import { serverPool } from "@/server/db";
 
 export async function POST(request: NextRequest) {
   const secret = process.env.POLAR_WEBHOOK_SECRET?.trim();
@@ -23,9 +24,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
   try {
-    return NextResponse.json({ received: true, ...(await handlePolarEvent(event)) }, { status: 202 });
+    return NextResponse.json({ received: true, ...(await handlePolarEvent(serverPool(), event, polarProductIds())) }, { status: 202 });
   } catch (e) {
-    // 500 makes Polar retry. Handlers must stay idempotent (dedupe on the webhook-id header / order id).
+    // 500 makes Polar retry (database down, say). Crediting is idempotent per order, so that's safe.
     console.error(`polar webhook ${event.type} ${headers["webhook-id"]}:`, (e as Error).message);
     return NextResponse.json({ error: "Processing failed; Polar will retry." }, { status: 500 });
   }

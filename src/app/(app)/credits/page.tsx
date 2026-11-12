@@ -5,7 +5,7 @@ import { requireWorkspace } from "@/lib/auth";
 import { enabledPacks, euro } from "@/lib/credits";
 import { isAdminRole } from "@/lib/team";
 import { formatDate, n } from "@/lib/format";
-import { kelviqConfigured } from "@/server/kelviq";
+import { polarConfigured, polarProducts } from "@/server/polar";
 import { AutoRefresh } from "../campaigns/[id]/preview/auto-refresh";
 import { BuyButton } from "./buy-button";
 
@@ -41,6 +41,7 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
   const { paid } = await searchParams;
   const { supabase, workspace, role } = await requireWorkspace();
   const canBuy = isAdminRole(role);
+  const products = polarProducts();
   const packs = enabledPacks();
   const groups = [
     { kind: "standard", title: "Credit packs", note: "For any campaign.", packs: packs.filter((p) => p.kind === "standard") },
@@ -115,16 +116,16 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
                   </div>
                   <div className="text-sm text-slate-600">{euro(p.priceCents)} excl. VAT</div>
                 </div>
-                <BuyButton pack={p.id} label={`Buy ${p.name}`} disabled={!kelviqConfigured() || !canBuy} />
+                <BuyButton pack={p.id} label={`Buy ${p.name}`} disabled={!polarConfigured() || !products[p.id] || !canBuy} />
               </Card>
             ))}
           </div>
         </section>
       ))}
       {!canBuy && <p className="text-sm text-slate-600">Only the workspace owner or an admin can buy credits. Everyone in the workspace uses them.</p>}
-      {!kelviqConfigured() && <p className="text-sm text-amber-800">Payments aren&apos;t set up on this server yet (KELVIQ_API_KEY).</p>}
+      {!polarConfigured() && <p className="text-sm text-amber-800">Payments aren&apos;t set up on this server yet (POLAR_ACCESS_TOKEN).</p>}
       <p className="text-xs text-slate-500">
-        Pay with iDEAL | Wero or card. Payments are handled by our reseller Kelviq, which adds VAT where it applies and sends the invoice. Why this price? We
+        Payments are handled by our reseller Polar (merchant of record), which adds VAT where it applies and sends the invoice. Why this price? We
         charge about three times what research and AI really cost us per email, and nothing when we can&apos;t find anything useful.
       </p>
 
