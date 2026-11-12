@@ -1,7 +1,7 @@
 // One-time Polar setup on the account the token belongs to (POLAR_SERVER: production by default).
 //   npx tsx scripts/polar-setup.ts [https://your-public-address] [--packs]
 // 1. Checks POLAR_ACCESS_TOKEN works (never prints it).
-// 2. Creates "Test Product" (one-time $10) if it doesn't exist. With --packs: one one-time product per
+// 2. Creates "Test Product" (one-time €10) if it doesn't exist. With --packs: one one-time product per
 //    pack on sale (src/config/packs.ts, PACKS_ENABLED), priced from the config in EUR excl. VAT, and
 //    saves each id in .env.local as POLAR_PRODUCT_<PACK> (ids aren't secret).
 // 3. If an address is given and no webhook endpoint points at <address>/api/webhook/polar yet:
@@ -87,11 +87,11 @@ async function main() {
     const created = await api<Product>("POST", "/v1/products/", {
       name: "Test Product",
       visibility: "private",
-      prices: [{ amount_type: "fixed", price_amount: 1000, price_currency: "usd" }],
+      prices: [{ amount_type: "fixed", price_amount: 1000, price_currency: "eur" }],
     });
     if (created.status >= 300) fail("Creating the test product", created.status, created.data);
     product = created.data;
-    console.log(`✓ Created Test Product, one-time $10 (${product.id})`);
+    console.log(`✓ Created Test Product, one-time €10 (${product.id})`);
   }
 
   const packProducts: Record<string, string> = {};
