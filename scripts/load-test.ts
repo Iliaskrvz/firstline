@@ -11,11 +11,12 @@ import { PgBoss } from "pg-boss";
 import { reserveForRun } from "@/billing/db";
 import { engineConfig } from "@/engine/config";
 import type { WebReader } from "@/engine/firecrawl";
-import { acquireWorkspaceSlot, PgSlotGate, releaseWorkspaceSlot } from "@/engine/limiter-pg";
+import { jobContext, PRIORITY } from "@/engine/job-context";
+import { acquireWorkspaceSlot, deferDelaySeconds, PgSlotGate, releaseWorkspaceSlot } from "@/engine/limiter-pg";
 import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
-import { LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
+import { GROUP_TIERS, LEAD_QUEUE, leadJobGroup, leadJobId, type LeadJobData } from "@/lib/queue";
 
 const [LEADS, WORKERS, FC_SLOTS, MAP_MS, SCRAPE_MS, WS_LIMIT, PER_WORKER] = [5000, 2, 10, 100, 200, 40, 20].map((d, i) => Number(process.argv[2 + i] ?? d));
 const root = path.resolve(__dirname, "..");
@@ -87,7 +88,7 @@ async function main() {
   await boss0.createQueue(LEAD_QUEUE, { retryLimit: 3, retryDelay: 5, retryBackoff: true, expireInSeconds: 600 });
   const runId = `load-${Date.now()}`;
   for (let i = 0; i < leadIds.length; i += 500) {
-    await boss0.insert(LEAD_QUEUE, leadIds.slice(i, i + 500).map((leadId) => ({ id: leadJobId(leadId, runId), data: { leadId, workspaceId: ws, preview: false, force: false } satisfies LeadJobData, group: { id: ws } })));
+    await boss0.insert(LEAD_QUEUE, leadIds.slice(i, i + 500).map((leadId) => ({ id: leadJobId(leadId, runId), data: { leadId, workspaceId: ws, preview: false, force: false } satisfies LeadJobData, group: leadJobGroup({ workspaceId: ws, preview: false }, WS_LIMIT) })));
   }
 
   console.log(`${LEADS} leads queued · ${WORKERS} workers × ${PER_WORKER} at once · workspace limit ${WS_LIMIT} · Firecrawl ${FC_SLOTS} at once, map ${MAP_MS} ms, scrape ${SCRAPE_MS} ms`);
@@ -106,18 +107,19 @@ async function main() {
     const boss = new PgBoss({ ...cfg, schema: "pgboss", max: 4 });
     await boss.start();
     bosses.push(boss);
-    await boss.work<LeadJobData>(LEAD_QUEUE, { localConcurrency: PER_WORKER, groupConcurrency: 50, pollingIntervalSeconds: 0.5 }, async ([job]) => {
+    await boss.work<LeadJobData>(LEAD_QUEUE, { localConcurrency: PER_WORKER, groupConcurrency: { default: 5, tiers: GROUP_TIERS }, pollingIntervalSeconds: 0.5 }, async ([job]) => {
       const s0 = Date.now();
-      const ok = await acquireWorkspaceSlot(pool, { workspaceId: ws, leadId: job.data.leadId, workerId: `w${w}`, limit: WS_LIMIT });
+      const slot = await acquireWorkspaceSlot(pool, { workspaceId: ws, leadId: job.data.leadId, workerId: `w${w}`, limit: WS_LIMIT, capacity: WORKERS * PER_WORKER });
       st.slotWaitMs += Date.now() - s0;
-      if (!ok) {
+      if (!slot.ok) {
         st.deferred++;
-        await boss.send(LEAD_QUEUE, job.data, { startAfter: 1, group: { id: ws } });
+        const deferrals = (job.data.deferrals ?? 0) + 1;
+        await boss.send(LEAD_QUEUE, { ...job.data, deferrals }, { startAfter: deferDelaySeconds(deferrals), group: leadJobGroup({ workspaceId: ws, preview: false }, WS_LIMIT) });
         return;
       }
       const p0 = Date.now();
       try {
-        await processLead(job.data.leadId, deps, { preview: false });
+        await jobContext.run({ workspaceId: ws, priority: PRIORITY.run }, () => processLead(job.data.leadId, deps, { preview: false }));
         st.done++;
         st.procMs += Date.now() - p0;
       } finally {

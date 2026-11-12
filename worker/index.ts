@@ -12,7 +12,8 @@ import { PgBoss } from "pg-boss";
 import { engineConfig } from "@/engine/config";
 import { createFirecrawl } from "@/engine/firecrawl";
 import { chainGates, effectiveConcurrency } from "@/engine/limiter";
-import { acquireWorkspaceSlot, asSingleton, PgRateGate, PgSlotGate, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
+import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, pruneProviderWindows, releaseWorkspaceSlot, workerCapacity, workspaceLimit } from "@/engine/limiter-pg";
+import { jobContext, PRIORITY } from "@/engine/job-context";
 import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 import { selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
@@ -21,8 +22,9 @@ import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { runRetention } from "@/billing/retention";
+import { anthropicBudget, budgetAlertEmail, firecrawlBudget, newAlertLevel } from "@/billing/budgets";
 import { collectFinished, submitPending } from "@/engine/economy-pg";
-import { dbConnection, LEAD_QUEUE, leadJobId, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
+import { dbConnection, GROUP_TIERS, LEAD_QUEUE, leadJobGroup, leadJobId, leadJobPriority, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
 import { createTool } from "@/integrations/registry";
 import { pollIntegrations, pushesToResume, runPush, type PushDeps } from "@/integrations/push-pg";
 import { encryptionKey } from "@/lib/secret-box";
@@ -46,15 +48,24 @@ async function main() {
   const conn = dbConnection(process.env.DATABASE_URL!);
   const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 4 });
   // Provider limits are shared by every worker process (Postgres), so adding workers can't exceed a plan.
-  const anthropicGate = chainGates(
-    new PgRateGate(pool, "anthropic", config.concurrency.anthropicPerMinute),
-    new PgSlotGate(pool, "anthropic", config.concurrency.anthropic),
-  );
+  const anthropicSlots = new PgSlotGate(pool, "anthropic", config.concurrency.anthropic);
+  const anthropicPerMinute = config.concurrency.anthropicPerMinute;
+  const anthropicGate = anthropicPerMinute ? chainGates(new PgRateGate(pool, "anthropic", anthropicPerMinute), anthropicSlots) : anthropicSlots;
+  if (config.llmProvider === "anthropic" && !anthropicPerMinute) log("ANTHROPIC_RPM not set: no per-minute limit of ours (set it to your Anthropic Console limit).");
   const llm = await selectLLM(config, { anthropicGate });
   if (config.llmProvider === "anthropic" && !config.anthropicApiKey) {
     log("⚠ LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing: research runs, AI steps will show 'Anthropic key missing'.");
   }
 
+  // Each workspace's leads-at-once limit (own setting, else from credits bought), cached for 30 s.
+  const limits = new Map<string, { limit: number; at: number }>();
+  const limitFor = async (ws: string) => {
+    const hit = limits.get(ws);
+    if (hit && Date.now() - hit.at < 30_000) return hit.limit;
+    const limit = Math.min(MAX_WORKSPACE_CONCURRENCY, await workspaceLimit(pool, ws, concurrencyLevel));
+    limits.set(ws, { limit, at: Date.now() });
+    return limit;
+  };
   const store = new PgStore(pool);
   const reader = createFirecrawl(config.firecrawlApiKey!);
   const planLimit = (await reader.planConcurrency?.()) ?? null;
@@ -77,8 +88,13 @@ async function main() {
       retryLimit: config.retries.jobRetryLimit,
       retryDelay: config.retries.jobRetryDelaySec,
       retryBackoff: true,
-      expireInSeconds: 600,
+      // Generous: time spent waiting for a shared Firecrawl/Anthropic slot must never make a job
+      // expire (an expiry would count as a failed attempt).
+      expireInSeconds: 3600,
     });
+  } else {
+    // Queues created before Phase 10 expired jobs after 10 minutes: raise it (waiting must not count as a retry).
+    await boss.updateQueue(LEAD_QUEUE, { expireInSeconds: 3600 }).catch((e) => log("couldn't update queue expiry:", (e as Error).message));
   }
 
   if (!(await boss.getQueue(PUSH_QUEUE))) {
@@ -125,7 +141,7 @@ async function main() {
   const enqueueLeads = async (leads: { leadId: string; workspaceId: string }[], runId: string) => {
     for (const l of leads) {
       await boss
-        .send(LEAD_QUEUE, { leadId: l.leadId, workspaceId: l.workspaceId, preview: false, force: false }, { id: leadJobId(l.leadId, runId), group: { id: l.workspaceId } })
+        .send(LEAD_QUEUE, { leadId: l.leadId, workspaceId: l.workspaceId, preview: false, force: false }, { id: leadJobId(l.leadId, runId), group: leadJobGroup({ workspaceId: l.workspaceId, preview: false }, await limitFor(l.workspaceId)) })
         .catch(() => null);
     }
   };
@@ -217,11 +233,33 @@ async function main() {
   };
   const apiTimer = setInterval(apiTick, 15_000);
 
+  // Provider budgets: email the site admins at 80% and 100% of Firecrawl credits / Anthropic spend cap.
+  const budgetCheck = async () => {
+    try {
+      await asSingleton(pool, "budgets", async () => {
+        const budgets = [await firecrawlBudget(pool, (await reader.creditUsage?.()) ?? null), await anthropicBudget(pool)];
+        const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim()).filter(Boolean);
+        for (const b of budgets) {
+          const level = await newAlertLevel(pool, b);
+          if (!level) continue;
+          const mail = budgetAlertEmail(b, level, process.env.PUBLIC_APP_URL?.trim() || null);
+          log(`⚠ budget: ${mail.subject}`);
+          if (mailer) for (const to of admins) await mailer.send({ to, ...mail }).catch((e) => log("budget alert email failed:", (e as Error).message));
+        }
+      });
+    } catch (e) {
+      log("budget check failed:", (e as Error).message);
+    }
+  };
+  await budgetCheck();
+  const budgetTimer = setInterval(budgetCheck, 60 * 60_000);
+
   // Data retention (§11): end idle campaigns and delete lead data 30 days after a campaign ended.
   const retention = async () => {
     try {
       const r = await asSingleton(pool, "retention", async () => {
         await apiHousekeeping(pool);
+        await pruneProviderWindows(pool);
         return runRetention(pool);
       });
       if (!r) return;
@@ -235,35 +273,40 @@ async function main() {
 
   // Leads in progress per workspace (Phase 10): the workspace's own limit (set on /admin, or by credits
   // bought), counted across every worker in Postgres. pg-boss only enforces the hard maximum.
-  const limits = new Map<string, { limit: number; at: number }>();
-  const limitFor = async (ws: string) => {
-    const hit = limits.get(ws);
-    if (hit && Date.now() - hit.at < 30_000) return hit.limit;
-    const limit = Math.min(MAX_WORKSPACE_CONCURRENCY, await workspaceLimit(pool, ws, concurrencyLevel));
-    limits.set(ws, { limit, at: Date.now() });
-    return limit;
+  let capacity = { value: config.concurrency.perWorker, at: 0 };
+  const capacityNow = async () => {
+    if (Date.now() - capacity.at > 30_000) capacity = { value: await workerCapacity(pool, config.concurrency.perWorker).catch(() => capacity.value), at: Date.now() };
+    return capacity.value;
   };
 
   await boss.work<LeadJobData>(
     LEAD_QUEUE,
     {
       localConcurrency: config.concurrency.perWorker, // jobs at once on this worker
-      groupConcurrency: MAX_WORKSPACE_CONCURRENCY, // hard cap per workspace; the real limit is below
+      // Per-workspace limit, enforced by the queue across all workers: each job's group tier is its
+      // workspace's limit (see leadJobGroup). acquireWorkspaceSlot below adds the fair share.
+      groupConcurrency: { default: 5, tiers: GROUP_TIERS },
       includeMetadata: true,
       pollingIntervalSeconds: 2,
     },
     async ([job]) => {
       const { leadId, preview, force, workspaceId } = job.data;
       const t0 = Date.now();
-      const slot = await acquireWorkspaceSlot(pool, { workspaceId, leadId, workerId: WORKER_ID, limit: await limitFor(workspaceId) });
-      if (!slot) {
-        // At its limit: try again in a few seconds (a new job; this one finishes without doing anything).
+      // Before any paid call: is there room for this workspace (its limit, its fair share of workers)?
+      const slot = await acquireWorkspaceSlot(pool, { workspaceId, leadId, workerId: WORKER_ID, limit: await limitFor(workspaceId), capacity: await capacityNow(), preview });
+      if (!slot.ok) {
+        // Not now: reschedule as a new job with a growing wait. This job completes without doing
+        // anything, so waiting never counts as one of the 3 failure retries.
         stats.deferred++;
-        await boss.send(LEAD_QUEUE, job.data, { startAfter: 3, group: { id: workspaceId } });
-        return { outcome: "deferred" };
+        const deferrals = (job.data.deferrals ?? 0) + 1;
+        await boss.send(LEAD_QUEUE, { ...job.data, deferrals }, { startAfter: deferDelaySeconds(deferrals), group: leadJobGroup(job.data, await limitFor(workspaceId)), priority: leadJobPriority(job.data) });
+        return { outcome: "deferred", reason: slot.reason };
       }
       try {
-        const res = await processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force });
+        // Shared provider limits read this to share fairly and to let previews go first.
+        const res = await jobContext.run({ workspaceId, priority: preview ? PRIORITY.preview : PRIORITY.run }, () =>
+          processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force }),
+        );
         stats.jobsDone++;
         // Public API: the last lead of a job finishes the job and queues its webhook.
         if (!preview) await completeJobsFor(pool, leadId).catch((e) => log("api job completion failed:", (e as Error).message));
@@ -328,6 +371,7 @@ async function main() {
     clearInterval(retentionTimer);
     clearInterval(pushTimer);
     clearInterval(apiTimer);
+    clearInterval(budgetTimer);
     server.close();
     await boss.stop({ graceful: true, timeout: 30_000 }).catch(() => {});
     await pool.end().catch(() => {});

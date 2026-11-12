@@ -303,3 +303,52 @@ select
 from public.workspaces w
 left join public.credit_ledger l on l.workspace_id = w.id
 group by w.id;
+
+-- ---------------------------------------------------------------------------
+-- Fair sharing of the provider limits (owner's change request, 2026-11-12): when the shared
+-- Firecrawl / Anthropic limits are full, waiting calls are let in by priority (free previews first),
+-- then the workspace using the fewest slots, then first come. Waiters refresh their row while
+-- they wait, so a crashed worker's waiters disappear.
+-- ---------------------------------------------------------------------------
+alter table public.provider_slots add column holder_ws text;
+
+create table public.provider_waiters (
+  id           uuid primary key,
+  provider     text not null,
+  workspace_id text not null,
+  priority     int not null default 0,
+  created_at   timestamptz not null default now(),
+  expires_at   timestamptz not null
+);
+create index provider_waiters_provider_idx on public.provider_waiters (provider, expires_at);
+alter table public.provider_waiters enable row level security;
+
+-- Calls per workspace in the current minute (fair share of a requests-per-minute limit).
+create table public.provider_window_usage (
+  provider     text not null,
+  window_start timestamptz not null,
+  workspace_id text not null,
+  count        int not null default 0,
+  primary key (provider, window_start, workspace_id)
+);
+alter table public.provider_window_usage enable row level security;
+
+-- Workspaces that want worker capacity right now (running or waiting), for the fair share of workers.
+create table public.workspace_demand (
+  workspace_id    uuid primary key,
+  last_wanted_at  timestamptz not null default now()
+);
+alter table public.workspace_demand enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Provider budgets (free Firecrawl plan: 1,000 credits a month; Anthropic monthly spend cap):
+-- one alert per provider, month and level.
+-- ---------------------------------------------------------------------------
+create table public.provider_budget_alerts (
+  provider text not null,
+  period   text not null,          -- e.g. 2026-11
+  level    int not null,           -- percent: 80, 100
+  sent_at  timestamptz not null default now(),
+  primary key (provider, period, level)
+);
+alter table public.provider_budget_alerts enable row level security;

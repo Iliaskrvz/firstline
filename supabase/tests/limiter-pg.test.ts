@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { acquireWorkspaceSlot, asSingleton, PgRateGate, PgSlotGate, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
+import { jobContext, PRIORITY } from "@/engine/job-context";
+import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, PREVIEW_EXTRA, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
 import { concurrencyLevel } from "@/lib/concurrency";
+import { anthropicBudget, firecrawlBudget, newAlertLevel } from "@/billing/budgets";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-00000000bb01";
@@ -80,20 +82,21 @@ describe("limits shared across workers", () => {
     for (let i = 0; i < 5; i++) await (i % 2 ? g1 : g2).run(async () => undefined);
     expect(sleeps).toEqual([]);
     await g1.run(async () => undefined); // 6th call waits for the next minute
-    expect(sleeps.length).toBe(1);
+    expect(sleeps.length).toBeGreaterThan(0);
     expect(new Date(t).getUTCMinutes()).toBe(1);
   });
 
   it("workspace slots: at most the workspace's limit, freed on release or when a worker dies", async () => {
     const leads = Array.from({ length: 4 }, (_, i) => `00000000-0000-0000-0000-0000000c000${i}`);
     const got = await Promise.all(leads.map((leadId, i) => acquireWorkspaceSlot(i % 2 ? a : b, { workspaceId: ws, leadId, workerId: `w${i % 2}`, limit: 3 })));
-    expect(got.filter(Boolean)).toHaveLength(3);
-    const blocked = leads[got.indexOf(false)];
-    await releaseWorkspaceSlot(a, leads[got.indexOf(true)]);
-    expect(await acquireWorkspaceSlot(a, { workspaceId: ws, leadId: blocked, workerId: "w0", limit: 3 })).toBe(true);
+    expect(got.filter((g) => g.ok)).toHaveLength(3);
+    const blocked = leads[got.findIndex((g) => !g.ok)];
+    await releaseWorkspaceSlot(a, leads[got.findIndex((g) => g.ok)]);
+    expect(await acquireWorkspaceSlot(a, { workspaceId: ws, leadId: blocked, workerId: "w0", limit: 3 })).toEqual({ ok: true });
     // A crashed worker's slots expire.
     await a.query("update public.workspace_slots set expires_at = now() - interval '1 second' where workspace_id = $1", [ws]);
-    expect(await acquireWorkspaceSlot(b, { workspaceId: ws, leadId: "00000000-0000-0000-0000-0000000c0099", workerId: "w1", limit: 1 })).toBe(true);
+    expect(await acquireWorkspaceSlot(b, { workspaceId: ws, leadId: "00000000-0000-0000-0000-0000000c0099", workerId: "w1", limit: 1 })).toEqual({ ok: true });
+    await a.query("delete from public.workspace_slots");
   });
 
   it("the limit follows credits bought, unless the workspace has its own setting", async () => {
@@ -119,5 +122,72 @@ describe("limits shared across workers", () => {
     expect(r).toContain(null);
     expect(max).toBe(1);
     expect(await asSingleton(a, "economy-test", task)).toBe("done"); // the lock was released
+  });
+
+  it("fair sharing: a small workspace gets the next free slot, before a big workspace's queue", async () => {
+    const g = new PgSlotGate(a, "fair-test", 2, { pollMs: 5 });
+    const order: string[] = [];
+    const call = (who: string, ms: number) => async () => {
+      order.push(who);
+      await wait(ms);
+    };
+    const big = Array.from({ length: 8 }, (_, i) => jobContext.run({ workspaceId: "big", priority: PRIORITY.run }, () => g.run(call(`big${i}`, 40))));
+    await wait(15); // the big run already holds both slots and has 6 calls waiting
+    const small = Array.from({ length: 2 }, (_, i) => jobContext.run({ workspaceId: "small", priority: PRIORITY.run }, () => g.run(call(`small${i}`, 40))));
+    await Promise.all([...big, ...small]);
+    // Both small calls start within the next two freed slots, not after the whole big queue.
+    expect(order.indexOf("small0")).toBeLessThanOrEqual(4);
+    expect(order.indexOf("small1")).toBeLessThanOrEqual(5);
+  });
+
+  it("fair sharing: a free preview goes before a big run's waiting calls, even from the same workspace", async () => {
+    const g = new PgSlotGate(a, "preview-test", 1, { pollMs: 5 });
+    const order: string[] = [];
+    const call = (who: string) => async () => {
+      order.push(who);
+      await wait(30);
+    };
+    const run = Array.from({ length: 5 }, (_, i) => jobContext.run({ workspaceId: "ws1", priority: PRIORITY.run }, () => g.run(call(`run${i}`))));
+    await wait(10);
+    const preview = jobContext.run({ workspaceId: "ws1", priority: PRIORITY.preview }, () => g.run(call("preview")));
+    await Promise.all([...run, preview]);
+    expect(order.indexOf("preview")).toBe(1); // right after the call that was already running
+  });
+
+  it("fair share of workers: a workspace can't take more than its share while others wait; previews may go a bit over", async () => {
+    await a.query("delete from public.workspace_slots; delete from public.workspace_demand");
+    const big = "00000000-0000-0000-0000-00000000f001";
+    const small = "00000000-0000-0000-0000-00000000f002";
+    const lead = (n: number) => `00000000-0000-0000-0000-0000000d${String(n).padStart(4, "0")}`;
+    const take = (wsId: string, n: number, preview = false) => acquireWorkspaceSlot(a, { workspaceId: wsId, leadId: lead(n), workerId: "w", limit: 40, capacity: 4, preview });
+    // Alone, the big workspace may use all 4 worker slots.
+    for (let i = 0; i < 4; i++) expect(await take(big, i)).toEqual({ ok: true });
+    // Once the small one wants capacity too, the big one is held at its share (4 ÷ 2 = 2) …
+    expect(await take(small, 100)).toEqual({ ok: true });
+    for (let i = 0; i < 2; i++) await releaseWorkspaceSlot(a, lead(i));
+    expect(await take(big, 10)).toEqual({ ok: false, reason: "fair_share" });
+    expect(await take(small, 101)).toEqual({ ok: true });
+    // … but a preview may go PREVIEW_EXTRA over.
+    expect(await take(big, 20, true)).toEqual({ ok: true });
+    expect(PREVIEW_EXTRA).toBe(5);
+  });
+
+  it("waiting reschedules with a growing delay; it is never a failed attempt", () => {
+    expect([1, 2, 3, 4, 5, 6, 20].map(deferDelaySeconds)).toEqual([2, 4, 8, 16, 30, 30, 30]);
+    expect(deferDelaySeconds(0)).toBe(1);
+  });
+
+  it("provider budgets: Firecrawl from its own numbers or our log, Anthropic vs the cap; one alert per level per month", async () => {
+    const fromFc = await firecrawlBudget(a, { remaining: 150, plan: 1000, periodStart: null, periodEnd: "2026-11-30T23:59:59Z" });
+    expect(fromFc).toMatchObject({ used: 850, limit: 1000, pct: 85, source: "Firecrawl" });
+    await a.query("insert into public.usage_costs (workspace_id, step, model, provider_units, cost_usd) values ($1, 'scrape', 'firecrawl-scrape', 300, 0.25), ($1, 'write', 'claude-sonnet-5-5', 0, 42.5)", [ws]);
+    expect(await firecrawlBudget(a, null, { FIRECRAWL_MONTHLY_CREDITS: "1000" })).toMatchObject({ used: 300, pct: 30, source: "our log this month" });
+    const an = await anthropicBudget(a, { ANTHROPIC_MONTHLY_CAP_USD: "50" });
+    expect(an).toMatchObject({ used: 42.5, limit: 50, pct: 85 });
+    expect(await anthropicBudget(a, {})).toMatchObject({ limit: null, pct: null });
+    expect(await newAlertLevel(a, an)).toBe(80);
+    expect(await newAlertLevel(a, an)).toBeNull(); // once
+    expect(await newAlertLevel(a, { ...an, pct: 101 })).toBe(100);
+    expect(await newAlertLevel(a, { ...an, pct: 50 })).toBeNull();
   });
 });

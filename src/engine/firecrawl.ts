@@ -11,9 +11,13 @@ export interface WebReader {
   robots(domain: string): Promise<string | null>;
   /** How many requests the Firecrawl plan runs at once (null if unknown). */
   planConcurrency?(): Promise<number | null>;
+  /** Credits left in this billing period (Firecrawl's own numbers), or null if unknown. */
+  creditUsage?(): Promise<CreditUsage | null>;
 }
 
 const BASE = "https://api.firecrawl.dev/v2";
+
+export type CreditUsage = { remaining: number; plan: number | null; periodStart: string | null; periodEnd: string | null };
 const EXCLUDE_TAGS = ["nav", "footer", "header", "script", "style", "noscript", "iframe", "svg", "form", "aside", "[hidden]", "[aria-hidden=true]", ".cookie", "#cookie", ".cookies", ".cookie-banner", "#CybotCookiebotDialog"];
 
 /**
@@ -94,6 +98,20 @@ export function createFirecrawl(apiKey: string, fetchImpl: typeof fetch = fetch,
         );
         const n = Number(j?.maxConcurrency);
         return Number.isInteger(n) && n > 0 ? n : null;
+      } catch {
+        return null;
+      }
+    },
+    async creditUsage() {
+      try {
+        const j = await timed(`${BASE}/team/credit-usage`, { headers: { Authorization: `Bearer ${apiKey}` } }, 5_000, fetchImpl, (res) =>
+          res.ok ? res.json() : Promise.resolve(null),
+        );
+        const d = j?.data;
+        const remaining = Number(d?.remainingCredits);
+        if (!Number.isFinite(remaining)) return null;
+        const plan = Number(d?.planCredits);
+        return { remaining, plan: Number.isFinite(plan) && plan > 0 ? plan : null, periodStart: d?.billingPeriodStart ?? null, periodEnd: d?.billingPeriodEnd ?? null };
       } catch {
         return null;
       }

@@ -2,7 +2,10 @@
 import "server-only";
 import { isDatabaseUrl } from "@/lib/env";
 import { PgBoss } from "pg-boss";
-import { dbConnection, LEAD_QUEUE, leadJobId, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
+import { dbConnection, LEAD_QUEUE, leadJobGroup, leadJobId, leadJobPriority, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
+import { workspaceLimit } from "@/engine/limiter-pg";
+import { concurrencyLevel } from "@/lib/concurrency";
+import { serverPool } from "@/server/db";
 
 let bossPromise: Promise<PgBoss> | null = null;
 
@@ -17,7 +20,7 @@ async function getBoss(): Promise<PgBoss> {
       boss.on("error", (e) => console.error("pg-boss (web):", e.message));
       await boss.start();
       if (!(await boss.getQueue(LEAD_QUEUE))) {
-        await boss.createQueue(LEAD_QUEUE, { retryLimit: 3, retryDelay: 20, retryBackoff: true, expireInSeconds: 600 });
+        await boss.createQueue(LEAD_QUEUE, { retryLimit: 3, retryDelay: 20, retryBackoff: true, expireInSeconds: 3600 });
       }
       if (!(await boss.getQueue(PUSH_QUEUE))) {
         await boss.createQueue(PUSH_QUEUE, { retryLimit: 3, retryDelay: 30, retryBackoff: true, expireInSeconds: 3600 });
@@ -33,9 +36,12 @@ async function getBoss(): Promise<PgBoss> {
 
 export async function enqueueLeads(jobs: LeadJobData[], runId: string): Promise<number> {
   const boss = await getBoss();
+  const limits = new Map<string, number>();
   let n = 0;
   for (const data of jobs) {
-    const id = await boss.send(LEAD_QUEUE, data, { id: leadJobId(data.leadId, runId), group: { id: data.workspaceId } }).catch(() => null);
+    if (!limits.has(data.workspaceId)) limits.set(data.workspaceId, await workspaceLimit(serverPool(), data.workspaceId, concurrencyLevel).catch(() => concurrencyLevel(0)));
+    const group = leadJobGroup(data, limits.get(data.workspaceId)!);
+    const id = await boss.send(LEAD_QUEUE, data, { id: leadJobId(data.leadId, runId), group, priority: leadJobPriority(data) }).catch(() => null);
     if (id) n++;
   }
   return n;

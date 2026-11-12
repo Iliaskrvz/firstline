@@ -27,8 +27,11 @@ export function engineConfig(env: Record<string, string | undefined> = process.e
       perWorkspace: num(env.WORKSPACE_CONCURRENCY, 5),
       firecrawl: num(env.FIRECRAWL_CONCURRENCY, 5),
       anthropic: num(env.ANTHROPIC_CONCURRENCY, 5),
-      /** Requests per minute to Anthropic across all workers (your Anthropic tier's limit, a bit under). */
-      anthropicPerMinute: num(env.ANTHROPIC_RPM, 45),
+      /**
+       * Requests per minute to Anthropic across all workers: the limit shown in your Anthropic Console
+       * (a bit under it). Not set = no per-minute limit of ours; Anthropic's own 429s are retried by the SDK.
+       */
+      anthropicPerMinute: env.ANTHROPIC_RPM?.trim() ? num(env.ANTHROPIC_RPM, 0) || null : null,
     },
     retries: { jobRetryLimit: 3, jobRetryDelaySec: 20 },
     quality: { judgePassAvg: 3.5 },
