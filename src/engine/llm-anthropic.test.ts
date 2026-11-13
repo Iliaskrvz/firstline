@@ -14,6 +14,7 @@ const base: WriteInput = {
   facts: [{ id: "F1", text: "Acme opened a Rotterdam studio.", src: "https://acme.nl/news", tier: "A" }],
   lead: { first_name: "Anna", company: "Acme", title: "Founder", linkedin_headline: null },
   examples: [],
+  personal: [],
 };
 
 describe("writer request (prompt caching)", () => {

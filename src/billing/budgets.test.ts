@@ -8,7 +8,8 @@ describe("budget alert email", () => {
     expect(e.subject).toBe("FirstLine: Firecrawl credits at 82% this month");
     expect(e.text).toMatch(/820 of 1,000 credits/);
     expect(e.text).toMatch(/Upgrade the Firecrawl plan/);
-    const an: Budget = { ...fc, provider: "anthropic", label: "Anthropic spend", used: 41.5, limit: 50, unit: "usd", pct: 83 };
-    expect(budgetAlertEmail(an, 80, null).text).toMatch(/\$41\.50 of \$50\.00/);
+    const ai: Budget = { ...fc, provider: "llm", label: "AI spend (DeepSeek)", used: 41.5, limit: 50, unit: "usd", pct: 83 };
+    expect(budgetAlertEmail(ai, 80, null).subject).toBe("FirstLine: AI spend (DeepSeek) at 83% this month");
+    expect(budgetAlertEmail(ai, 80, null).text).toMatch(/\$41\.50 of \$50\.00/);
   });
 });

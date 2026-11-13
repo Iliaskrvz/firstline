@@ -10,6 +10,7 @@ import { totalCost } from "./costs";
 import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMRefusalError, type LLM } from "./llm";
+import { personalValues } from "./privacy";
 import { researchDomain } from "./research";
 import type { EngineStore } from "./store";
 import type { CostEntry, Fact, JudgeScores, WriterOutput } from "./types";
@@ -54,7 +55,7 @@ async function factsFor(lead: TestLead, deps: LabDeps, costs: CostEntry[]): Prom
     await deps.store.saveResearch({ domain: lead.domain, pages, facts: [], status: r.status, extractor: deps.llm.extractorId, researched_at: now.toISOString(), expires_at: new Date(now.getTime() + deps.config.research.negativeCacheDays * 86_400_000).toISOString() });
     return [];
   }
-  const ex = await deps.llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages });
+  const ex = await deps.llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages, personal: personalValues(lead) });
   costs.push(...ex.costs);
   await deps.store.saveResearch({
     domain: lead.domain,
@@ -91,13 +92,14 @@ async function writeSide(version: string, lead: TestLead, facts: Fact[], set: Te
         examples: [],
         feedback,
         previous,
+        personal: personalValues(lead),
       });
       costs.push(...w.costs);
       const checks = [...planCheck(w.output, ctx), ...ruleChecks(w.output, ctx)];
       const email = render(tpl.body, vars, w.output.slots).replace(/\n{3,}/g, "\n\n").trim();
       let judge: JudgeScores | null = null;
       if (allPass(checks)) {
-        const j = await deps.llm.judge({ language, slots: w.output.slots, facts, emailPreview: email, role: lead.title });
+        const j = await deps.llm.judge({ language, slots: w.output.slots, facts, emailPreview: email, role: lead.title, personal: personalValues(lead) });
         costs.push(...j.costs);
         judge = j.output;
         const ok = judgeAverage(judge) >= deps.config.quality.judgePassAvg && judge.claims_supported;

@@ -12,7 +12,8 @@ import { deferringLLM, DeferredWriteError, prewrittenLLM, WAITING_FOR_BATCH } fr
 import { fallbackSlots, FALLBACK_REASONS, type FallbackReason } from "./fallback";
 import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
-import { LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
+import { LLMInvalidOutputError, LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
+import { personalValues } from "./privacy";
 import type { Gate } from "./limiter";
 import { findPersonFacts } from "./deep";
 import { LIVE_SKILL_VERSION as SKILL_VERSION } from "./skills";
@@ -106,6 +107,8 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   const rules = job.template.style_rules ?? {};
   const language: Language = rules.language && rules.language !== "auto" ? rules.language : detectLanguage(job.template.body);
   const vars = leadVars(lead);
+  /** Never sent to a provider that scrubs (DeepSeek): email, first/last name, LinkedIn URL. */
+  const personal = personalValues(lead);
   const renderEmail = (slots: Record<string, string>) => ({
     subject: render(tpl.subject, vars, slots).trim(),
     body: render(tpl.body, vars, slots).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(),
@@ -133,7 +136,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
             const w = await llm.write({
               writer: job.campaign.writer, skillVersion: SKILL_VERSION, language, template: { subject: "", body: step.body, slots: ftpl.slots },
               styleRules: rules, facts: stepFacts, lead: { first_name: lead.first_name, company: lead.company, title: lead.title, linkedin_headline: lead.linkedin_headline },
-              examples: [], feedback, previous, followUp: { stepNo: step.step_no, firstEmail },
+              examples: [], feedback, previous, followUp: { stepNo: step.step_no, firstEmail }, personal,
             });
             await log(w.costs);
             const checks = [...planCheck(w.output, fctx), ...ruleChecks(w.output, fctx)];
@@ -146,6 +149,7 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
           }
         } catch (e) {
           if (!(e instanceof LLMUnavailableError || e instanceof LLMRefusalError)) throw e;
+          if (e instanceof LLMInvalidOutputError) await log(e.costs);
         }
       }
       if (result) written++;
@@ -199,11 +203,15 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       return fallback(r.status, research);
     }
     try {
-      const ex = await llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages });
+      const ex = await llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages, personal });
       await log(ex.costs);
       facts = ex.output.facts;
     } catch (e) {
       if (e instanceof LLMUnavailableError) return fail(e.reason, { ...research, ai: e.reason });
+      if (e instanceof LLMInvalidOutputError) {
+        await log(e.costs);
+        return fallback("invalid_output", research);
+      }
       if (e instanceof LLMRefusalError) return fallback("refusal", research);
       throw e;
     }
@@ -250,14 +258,14 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       const w = await llm.write({
         writer: job.campaign.writer, skillVersion: SKILL_VERSION, language, template: { subject: job.template.subject, body: job.template.body, slots: tpl.slots },
         styleRules: rules, facts: allFacts, lead: { first_name: lead.first_name, company: lead.company, title: lead.title, linkedin_headline: lead.linkedin_headline },
-        examples, feedback, previous,
+        examples, feedback, previous, personal,
       });
       await log(w.costs);
       const out = w.output;
       const checks = [...planCheck(out, ctx), ...ruleChecks(out, ctx)];
       let judge: JudgeScores | null = null;
       if (allPass(checks)) {
-        const j = await llm.judge({ language, slots: out.slots, facts: allFacts, emailPreview: renderEmail(out.slots).body, role: lead.title });
+        const j = await llm.judge({ language, slots: out.slots, facts: allFacts, emailPreview: renderEmail(out.slots).body, role: lead.title, personal });
         await log(j.costs);
         judge = j.output;
         const avg = judgeAverage(judge);
@@ -297,6 +305,10 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
       return { outcome: "deferred", detail: WAITING_FOR_BATCH, costUsd: totalCost(spent) };
     }
     if (e instanceof LLMUnavailableError) return fail(e.reason, { ...research, ai: e.reason });
+    if (e instanceof LLMInvalidOutputError) {
+      await log(e.costs);
+      return fallback("invalid_output", research);
+    }
     if (e instanceof LLMRefusalError) return fallback("refusal", research);
     throw e;
   }

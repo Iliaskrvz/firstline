@@ -1,12 +1,12 @@
 // Provider budgets (owner's change request, 2026-11-12): Firecrawl credits left this billing period
-// and Anthropic spend against the monthly cap, shown on /admin, with an alert at 80% and 100%.
+// and AI spend (DeepSeek or Anthropic) against the monthly cap, shown on /admin, with an alert at 80% and 100%.
 import type pg from "pg";
 import type { CreditUsage } from "@/engine/firecrawl";
 
 export const ALERT_LEVELS = [80, 100] as const;
 
 export type Budget = {
-  provider: "firecrawl" | "anthropic";
+  provider: "firecrawl" | "llm";
   label: string;
   used: number;
   limit: number | null;
@@ -42,14 +42,29 @@ export async function firecrawlBudget(pool: pg.Pool, usage: CreditUsage | null, 
   };
 }
 
-/** Anthropic: our logged cost this calendar month against ANTHROPIC_MONTHLY_CAP_USD (your Console spend cap). */
-export async function anthropicBudget(pool: pg.Pool, env: Record<string, string | undefined> = process.env, now = new Date()): Promise<Budget> {
-  const { rows } = await pool.query<{ usd: number }>("select coalesce(sum(cost_usd), 0)::float usd from public.usage_costs where model like 'claude-%' and created_at >= $1", [
-    monthStart(now),
-  ]);
-  const cap = Number(env.ANTHROPIC_MONTHLY_CAP_USD) || null;
+const PROVIDER_LABEL: Record<string, string> = { deepseek: "DeepSeek", anthropic: "Anthropic", fake: "AI" };
+
+/**
+ * AI spend (any provider): our logged cost this calendar month against LLM_MONTHLY_CAP_USD (formerly
+ * ANTHROPIC_MONTHLY_CAP_USD, still read). Lab and bake-off spend counts too: it's real money.
+ */
+export async function llmBudget(pool: pg.Pool, env: Record<string, string | undefined> = process.env, now = new Date(), provider = env.LLM_PROVIDER ?? "deepseek"): Promise<Budget> {
+  const { rows } = await pool.query<{ usd: number }>(
+    "select coalesce(sum(cost_usd), 0)::float usd from public.usage_costs where (model like 'claude-%' or model like 'deepseek-%') and created_at >= $1",
+    [monthStart(now)],
+  );
+  const cap = Number(env.LLM_MONTHLY_CAP_USD?.trim() || env.ANTHROPIC_MONTHLY_CAP_USD?.trim()) || null;
   const used = Math.round(rows[0].usd * 100) / 100;
-  return { provider: "anthropic", label: "Anthropic spend", used, limit: cap, unit: "usd", pct: cap ? Math.round((used / cap) * 100) : null, source: "our cost log this month", periodEnd: null };
+  return {
+    provider: "llm",
+    label: `AI spend (${PROVIDER_LABEL[provider] ?? provider})`,
+    used,
+    limit: cap,
+    unit: "usd",
+    pct: cap ? Math.round((used / cap) * 100) : null,
+    source: "our cost log this month",
+    periodEnd: null,
+  };
 }
 
 /** The highest alert level reached and not yet sent this month (records it), or null. */
@@ -64,14 +79,14 @@ export async function newAlertLevel(pool: pg.Pool, b: Budget, now = new Date()):
 export function budgetAlertEmail(b: Budget, level: number, appUrl: string | null): { subject: string; text: string } {
   const amount =
     b.unit === "usd" ? `$${b.used.toFixed(2)} of $${b.limit?.toFixed(2)}` : `${b.used.toLocaleString("en")} of ${b.limit?.toLocaleString("en")} credits`;
-  const what = b.provider === "firecrawl" ? "Firecrawl credits" : "Anthropic spend";
+  const what = b.provider === "firecrawl" ? "Firecrawl credits" : b.label;
   return {
     subject: `FirstLine: ${what} at ${b.pct}% this month`,
     text:
       `${what} has reached ${level}% (${amount}).\n\n` +
       (b.provider === "firecrawl"
         ? "When the credits run out, research stops and leads fall back to the neutral line. Upgrade the Firecrawl plan or buy extra credits before customers notice."
-        : "When the cap is reached, Anthropic refuses requests and AI steps fail. Raise the spend cap or upgrade in the Anthropic Console.") +
+        : "This is our own monthly cap (LLM_MONTHLY_CAP_USD). Check /admin for where the money goes; raise the cap or top up the provider if this is expected.") +
       (appUrl ? `\n\nDetails: ${appUrl}/admin` : ""),
   };
 }

@@ -23,7 +23,8 @@ import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
 import { runRetention } from "@/billing/retention";
-import { anthropicBudget, budgetAlertEmail, firecrawlBudget, newAlertLevel } from "@/billing/budgets";
+import { budgetAlertEmail, firecrawlBudget, llmBudget, newAlertLevel } from "@/billing/budgets";
+import { balanceAlertEmail, balanceThreshold, fetchDeepSeekBalance, newBalanceAlert } from "@/billing/deepseek-balance";
 import { collectFinished, submitPending } from "@/engine/economy-pg";
 import { dbConnection, GROUP_TIERS, LEAD_QUEUE, leadJobGroup, leadJobId, leadJobPriority, PUSH_QUEUE, type LeadJobData, type PushJobData } from "@/lib/queue";
 import { createTool } from "@/integrations/registry";
@@ -49,12 +50,16 @@ async function main() {
   const conn = dbConnection(process.env.DATABASE_URL!);
   const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 4 });
   // Provider limits are shared by every worker process (Postgres), so adding workers can't exceed a plan.
-  const anthropicSlots = new PgSlotGate(pool, "anthropic", config.concurrency.anthropic);
-  const anthropicPerMinute = config.concurrency.anthropicPerMinute;
-  const anthropicGate = anthropicPerMinute ? chainGates(new PgRateGate(pool, "anthropic", anthropicPerMinute), anthropicSlots) : anthropicSlots;
-  if (config.llmProvider === "anthropic" && !anthropicPerMinute) log("ANTHROPIC_RPM not set: no per-minute limit of ours (set it to your Anthropic Console limit).");
-  const llm = await selectLLM(config, { anthropicGate });
-  const llmFor = await llmFactory(config, { anthropicGate });
+  const llmSlots = new PgSlotGate(pool, `llm:${config.llmProvider}`, config.concurrency.llm);
+  const llmPerMinute = config.concurrency.llmPerMinute;
+  const llmGate = llmPerMinute ? chainGates(new PgRateGate(pool, `llm:${config.llmProvider}`, llmPerMinute), llmSlots) : llmSlots;
+  if (config.llmProvider !== "fake" && !llmPerMinute) log("LLM_RPM not set: no per-minute limit of ours on AI requests.");
+  const llm = await selectLLM(config, { gate: llmGate });
+  const llmFor = await llmFactory(config, { gate: llmGate });
+  log(`AI provider: ${config.llmProvider}${config.llmProvider === "fake" ? " (test output, no AI used)" : ""}`);
+  if (config.llmProvider === "deepseek" && !config.deepseekApiKey) {
+    log("⚠ LLM_PROVIDER=deepseek but DEEPSEEK_API_KEY is missing: research runs, AI steps will show 'DeepSeek key missing'.");
+  }
   if (config.llmProvider === "anthropic" && !config.anthropicApiKey) {
     log("⚠ LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing: research runs, AI steps will show 'Anthropic key missing'.");
   }
@@ -239,11 +244,12 @@ async function main() {
   };
   const apiTimer = setInterval(apiTick, 15_000);
 
-  // Provider budgets: email the site admins at 80% and 100% of Firecrawl credits / Anthropic spend cap.
+  // Provider budgets: email the site admins at 80% and 100% of Firecrawl credits / the AI spend cap,
+  // and once a day while the prepaid DeepSeek balance is below DEEPSEEK_BALANCE_ALERT.
   const budgetCheck = async () => {
     try {
       await asSingleton(pool, "budgets", async () => {
-        const budgets = [await firecrawlBudget(pool, (await reader.creditUsage?.()) ?? null), await anthropicBudget(pool)];
+        const budgets = [await firecrawlBudget(pool, (await reader.creditUsage?.()) ?? null), await llmBudget(pool, process.env, new Date(), config.llmProvider)];
         const admins = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim()).filter(Boolean);
         for (const b of budgets) {
           const level = await newAlertLevel(pool, b);
@@ -251,6 +257,15 @@ async function main() {
           const mail = budgetAlertEmail(b, level, process.env.PUBLIC_APP_URL?.trim() || null);
           log(`⚠ budget: ${mail.subject}`);
           if (mailer) for (const to of admins) await mailer.send({ to, ...mail }).catch((e) => log("budget alert email failed:", (e as Error).message));
+        }
+        if (config.llmProvider === "deepseek" && config.deepseekApiKey) {
+          const balance = await fetchDeepSeekBalance(config.deepseekApiKey);
+          const threshold = balanceThreshold();
+          if (balance && (await newBalanceAlert(pool, balance, threshold))) {
+            const mail = balanceAlertEmail(balance, threshold, process.env.PUBLIC_APP_URL?.trim() || null);
+            log(`⚠ ${mail.subject}`);
+            if (mailer) for (const to of admins) await mailer.send({ to, ...mail }).catch((e) => log("balance alert email failed:", (e as Error).message));
+          }
         }
       });
     } catch (e) {

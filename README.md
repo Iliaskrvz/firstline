@@ -6,7 +6,7 @@ Pay-per-use cold email personalisation. **[SPEC.md](SPEC.md) is the source of tr
 
 - **Phase 1** (done): auth, workspaces, schema with RLS and credit ledger, CSV upload + mapping, template editor.
 - **Phase 2** (done, without Claude): per-lead engine (research → facts → write → validate → fallback), pg-boss
-  worker, free 5-lead preview. Writing runs on a **fake LLM** until an Anthropic key is added.
+  worker, free 5-lead preview. Writing runs on a **fake LLM** until an AI provider key is added (DeepSeek by default).
 - **Phase 3** (done): Gmail sender. Run campaign (free, ≤ 50 leads until credits exist), Inboxes, Sender
   Sheet script ([apps-script/](apps-script/README.md)), `/api/sender/next` + `/report`, scheduler, stop rules.
 - **Phase 4** (done): follow-up steps in the same thread (plain or personalised, delay in working days),
@@ -43,11 +43,13 @@ All job logic lives in `src/engine/` and has no queue imports, so the queue can 
 | Facts (Haiku) with tiers, 30-day domain cache keyed by extractor | `llm*.ts`, `prompts/extract.ts` |
 | Sales Skill v1 writer: plan first, then slots (strict JSON) | `prompts/skill-v1.ts`, `schemas.ts` |
 | Plan check + rule checks in code, AI judge, one rewrite, neutral fallback (0 credits) | `checks.ts`, `prompts/judge.ts`, `fallback.ts` |
-| Real cost of every Firecrawl/Claude call → `usage_costs` | `costs.ts` |
+| Real cost of every Firecrawl/AI call → `usage_costs` | `costs.ts` |
 
-**Switching to Claude:** set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY` in `.env.local`, restart the worker.
-Until then the preview is labelled "Test output, no AI used". With `LLM_PROVIDER=anthropic` and no key, research
-still runs and AI steps show "Anthropic key missing".
+**Switching on AI (DeepSeek):** create a key at platform.deepseek.com → API keys and top up the prepaid balance. Then save
+`DEEPSEEK_API_KEY` with `bash scripts/set-env.sh DEEPSEEK_API_KEY`, set `LLM_PROVIDER=deepseek` the same way, and deploy.
+Optional: `LLM_MONTHLY_CAP_USD` (monthly budget alert), `DEEPSEEK_BALANCE_ALERT` (low-balance email), `LLM_RPM`.
+Until then the preview is labelled "Test output, no AI used". With a provider set but no key, research still runs
+and AI steps show "DeepSeek key missing". **Switching back to Claude:** `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`.
 
 ### Try the engine without the database
 
@@ -106,29 +108,35 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
 - **Roles:** owner, admin, member (`src/lib/team.ts`). Owners and admins buy credits and manage integrations, API keys and the team; members do everything else. Seats are free. Settings → Team: invite by email (a 7-day link; emailed when RESEND_API_KEY is set, otherwise copy the link), remove, change role, transfer ownership. Settings → Activity: who ran, pushed, bought or changed what.
 - **Several workspaces per person:** the current one is in the `fl_ws` cookie, checked against the memberships on every request; switch at the top right. Every list query filters on the current workspace.
 - **Leads at once per workspace:** set on /admin, or automatic from credits bought (`src/lib/concurrency.ts`). Enforced across all workers with `workspace_slots`.
-- **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and Anthropic's requests per minute are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
+- **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and the AI provider's requests per minute and at once are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
 - **Packs:** `src/config/packs.ts`. Lite credits pay for Lite-writer campaigns only. Load test: `npx tsx scripts/load-test.ts 5000`.
 
 ## Models and costs
 
-- **One file:** `src/config/models.ts` holds the model and effort per step, the Anthropic price table (checked against the pricing page on 2026-11-13) and the bake-off settings. No model names anywhere else. Anthropic only.
-- **Steps:**
+- **One file:** `src/config/models.ts` holds, per provider, the model per step, the price tables (DeepSeek peak/off-peak, Anthropic; checked against both pricing pages on 2026-11-13), DeepSeek's peak hours and holidays, and the bake-off candidates. No model names anywhere else.
+- **Provider:** `LLM_PROVIDER=deepseek` (owner's decision 2026-11-13) or `anthropic` (kept, unused; switching back is this one setting plus `ANTHROPIC_API_KEY`). `fake` = test output.
+- **Steps (DeepSeek):**
 
   | Step | Model |
   |---|---|
-  | extraction | Haiku 5.5 |
-  | writer_pro | Sonnet 5.5 |
-  | writer_lite | Haiku 5.5 |
-  | writer_economy | Sonnet 5.5 through the Batch API |
-  | judge | Haiku 5.5 |
-  | judge_sample | Sonnet 5.5 (planned 5% double-check, not wired yet) |
-  | testset_judge | Opus 5.5, low effort (Quality Lab comparisons and the bake-off) |
+  | extraction | deepseek-flash |
+  | writer_pro | deepseek-v4-pro |
+  | writer_lite | deepseek-flash |
+  | writer_economy | deepseek-v4-pro, held until DeepSeek's off-peak hours (half price) |
+  | judge | deepseek-flash |
+  | judge_sample | deepseek-v4-pro (planned 5% double-check, not wired yet) |
+  | testset_judge | deepseek-v4-pro (Quality Lab comparisons and the bake-off) |
+
+  Thinking is off for every step. DeepSeek peak hours are 01:00–04:00 and 06:00–10:00 UTC, Monday to Friday, except Chinese public holidays; everything else is off-peak. Each request is priced by the hour it ran, and cache hits are recorded separately (`cached_tokens`).
+- **Privacy (hard rule, tested):** a lead's email address, first name, last name and LinkedIn URL never go to the AI provider. The writer refers to the person neutrally; `{{first_name}}` and other variables are filled in by our code afterwards. Every DeepSeek request is also scrubbed (`src/engine/privacy.ts`). `src/engine/llm-deepseek.test.ts` fails if any of them appears in a request. Deep research isn't available with DeepSeek.
+- **JSON:** every answer is checked against our schemas; an empty or invalid answer is retried once, then the lead gets the free fallback.
 
 - **Costs:** every call's real cost goes to `usage_costs`. /admin shows the spend per step and model over the last 30 days. Lab and bake-off rows have no workspace and are left out of the customer margins.
 - **Model bake-off** (/admin/lab):
-  - Writers: Sonnet, Haiku, Sonnet batch and Opus all write from the same facts.
-  - Judging: Opus scores every email and compares each writer with Sonnet blind, in both orders. Haiku judges the same pairs, to measure how often it agrees.
-  - Extraction: Haiku vs Sonnet on 30 leads, with every fact checked against its page.
+  - Writers (DeepSeek): V4 Pro, Flash, and V4 Pro held for off-peak hours, all from the same facts.
+  - Judging: V4 Pro scores every email and compares each writer with V4 Pro blind, in both orders. Flash judges the same pairs, to measure how often it agrees.
+  - Extraction: Flash vs V4 Pro on 30 leads, with every fact checked against its page.
+  - With `LLM_PROVIDER=anthropic` the Claude candidates run instead (Sonnet, Haiku, Sonnet batch, Opus).
   - Output: a blind sheet of 20 pairs for the owner.
   - Budget: hard $20. After 5 leads the whole run is projected, and it stops if that would go over.
   - It starts only when an admin ticks the approval box. It never changes defaults.

@@ -46,7 +46,7 @@ export async function runQueuedBakeoff(pool: pg.Pool, deps: Omit<BakeoffDeps, "r
         await pool.query("update public.bakeoff_runs set progress = $2, cost_usd = $3 where id = $1", [run.id, JSON.stringify(p), p.spentUsd]);
       },
     });
-    const report = finishReport(out.report, await runCosts(pool, run.id), deps.config);
+    const report = finishReport(out.report, deps.config);
     const spent = await runSpend(pool, run.id);
     await pool.query(
       `update public.bakeoff_runs set status = $2, report = $3, records = $4, cost_usd = $5,
@@ -63,14 +63,6 @@ export async function runQueuedBakeoff(pool: pg.Pool, deps: Omit<BakeoffDeps, "r
     log?.(`model bake-off: run ${run.id} failed: ${(e as Error).message}`);
   }
   return run.id;
-}
-
-async function runCosts(pool: pg.Pool, runId: number) {
-  const { rows } = await pool.query<{ step: string; model: string; usd: number }>(
-    "select step, model, sum(cost_usd)::float usd from public.usage_costs where bakeoff_run_id = $1 group by step, model",
-    [runId],
-  );
-  return rows;
 }
 
 async function runSpend(pool: pg.Pool, runId: number): Promise<number> {

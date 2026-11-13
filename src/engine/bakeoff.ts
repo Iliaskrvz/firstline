@@ -1,10 +1,10 @@
 // Model bake-off (Quality Lab). Every writer candidate writes from the same facts; the test-set judge
-// (Opus, lowest effort) scores each email and compares each candidate with the Sonnet baseline, blind
-// and in both orders. Haiku compares the same pairs, to see how often the cheap judge agrees.
-// Extraction: Haiku vs Sonnet on the first leads, each fact checked against its page.
+// scores each email and compares each candidate with the baseline writer, blind and in both orders. A
+// cheaper judge compares the same pairs, to see how often it agrees. Extraction: two models on the first
+// leads, each fact checked against its page. Candidates per provider: src/config/models.ts (bakeoffSetup).
 // Framework-agnostic: models come in through llmFor, every cost goes out through record.
 // A hard budget stops the run before it can go over; after a short pilot the whole run is projected.
-import { BAKEOFF, STEP_MODELS, type BakeoffWriter, type StepModel, type StepModels } from "@/config/models";
+import { BAKEOFF, bakeoffSetup, providerOf, type BakeoffSetup, type StepModel, type StepModels } from "@/config/models";
 import { usdToEur } from "@/lib/admin";
 import { enabledPacks } from "@/lib/credits";
 import { parseTemplate, render } from "@/lib/template";
@@ -14,11 +14,14 @@ import type { EngineConfig } from "./config";
 import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMRefusalError, type LLM, type WriteInput } from "./llm";
+import { personalValues } from "./privacy";
 import { researchDomain } from "./research";
 import type { TestLead, TestSet } from "./lab";
 import type { CostEntry, Fact, JudgeScores, Language, WriterOutput } from "./types";
 
 export type BakeoffLead = TestLead & { setId: string };
+/** A writer key from the provider's bake-off setup (e.g. "pro", "flash", "pro_offpeak"). */
+export type BakeoffWriter = string;
 
 export type WriteOutcome = {
   slots: Record<string, string> | null;
@@ -64,6 +67,10 @@ export type WriterRow = {
 export type BlindPair = { n: number; company: string | null; a: string; b: string; key: { a: BakeoffWriter; b: BakeoffWriter } };
 
 export type BakeoffReport = {
+  provider: string;
+  baseline: BakeoffWriter;
+  judgeModel: string;
+  agreementModel: string;
   leads: number;
   leadsWithFacts: number;
   firecrawlCredits: number;
@@ -95,6 +102,9 @@ export type BakeoffDeps = {
   now?: () => number;
 };
 
+/** Model label as usage_costs shows it: Anthropic batches are "(batch)", DeepSeek's held-for-off-peak runs "(off-peak)". */
+export const modelLabel = (sm: StepModel) => (sm.batch ? `${sm.model} (${providerOf(sm.model) === "deepseek" ? "off-peak" : "batch"})` : sm.model);
+
 export class OverBudgetError extends Error {
   constructor(
     public spentUsd: number,
@@ -106,20 +116,17 @@ export class OverBudgetError extends Error {
   }
 }
 
-const WRITERS = Object.keys(BAKEOFF.writers) as BakeoffWriter[];
-const BASELINE = BAKEOFF.baseline as BakeoffWriter;
-const CANDIDATES = WRITERS.filter((w) => w !== BASELINE);
-const DIRECT = WRITERS.filter((w) => !(BAKEOFF.writers[w] as StepModel).batch);
-const BATCHED = WRITERS.filter((w) => (BAKEOFF.writers[w] as StepModel).batch);
-
 const judgeAverage = (j: JudgeScores) => (j.relevance + j.specificity + j.value_clarity + j.cta_effort + j.sounds_human + j.would_reply) / 6;
-const modelLabel = (sm: StepModel) => (sm.batch ? `${sm.model} (batch)` : sm.model);
 const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 
 /** Spend tracking with a hard stop: a call is only made when its expected cost still fits. */
 class Budget {
   spent = 0;
   private avg = new Map<string, { n: number; usd: number }>();
+  /** Total spent per key (e.g. "write:pro"): the writer's real cost, the same rows as usage_costs. */
+  total(key: string): number {
+    return this.avg.get(key)?.usd ?? 0;
+  }
   constructor(
     readonly limit: number,
     private record: (c: CostEntry[]) => Promise<void>,
@@ -166,6 +173,7 @@ function writeInput(sc: SetCtx, lead: TestLead, facts: Fact[], feedback?: string
     examples: [],
     feedback,
     previous,
+    personal: personalValues(lead),
   };
 }
 
@@ -181,6 +189,12 @@ const slotLines = (w: WriteOutcome) => Object.entries(w.slots ?? {}).map(([k, v]
 const toVerdict = (winner: "a" | "b" | "tie", candidateIsA: boolean): PairVerdict => (winner === "tie" ? "tie" : (winner === "a") === candidateIsA ? "candidate" : "baseline");
 
 export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ status: BakeoffStatus; report: BakeoffReport; records: LeadRecord[]; projectedUsd: number | null }> {
+  const setup = bakeoffSetup(deps.config.llmProvider);
+  const WRITERS = Object.keys(setup.writers);
+  const BASELINE = setup.baseline;
+  const CANDIDATES = WRITERS.filter((w) => w !== BASELINE);
+  const DIRECT = WRITERS.filter((w) => !setup.writers[w].batch);
+  const BATCHED = WRITERS.filter((w) => setup.writers[w].batch);
   const budget = new Budget(deps.budgetUsd ?? BAKEOFF.budgetUsd, deps.record);
   const now = deps.now ?? (() => Date.now());
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -194,12 +208,12 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
   const progress = (phase: string, done: number, total: number, note?: string) =>
     deps.progress?.({ phase, done, total, spentUsd: round(budget.spent), projectedUsd: projectedUsd == null ? null : round(projectedUsd, 2), note });
 
-  const writerLLM = (w: BakeoffWriter) => deps.llmFor({ writer_pro: BAKEOFF.writers[w] as StepModel, writer_economy: BAKEOFF.writers[w] as StepModel });
-  const opus = deps.llmFor({ judge: STEP_MODELS.testset_judge, testset_judge: STEP_MODELS.testset_judge });
-  const haikuJudge = deps.llmFor({ testset_judge: STEP_MODELS.judge });
-  const extractors = Object.fromEntries(Object.entries(BAKEOFF.extractors).map(([k, sm]) => [k, deps.llmFor({ extraction: sm as StepModel })]));
+  const writerLLM = (w: BakeoffWriter) => deps.llmFor({ writer_pro: setup.writers[w], writer_economy: setup.writers[w] });
+  const mainJudge = deps.llmFor({ judge: setup.judge, testset_judge: setup.judge });
+  const agreementJudge = deps.llmFor({ testset_judge: setup.agreementJudge });
+  const extractors = Object.fromEntries(Object.entries(setup.extractors).map(([k, sm]) => [k, deps.llmFor({ extraction: sm })]));
   const extraction: Record<string, ExtractorRow> = Object.fromEntries(
-    Object.entries(BAKEOFF.extractors).map(([k, sm]) => [k, { extractor: k, model: sm.model, leads: 0, facts: 0, supported: 0, unsupported: 0, wrong: 0, costUsd: 0 }]),
+    Object.entries(setup.extractors).map(([k, sm]) => [k, { extractor: k, model: sm.model, leads: 0, facts: 0, supported: 0, unsupported: 0, wrong: 0, costUsd: 0 }]),
   );
   const writerMs = new Map<BakeoffWriter, number[]>();
   const tally = (w: BakeoffWriter, ms: number) => writerMs.set(w, [...(writerMs.get(w) ?? []), ms]);
@@ -220,10 +234,10 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
       }
       const compare = i < BAKEOFF.extractionLeads;
       for (const [name, llm] of Object.entries(extractors)) {
-        const production = BAKEOFF.extractors[name as keyof typeof BAKEOFF.extractors].model === STEP_MODELS.extraction.model;
+        const production = setup.extractors[name].model === deps.config.models.extraction.model;
         if (!compare && !production) continue;
         budget.before(`extract:${name}`);
-        const ex = await llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages });
+        const ex = await llm.extractFacts({ company: lead.company, domain: lead.domain, pages: r.pages, personal: personalValues(lead) });
         await budget.charge(`extract:${name}`, ex.costs);
         if (production) factsBy.set(i, ex.output.facts);
         if (!compare) continue;
@@ -231,9 +245,9 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
         row.leads += 1;
         row.facts += ex.output.facts.length;
         row.costUsd += ex.costs.reduce((s, c) => s + Number(c.cost_usd), 0);
-        if (ex.output.facts.length && opus.checkFacts) {
+        if (ex.output.facts.length && mainJudge.checkFacts) {
           budget.before("fact_check");
-          const fc = await opus.checkFacts({ domain: lead.domain, facts: ex.output.facts, pages: r.pages.map((p) => ({ url: p.url, markdown: p.markdown })) });
+          const fc = await mainJudge.checkFacts({ domain: lead.domain, facts: ex.output.facts, pages: r.pages.map((p) => ({ url: p.url, markdown: p.markdown })) });
           await budget.charge("fact_check", fc.costs);
           for (const f of ex.output.facts) {
             const v = fc.output.checks.find((c) => c.id === f.id)?.verdict ?? "unsupported";
@@ -261,18 +275,18 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
         await budget.charge(key, res.costs);
         return toVerdict(res.output.winner, candidateIsA);
       };
-      const o1 = await ask(opus, "compare:opus", true);
-      const o2 = await ask(opus, "compare:opus", false);
-      const h1 = await ask(haikuJudge, "compare:haiku", true);
-      const h2 = await ask(haikuJudge, "compare:haiku", false);
+      const o1 = await ask(mainJudge, "compare:main", true);
+      const o2 = await ask(mainJudge, "compare:main", false);
+      const h1 = await ask(agreementJudge, "compare:agreement", true);
+      const h2 = await ask(agreementJudge, "compare:agreement", false);
       rec.pairs[cand] = { opus: [o1, o2], verdict: o1 === o2 ? o1 : "tie", haiku: [h1, h2] };
     };
     const score = async (i: number, w: BakeoffWriter) => {
       const out = records[i].writes[w];
       if (!out?.email || !out.slots) return;
-      budget.before("judge:opus");
-      const j = await opus.judge({ language: records[i].language, slots: out.slots, facts: factsBy.get(i)!, emailPreview: out.email, role: leads[i].title });
-      await budget.charge("judge:opus", j.costs);
+      budget.before("judge:main");
+      const j = await mainJudge.judge({ language: records[i].language, slots: out.slots, facts: factsBy.get(i)!, emailPreview: out.email, role: leads[i].title, personal: personalValues(leads[i]) });
+      await budget.charge("judge:main", j.costs);
       records[i].judged[w] = { avg: round(judgeAverage(j.output), 2), claimsSupported: j.output.claims_supported, unsupported: j.output.unsupported_claims };
     };
     const writeDirect = async (i: number, w: BakeoffWriter) => {
@@ -327,8 +341,8 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
         // Projection: the rest of the direct leads, plus the batch writer for every lead (half the Sonnet price).
         const perLead = (key: string, times: number) => budget.expected(key) * times;
         const directPerLead =
-          DIRECT.reduce((s, w) => s + perLead(`write:${w}`, 1.3), 0) + perLead("judge:opus", DIRECT.length) + perLead("compare:opus", 2 * (DIRECT.length - 1)) + perLead("compare:haiku", 2 * (DIRECT.length - 1));
-        const batchPerLead = BATCHED.length ? perLead(`write:${BASELINE}`, 1.3) * 0.5 + perLead("judge:opus", 1) + perLead("compare:opus", 2) + perLead("compare:haiku", 2) : 0;
+          DIRECT.reduce((s, w) => s + perLead(`write:${w}`, 1.3), 0) + perLead("judge:main", DIRECT.length) + perLead("compare:main", 2 * (DIRECT.length - 1)) + perLead("compare:agreement", 2 * (DIRECT.length - 1));
+        const batchPerLead = BATCHED.length ? perLead(`write:${BASELINE}`, 1.3) * 0.5 + perLead("judge:main", 1) + perLead("compare:main", 2) + perLead("compare:agreement", 2) : 0;
         projectedUsd = budget.spent + directPerLead * (withFacts.length - pilot) + batchPerLead * withFacts.length;
         await progress("writers", n + 1, withFacts.length, "projected");
         if (projectedUsd > budget.limit) throw new OverBudgetError(budget.spent, projectedUsd, budget.limit);
@@ -395,24 +409,25 @@ export async function runBakeoff(sets: TestSet[], deps: BakeoffDeps): Promise<{ 
   } catch (e) {
     if (!(e instanceof OverBudgetError)) throw e;
     projectedUsd = e.projectedUsd;
-    return { status: "over_budget", report: buildReport(records, leads.length, credits, budget.spent, extraction, writerMs, deps.config, random), records, projectedUsd };
+    return { status: "over_budget", report: buildReport(setup, deps.config.llmProvider, records, leads.length, credits, budget, extraction, writerMs, random), records, projectedUsd };
   }
-  return { status: "done", report: buildReport(records, leads.length, credits, budget.spent, extraction, writerMs, deps.config, random), records, projectedUsd };
+  return { status: "done", report: buildReport(setup, deps.config.llmProvider, records, leads.length, credits, budget, extraction, writerMs, random), records, projectedUsd };
 }
 
-/** Writer cost per email from the run's cost entries, by model label (the same rows as usage_costs). */
-export type WriterCosts = Partial<Record<string, { usd: number }>>;
-
 function buildReport(
+  setup: BakeoffSetup,
+  provider: string,
   records: LeadRecord[],
   leads: number,
   credits: number,
-  spent: number,
+  budget: Budget,
   extraction: Record<string, ExtractorRow>,
   writerMs: Map<BakeoffWriter, number[]>,
-  config: EngineConfig,
   random: () => number,
 ): BakeoffReport {
+  const WRITERS = Object.keys(setup.writers);
+  const BASELINE = setup.baseline;
+  const spent = budget.spent;
   const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
   const rate = (hit: number, n: number) => (n ? round(hit / n, 3) : null);
   const writers: WriterRow[] = WRITERS.map((w) => {
@@ -423,7 +438,7 @@ function buildReport(
     const noFact = records.filter((r) => r.writes[w]?.email && (!r.writes[w]!.factsUsed.length || r.judged[w]?.claimsSupported === false)).length;
     return {
       writer: w,
-      model: modelLabel(BAKEOFF.writers[w] as StepModel),
+      model: modelLabel(setup.writers[w]),
       emails: emails.length,
       wins: pairs.filter((p) => p!.verdict === "candidate").length,
       losses: pairs.filter((p) => p!.verdict === "baseline").length,
@@ -432,7 +447,8 @@ function buildReport(
       ruleFailRate: rate(outs.filter((o) => !o.error && !o.firstPass).length, outs.filter((o) => !o.error).length),
       finalFailRate: rate(outs.filter((o) => !o.error && !o.finalPass).length, outs.filter((o) => !o.error).length),
       claimsWithoutFactRate: rate(noFact, emails.length),
-      costPerEmailUsd: null, // filled from usage_costs by the caller (writerCostsInto)
+      // Every write call of this writer, rewrites included (the same rows as in usage_costs).
+      costPerEmailUsd: emails.length ? round(budget.total(`write:${w}`) / emails.length, 6) : null,
       avgMsPerEmail: avg(writerMs.get(w) ?? []) == null ? null : Math.round(avg(writerMs.get(w) ?? [])!),
     };
   });
@@ -449,11 +465,7 @@ function buildReport(
     const n = row.wins + row.losses + row.ties;
     return n ? (row.wins + row.ties / 2) / n : -1;
   };
-  const cheaper = CANDIDATES.filter((w) => {
-    const sm = BAKEOFF.writers[w] as StepModel;
-    const base = BAKEOFF.writers[BASELINE] as StepModel;
-    return sm.batch || (sm.model !== base.model && sm.model !== "claude-opus-5-5");
-  });
+  const cheaper = setup.cheaper.filter((w) => w in setup.writers);
   const bestCheaper = cheaper.length ? cheaper.reduce((a, b) => (share(b) > share(a) ? b : a)) : null;
   const blind: BlindPair[] = [];
   if (bestCheaper) {
@@ -471,6 +483,10 @@ function buildReport(
   }
   const ex = Object.values(extraction).map((r) => ({ ...r, costUsd: round(r.costUsd, 6) }));
   return {
+    provider,
+    baseline: BASELINE,
+    judgeModel: setup.judge.model,
+    agreementModel: setup.agreementJudge.model,
     leads,
     leadsWithFacts: records.filter((r) => r.facts > 0).length,
     firecrawlCredits: credits,
@@ -485,21 +501,14 @@ function buildReport(
 }
 
 /**
- * Fill in each writer's real cost per email (from usage_costs, by model label) and the production estimate:
- * writer + Haiku extraction per lead + Firecrawl credits per lead, against each pack's price per credit.
+ * The production estimate per writer: writer + extraction per lead (the production extractor) + Firecrawl
+ * credits per lead, against each pack on sale's price per credit.
  */
-export function finishReport(
-  report: BakeoffReport,
-  costs: { step: string; model: string; usd: number }[],
-  config: EngineConfig,
-  env: Record<string, string | undefined> = process.env,
-): BakeoffReport {
-  const sum = (pred: (c: { step: string; model: string }) => boolean) => costs.filter(pred).reduce((s, c) => s + c.usd, 0);
-  const writers = report.writers.map((w) => ({ ...w, costPerEmailUsd: w.emails ? round(sum((c) => c.step === "write" && c.model === w.model) / w.emails, 6) : null }));
-  const extractRow = report.extraction.find((r) => r.model === STEP_MODELS.extraction.model);
+export function finishReport(report: BakeoffReport, config: EngineConfig, env: Record<string, string | undefined> = process.env): BakeoffReport {
+  const extractRow = report.extraction.find((r) => r.model === config.models.extraction.model);
   const extractPerLead = extractRow && extractRow.leads ? extractRow.costUsd / extractRow.leads : 0;
   const firecrawlPerLead = report.leads ? (report.firecrawlCredits / report.leads) * config.firecrawlUsdPerCredit : 0;
-  const production = writers
+  const production = report.writers
     .filter((w) => w.costPerEmailUsd != null)
     .map((w) => {
       const costPerEmailUsd = round(w.costPerEmailUsd! + extractPerLead + firecrawlPerLead, 6);
@@ -512,11 +521,12 @@ export function finishReport(
         });
       return { writer: w.writer, costPerEmailUsd, packs };
     });
-  return { ...report, writers, production };
+  return { ...report, production };
 }
 
 /** Before a run: what it will roughly use (shown on the Start button). */
 export function bakeoffPlan(sets: TestSet[], config: EngineConfig) {
+  const setup = bakeoffSetup(config.llmProvider);
   const leads = Math.min(BAKEOFF.maxLeads, sets.reduce((s, x) => s + x.leads.length, 0));
   return {
     leads,
@@ -525,6 +535,9 @@ export function bakeoffPlan(sets: TestSet[], config: EngineConfig) {
     budgetUsd: BAKEOFF.budgetUsd,
     /** map + pages per lead. */
     firecrawlCredits: leads * (1 + config.research.maxPages),
-    writers: WRITERS.map((w) => ({ writer: w, model: modelLabel(BAKEOFF.writers[w] as StepModel) })),
+    writers: Object.entries(setup.writers).map(([w, sm]) => ({ writer: w, model: modelLabel(sm) })),
+    judge: setup.judge.model,
+    agreementJudge: setup.agreementJudge.model,
+    extractors: Object.values(setup.extractors).map((sm) => sm.model),
   };
 }

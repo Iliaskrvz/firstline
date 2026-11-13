@@ -8,7 +8,6 @@ import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadAdmin, loadCostBreakdown } from "@/billing/admin-db";
-import { STEP_MODELS } from "@/config/models";
 import { EN, NL, reader, scripted } from "@/engine/bakeoff.fixtures";
 import { blindTally, getBakeoff, listBakeoffs, queueBakeoff, runQueuedBakeoff, saveBlindPick } from "@/engine/bakeoff-pg";
 import { engineConfig } from "@/engine/config";
@@ -40,25 +39,27 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const deps = () => ({ reader, config: engineConfig({}), llmFor: (m: object) => scripted({ ...STEP_MODELS, ...m }), sleep: async () => {}, random: () => 0.3 });
+const config = engineConfig({ LLM_PROVIDER: "deepseek" });
+const deps = () => ({ reader, config, llmFor: (m: object) => scripted({ ...config.models, ...m }), sleep: async () => {}, random: () => 0.3 });
 
 describe("model bake-off (database)", () => {
   let id: number;
 
   it("runs a queued bake-off and stores the report; costs go to usage_costs without a workspace", async () => {
-    id = await queueBakeoff(pool, { testSetIds: ["nl", "en"], provider: "anthropic", approvedBy: "owner@firstline.test" });
+    id = await queueBakeoff(pool, { testSetIds: ["nl", "en"], provider: "deepseek", approvedBy: "owner@firstline.test" });
     expect(await runQueuedBakeoff(pool, deps())).toBe(id);
     expect(await runQueuedBakeoff(pool, deps())).toBeNull();
 
     const run = (await getBakeoff(pool, id))!;
     expect(run.status).toBe("done");
     expect(run.report!.leads).toBe(7);
-    const sonnet = run.report!.writers.find((w) => w.writer === "sonnet")!;
-    expect(sonnet.costPerEmailUsd).toBe(0.01);
-    expect(run.report!.production.find((p) => p.writer === "haiku")!.costPerEmailUsd).toBeLessThan(sonnet.costPerEmailUsd!);
+    const pro = run.report!.writers.find((w) => w.writer === "pro")!;
+    expect(pro.costPerEmailUsd).toBe(0.005016);
+    const prod = (w: string) => run.report!.production.find((p) => p.writer === w)!.costPerEmailUsd;
+    expect(prod("flash")).toBeLessThan(prod("pro")); // writer + extraction + Firecrawl per lead
 
     const { rows } = await pool.query("select count(*)::int n, count(workspace_id)::int with_ws, sum(cost_usd)::float usd from public.usage_costs where bakeoff_run_id = $1", [id]);
-    expect(rows[0].n).toBeGreaterThan(50);
+    expect(rows[0].n).toBeGreaterThan(40);
     expect(rows[0].with_ws).toBe(0);
     expect(Number(run.cost_usd)).toBeCloseTo(rows[0].usd, 5);
     expect((await listBakeoffs(pool))[0]).toMatchObject({ id, status: "done", report: null });
@@ -67,8 +68,8 @@ describe("model bake-off (database)", () => {
   it("/admin shows the lab spend per step and model, and keeps it out of the customer margins", async () => {
     const breakdown = await loadCostBreakdown(pool);
     expect(breakdown.every((r) => r.source === "lab")).toBe(true);
-    expect(breakdown.some((r) => r.step === "compare" && r.model === "claude-opus-5-5")).toBe(true);
-    expect(breakdown.some((r) => r.step === "write" && r.model === "claude-sonnet-5-5 (batch)")).toBe(true);
+    expect(breakdown.some((r) => r.step === "compare" && r.model === "deepseek-v4-pro")).toBe(true);
+    expect(breakdown.some((r) => r.step === "write" && r.model === "deepseek-v4-pro (off-peak)")).toBe(true);
     expect(breakdown.reduce((s, r) => s + r.share, 0)).toBeCloseTo(1, 5);
     const admin = await loadAdmin(pool);
     expect(admin.days.reduce((s, d) => s + d.costUsd, 0)).toBe(0);
@@ -87,11 +88,11 @@ describe("model bake-off (database)", () => {
   });
 
   it("over the budget: stopped with partial results, nothing written past it", async () => {
-    const small = await queueBakeoff(pool, { testSetIds: ["en"], provider: "anthropic", approvedBy: "owner@firstline.test" });
-    await pool.query("update public.bakeoff_runs set budget_usd = 0.05 where id = $1", [small]);
+    const small = await queueBakeoff(pool, { testSetIds: ["en"], provider: "deepseek", approvedBy: "owner@firstline.test" });
+    await pool.query("update public.bakeoff_runs set budget_usd = 0.03 where id = $1", [small]);
     await runQueuedBakeoff(pool, deps());
     const run = (await getBakeoff(pool, small))!;
     expect(run.status).toBe("over_budget");
-    expect(Number(run.cost_usd)).toBeLessThanOrEqual(0.05);
+    expect(Number(run.cost_usd)).toBeLessThanOrEqual(0.04);
   });
 });

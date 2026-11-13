@@ -11,7 +11,7 @@ export function BakeoffForm(props: {
   maxLeads: number;
   creditsPerLead: number;
   budgetUsd: number;
-  provider: "fake" | "anthropic";
+  provider: "fake" | "anthropic" | "deepseek";
   writers: string[];
   busy: boolean;
 }) {
@@ -38,18 +38,18 @@ export function BakeoffForm(props: {
       <div className="rounded-xl bg-slate-50 p-4 text-slate-700 ring-1 ring-slate-200">
         <p>
           <strong>{leads}</strong> leads · writers: {props.writers.join(", ")} · about <strong>{leads * props.creditsPerLead}</strong> Firecrawl credits ·
-          hard budget <strong>${props.budgetUsd}</strong> for Claude
+          hard budget <strong>${props.budgetUsd}</strong> for the AI provider
         </p>
         <p className="mt-1 text-xs text-slate-500">
           {props.provider === "fake"
             ? "LLM_PROVIDER is fake on this server: test output, no AI used, $0 for Claude (Firecrawl still reads the websites)."
-            : "Runs on the real Claude API. After 5 leads it projects the whole run and stops if that would go over the budget."}
+            : `Runs on the real ${props.provider === "deepseek" ? "DeepSeek" : "Claude"} API. After 5 leads it projects the whole run and stops if that would go over the budget.${props.provider === "deepseek" ? " The off-peak writer waits for DeepSeek's off-peak hours." : ""}`}
         </p>
       </div>
       <label className="flex items-start gap-2">
         <input type="checkbox" checked={approved} onChange={(e) => setApproved(e.target.checked)} className="mt-0.5 size-4" />
         <span>
-          I approve spending up to ${props.budgetUsd} on Claude and about {leads * props.creditsPerLead} Firecrawl credits for this bake-off.
+          I approve spending up to ${props.budgetUsd} on {props.provider === "deepseek" ? "DeepSeek" : "Claude"} and about {leads * props.creditsPerLead} Firecrawl credits for this bake-off.
         </span>
       </label>
       <Button

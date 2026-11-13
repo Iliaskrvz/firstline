@@ -1,7 +1,8 @@
-// The engine's only door to a language model. Two implementations:
+// The engine's only door to a language model. Implementations:
 //   - FakeLLM: realistic output built from the real page text. No AI used, $0.
-//   - AnthropicLLM: Claude (Haiku for facts + judge, Sonnet/Haiku for writing).
-// Switch with LLM_PROVIDER=anthropic (plus ANTHROPIC_API_KEY). Nothing else changes.
+//   - DeepSeekLLM: DeepSeek (LLM_PROVIDER=deepseek + DEEPSEEK_API_KEY). The default for AI steps.
+//   - AnthropicLLM: Claude (LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY), kept for switching back.
+// Models per step: src/config/models.ts. Nothing else changes when switching.
 import type { StyleRules } from "@/lib/types";
 import type { Slot } from "@/lib/template";
 import type { EngineConfig } from "./config";
@@ -13,6 +14,8 @@ export type ExtractInput = {
   company: string | null;
   domain: string;
   pages: { url: string; type: string; markdown: string }[];
+  /** Personal values of the lead being researched (privacy.ts): scrubbed before a request leaves. */
+  personal?: string[];
 };
 
 export type WriteInput = {
@@ -29,9 +32,11 @@ export type WriteInput = {
   previous?: WriterOutput;
   /** Set when writing a follow-up in the same thread. */
   followUp?: { stepNo: number; firstEmail: string };
+  /** The lead's personal values (privacy.ts personalValues): never sent to a provider that scrubs. */
+  personal: string[];
 };
 
-export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null };
+export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null; personal: string[] };
 
 /** Deep research (behind a switch): pages about a named contact → match verdict + at most 2 facts. */
 export type PersonInput = {
@@ -56,7 +61,7 @@ export interface BatchWriter {
 }
 
 export interface LLM {
-  readonly provider: "fake" | "anthropic";
+  readonly provider: "fake" | "anthropic" | "deepseek";
   /** Cache key part: facts from different extractors are never mixed. */
   readonly extractorId: string;
   extractFacts(input: ExtractInput): Promise<LLMResult<{ facts: Fact[] }>>;
@@ -88,12 +93,22 @@ export class LLMRefusalError extends Error {
   }
 }
 
+/** The model's answer wasn't valid JSON for our schema, twice. The lead gets the free fallback. */
+export class LLMInvalidOutputError extends LLMRefusalError {
+  /** What the failed attempts cost (logged to usage_costs). */
+  costs: CostEntry[] = [];
+  constructor(message = "The model's answer wasn't valid twice") {
+    super(message);
+    this.name = "LLMInvalidOutputError";
+  }
+}
+
 /** Stands in when LLM_PROVIDER=anthropic but no key is set: every AI step reports it clearly. */
 export class MissingKeyLLM implements LLM {
-  readonly provider = "anthropic" as const;
   readonly extractorId = "unavailable";
+  constructor(readonly provider: "anthropic" | "deepseek" = "anthropic") {}
   private fail(): never {
-    throw new LLMUnavailableError("Anthropic key missing");
+    throw new LLMUnavailableError(this.provider === "deepseek" ? "DeepSeek key missing" : "Anthropic key missing");
   }
   async extractFacts(): Promise<never> {
     this.fail();
@@ -110,22 +125,22 @@ export class MissingKeyLLM implements LLM {
  * A factory for LLMs whose steps use other models than the production config (Quality Lab, model
  * bake-off). Same provider, key and shared rate limits as the production LLM.
  */
-export async function llmFactory(config: EngineConfig, opts: { anthropicGate?: import("./limiter").Gate } = {}): Promise<(models: Partial<import("@/config/models").StepModels>) => LLM> {
+export async function llmFactory(config: EngineConfig, opts: { gate?: import("./limiter").Gate } = {}): Promise<(models: Partial<import("@/config/models").StepModels>) => LLM> {
   if (config.llmProvider === "fake") {
     const { FakeLLM } = await import("./llm-fake");
     return () => new FakeLLM();
   }
-  if (!config.anthropicApiKey) return () => new MissingKeyLLM();
+  const withModels = (models: Partial<import("@/config/models").StepModels>): EngineConfig => ({ ...config, models: { ...config.models, ...models } });
+  if (config.llmProvider === "deepseek") {
+    if (!config.deepseekApiKey) return () => new MissingKeyLLM("deepseek");
+    const { DeepSeekLLM } = await import("./llm-deepseek");
+    return (models) => new DeepSeekLLM(withModels(models), { gate: opts.gate });
+  }
+  if (!config.anthropicApiKey) return () => new MissingKeyLLM("anthropic");
   const { AnthropicLLM } = await import("./llm-anthropic");
-  return (models) => new AnthropicLLM({ ...config, models: { ...config.models, ...models } }, opts.anthropicGate);
+  return (models) => new AnthropicLLM(withModels(models), opts.gate);
 }
 
-export async function selectLLM(config: EngineConfig, opts: { anthropicGate?: import("./limiter").Gate } = {}): Promise<LLM> {
-  if (config.llmProvider === "fake") {
-    const { FakeLLM } = await import("./llm-fake");
-    return new FakeLLM();
-  }
-  if (!config.anthropicApiKey) return new MissingKeyLLM();
-  const { AnthropicLLM } = await import("./llm-anthropic");
-  return new AnthropicLLM(config, opts.anthropicGate);
+export async function selectLLM(config: EngineConfig, opts: { gate?: import("./limiter").Gate } = {}): Promise<LLM> {
+  return (await llmFactory(config, opts))({});
 }

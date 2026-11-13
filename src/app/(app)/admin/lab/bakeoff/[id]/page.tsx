@@ -79,7 +79,7 @@ async function Report({ params }: { params: PageProps<"/admin/lab/bakeoff/[id]">
                   <tr>
                     <th className="px-6 py-2 font-medium">Writer</th>
                     <th className="px-3 py-2 text-right font-medium">Emails</th>
-                    <th className="px-3 py-2 text-right font-medium">vs Sonnet (W / L / T)</th>
+                    <th className="px-3 py-2 text-right font-medium">vs {r.writers.find((w) => w.writer === r.baseline)?.model.replace("claude-", "")} (W / L / T)</th>
                     <th className="px-3 py-2 text-right font-medium">Judge score</th>
                     <th className="px-3 py-2 text-right font-medium">Rule checks failed</th>
                     <th className="px-3 py-2 text-right font-medium">Claim without fact</th>
@@ -92,7 +92,7 @@ async function Report({ params }: { params: PageProps<"/admin/lab/bakeoff/[id]">
                     <tr key={w.writer}>
                       <td className="px-6 py-2 font-medium text-slate-900">{w.model.replace("claude-", "")}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{w.emails}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{w.writer === "sonnet" ? "baseline" : `${w.wins} / ${w.losses} / ${w.ties}`}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{w.writer === r.baseline ? "baseline" : `${w.wins} / ${w.losses} / ${w.ties}`}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{w.judgeAvg?.toFixed(2) ?? "–"}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{pct(w.ruleFailRate)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{pct(w.claimsWithoutFactRate)}</td>
@@ -138,10 +138,10 @@ async function Report({ params }: { params: PageProps<"/admin/lab/bakeoff/[id]">
             </Card>
 
             <Card className="space-y-2 text-sm">
-              <h2 className="text-base font-semibold text-slate-900">Judge: does Haiku agree with Opus?</h2>
+              <h2 className="text-base font-semibold text-slate-900">Judge: does {r.agreementModel} agree with {r.judgeModel}?</h2>
               <p className="text-3xl font-semibold tabular-nums">{pct(r.judgeAgreement.rate)}</p>
               <p className="text-slate-600">
-                Same verdict in {r.judgeAgreement.agree} of {r.judgeAgreement.orders} comparisons. Keep Haiku as the judge if this is high (about 85% or more).
+                Same verdict in {r.judgeAgreement.agree} of {r.judgeAgreement.orders} comparisons. Keep {r.agreementModel} as the everyday judge if this is high (about 85% or more).
               </p>
             </Card>
           </div>
@@ -177,7 +177,7 @@ async function Report({ params }: { params: PageProps<"/admin/lab/bakeoff/[id]">
                   </tbody>
                 </table>
               </div>
-              <p className="px-6 py-3 text-xs text-slate-500">Writer + Haiku extraction + Firecrawl per lead; the Haiku judge in the write loop is not included. Margin = (price per credit − cost) ÷ price.</p>
+              <p className="px-6 py-3 text-xs text-slate-500">Writer + extraction + Firecrawl per lead; the judge in the write loop is not included. DeepSeek prices depend on the hour (off-peak is half price); see the model labels. Margin = (price per credit − cost) ÷ price.</p>
             </Card>
           )}
 

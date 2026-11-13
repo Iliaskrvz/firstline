@@ -24,5 +24,6 @@ export const FALLBACK_REASONS = {
   no_facts: "No usable facts found on the website",
   failed_checks: "Didn't pass the checks after one rewrite",
   refusal: "The model declined to write this one",
+  invalid_output: "The AI's answer wasn't usable twice",
 } as const;
 export type FallbackReason = keyof typeof FALLBACK_REASONS;

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { jobContext, PRIORITY } from "@/engine/job-context";
 import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, PREVIEW_EXTRA, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
 import { concurrencyLevel } from "@/lib/concurrency";
-import { anthropicBudget, firecrawlBudget, newAlertLevel } from "@/billing/budgets";
+import { firecrawlBudget, llmBudget, newAlertLevel } from "@/billing/budgets";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-00000000bb01";
@@ -194,9 +194,10 @@ describe("limits shared across workers", () => {
     expect(fromFc).toMatchObject({ used: 850, limit: 1000, pct: 85, source: "Firecrawl" });
     await a.query("insert into public.usage_costs (workspace_id, step, model, provider_units, cost_usd) values ($1, 'scrape', 'firecrawl-scrape', 300, 0.25), ($1, 'write', 'claude-sonnet-5-5', 0, 42.5)", [ws]);
     expect(await firecrawlBudget(a, null, { FIRECRAWL_MONTHLY_CREDITS: "1000" })).toMatchObject({ used: 300, pct: 30, source: "our log this month" });
-    const an = await anthropicBudget(a, { ANTHROPIC_MONTHLY_CAP_USD: "50" });
+    const an = await llmBudget(a, { ANTHROPIC_MONTHLY_CAP_USD: "50" }); // the old name still works
     expect(an).toMatchObject({ used: 42.5, limit: 50, pct: 85 });
-    expect(await anthropicBudget(a, {})).toMatchObject({ limit: null, pct: null });
+    expect(await llmBudget(a, {})).toMatchObject({ limit: null, pct: null });
+    expect(await llmBudget(a, { LLM_MONTHLY_CAP_USD: "100", ANTHROPIC_MONTHLY_CAP_USD: "50" })).toMatchObject({ limit: 100 });
     expect(await newAlertLevel(a, an)).toBe(80);
     expect(await newAlertLevel(a, an)).toBeNull(); // once
     expect(await newAlertLevel(a, { ...an, pct: 101 })).toBe(100);

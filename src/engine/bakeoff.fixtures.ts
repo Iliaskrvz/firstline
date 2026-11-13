@@ -1,10 +1,11 @@
 // Test fixtures for the model bake-off: scripted models (no network) and a fake website reader.
-import { anthropicCostEntry } from "./costs";
+import { modelCostEntry } from "./costs";
 import type { StepModels } from "@/config/models";
 import type { WebReader } from "./firecrawl";
 import type { LLM } from "./llm";
 import { FakeLLM } from "./llm-fake";
 import type { TestSet } from "./lab";
+import type { CostEntry } from "./types";
 
 export const SITE = (d: string): Record<string, string> => ({
   [`https://${d}/`]: `# ${d}\n\nWe design packaging for independent food brands across the Netherlands since 2012. Our team of twelve designers works from Utrecht for clients in five countries.`,
@@ -29,46 +30,57 @@ export const EN = set("en", 4, "Hi {{first_name}},\n\n[[opener · something spec
 export const NL = set("nl", 3, "Hoi {{first_name}},\n\n[[opener · iets specifieks van hun website · 25]]\n\n[[sign · een korte afsluiter · 6]]\n\nGroet");
 
 // Each writer model leaves its own closing line, so the scripted judges can tell the versions apart.
-const SIGN: Record<string, string> = { "claude-sonnet-5-5": "Hope this is useful.", "claude-haiku-5-5": "Hope this helps.", "claude-opus-5-5": "Hope this is useful today." };
+const SIGN: Record<string, string> = {
+  "claude-sonnet-5-5": "Hope this is useful.",
+  "claude-haiku-5-5": "Hope this helps.",
+  "claude-opus-5-5": "Hope this is useful today.",
+  "deepseek-v4-pro": "Hope this is useful.",
+  "deepseek-flash": "Hope this helps.",
+};
 const RANK: Record<string, number> = { "Hope this helps.": 0, "Hope this is useful.": 1, "Hope this is useful today.": 2 };
 const signOf = (lines: string) => lines.split("\n").find((l) => l.startsWith("sign: "))!.slice(6);
+/** The cheap judges (always pick A: position bias) and the bigger extractors (one extra fact not on the page). */
+const CHEAP = new Set(["claude-haiku-5-5", "deepseek-flash"]);
+const BIG = new Set(["claude-sonnet-5-5", "deepseek-v4-pro"]);
+
+/** A Monday in DeepSeek's peak hours, and a Saturday (off-peak), so DeepSeek costs are predictable. */
+export const PEAK = new Date("2026-11-16T02:00:00Z");
+export const OFF_PEAK = new Date("2026-11-14T12:00:00Z");
 
 export function scripted(models: StepModels): LLM {
   const fake = new FakeLLM();
-  const usage = (i: number, o: number) => ({ input_tokens: i, output_tokens: o });
+  const cost = (step: CostEntry["step"], model: string, input: number, output: number, batch = false) =>
+    modelCostEntry(step, model, { input, output }, { batch, at: batch ? OFF_PEAK : PEAK });
   return {
-    provider: "anthropic",
+    provider: models.extraction.model.startsWith("deepseek-") ? "deepseek" : "anthropic",
     extractorId: models.extraction.model,
     extractFacts: async (input) => {
       const r = await fake.extractFacts(input);
-      // Sonnet finds one more fact, which isn't on the page.
-      const extra = models.extraction.model === "claude-sonnet-5-5" ? [{ id: `F${r.output.facts.length + 1}`, text: "Studio has 400 employees worldwide.", src: input.pages[0].url, tier: "A" as const }] : [];
-      return { output: { facts: [...r.output.facts, ...extra] }, costs: [anthropicCostEntry("extract", models.extraction.model, usage(4000, 400))] };
+      const extra = BIG.has(models.extraction.model) ? [{ id: `F${r.output.facts.length + 1}`, text: "Studio has 400 employees worldwide.", src: input.pages[0].url, tier: "A" as const }] : [];
+      return { output: { facts: [...r.output.facts, ...extra] }, costs: [cost("extract", models.extraction.model, 4000, 400)] };
     },
     write: async (input) => {
       const step = models.writer_pro;
       const r = await fake.write(input);
       r.output.slots.sign = SIGN[step.model];
-      return { output: r.output, costs: [anthropicCostEntry("write", step.model, usage(2000, 600))] };
+      return { output: r.output, costs: [cost("write", step.model, 2000, 600)] };
     },
     judge: async (input) => {
       const s = RANK[input.slots.sign] + 3;
       return {
         output: { relevance: s, specificity: s, value_clarity: s, cta_effort: s, sounds_human: s, would_reply: s, claims_supported: true, unsupported_claims: [] },
-        costs: [anthropicCostEntry("judge", models.judge.model, usage(1200, 300))],
+        costs: [cost("judge", models.judge.model, 1200, 300)],
       };
     },
     compare: async (input) => {
       const a = RANK[signOf(input.a)];
       const b = RANK[signOf(input.b)];
-      const isHaiku = models.testset_judge.model === "claude-haiku-5-5";
-      // Opus picks the better version; Haiku always picks A (position bias).
-      const winner = isHaiku ? "a" : a === b ? "tie" : a > b ? "a" : "b";
-      return { output: { winner, reason: "scripted" }, costs: [anthropicCostEntry("compare", models.testset_judge.model, usage(1000, 200))] };
+      const winner = CHEAP.has(models.testset_judge.model) ? "a" : a === b ? "tie" : a > b ? "a" : "b";
+      return { output: { winner, reason: "scripted" }, costs: [cost("compare", models.testset_judge.model, 1000, 200)] };
     },
     checkFacts: async (input) => {
       const r = await fake.checkFacts(input);
-      return { output: r.output, costs: [anthropicCostEntry("fact_check", models.testset_judge.model, usage(5000, 300))] };
+      return { output: r.output, costs: [cost("fact_check", models.testset_judge.model, 5000, 300)] };
     },
     batch: {
       submit: async () => "batch_1",
@@ -78,10 +90,9 @@ export function scripted(models: StepModels): LLM {
           items.map(async (it) => {
             const r = await fake.write(it.input);
             r.output.slots.sign = SIGN[models.writer_economy.model];
-            return { id: it.id, output: r.output, costs: [anthropicCostEntry("write", models.writer_economy.model, usage(2000, 600), { batch: true })] };
+            return { id: it.id, output: r.output, costs: [cost("write", models.writer_economy.model, 2000, 600, true)] };
           }),
         ),
     },
   };
 }
-

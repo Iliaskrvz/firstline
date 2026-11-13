@@ -6,8 +6,10 @@ import { PRICE_MULTIPLE, TARGET_COST_EUR } from "@/lib/admin";
 import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
 import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
-import { STEP_MODELS, STEPS } from "@/config/models";
-import { anthropicBudget, firecrawlBudget } from "@/billing/budgets";
+import { STEPS } from "@/config/models";
+import { engineConfig } from "@/engine/config";
+import { balanceThreshold, fetchDeepSeekBalance, isLow } from "@/billing/deepseek-balance";
+import { firecrawlBudget, llmBudget } from "@/billing/budgets";
 import { createFirecrawl } from "@/engine/firecrawl";
 import { serverPool } from "@/server/db";
 import { SenderSwitch } from "./sender-switch";
@@ -44,13 +46,16 @@ async function Admin() {
   await requireAdmin();
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
-  const [a, fcBudget, anBudget, refunds, breakdown] = await Promise.all([
+  const config = engineConfig();
+  const [a, fcBudget, anBudget, refunds, breakdown, balance] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
-    anthropicBudget(pool),
+    llmBudget(pool, process.env, new Date(), config.llmProvider),
     loadRefunds(pool),
     loadCostBreakdown(pool),
+    config.llmProvider === "deepseek" && config.deepseekApiKey ? fetchDeepSeekBalance(config.deepseekApiKey) : Promise.resolve(null),
   ]);
+  const threshold = balanceThreshold();
   const budgets = [fcBudget, anBudget];
   const flagged = a.workspaces.filter((w) => (w.personalShare ?? 0) > 0.5 && w.leads >= 200);
   return (
@@ -74,8 +79,8 @@ async function Admin() {
                 </div>
                 <p className="text-xs text-slate-500">
                   {b.limit == null
-                    ? b.provider === "anthropic"
-                      ? "Set ANTHROPIC_MONTHLY_CAP_USD to your Console spend cap to get alerts."
+                    ? b.provider === "llm"
+                      ? "Set LLM_MONTHLY_CAP_USD to your monthly AI budget to get alerts."
                       : "Firecrawl didn't report the plan size; set FIRECRAWL_MONTHLY_CREDITS."
                     : `From ${b.source}${b.periodEnd ? `, period ends ${b.periodEnd.slice(0, 10)}` : ""}. Email to admins at 80% and 100%.`}
                 </p>
@@ -97,6 +102,29 @@ async function Admin() {
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+      {config.llmProvider === "deepseek" && (
+        <Card className={`space-y-1 text-sm ${balance && isLow(balance, threshold) ? "bg-amber-50 text-amber-900" : ""}`}>
+          <h2 className="text-base font-semibold text-slate-900">DeepSeek balance (prepaid)</h2>
+          {balance ? (
+            <p>
+              <span className="text-2xl font-semibold tabular-nums">
+                {balance.total.toFixed(2)} {balance.currency}
+              </span>{" "}
+              <span className="text-slate-600">
+                ({balance.toppedUp.toFixed(2)} topped up, {balance.granted.toFixed(2)} granted){balance.available ? "" : " · not enough for API calls"}
+              </span>
+            </p>
+          ) : (
+            <p className="text-slate-600">{config.deepseekApiKey ? "Couldn't read the balance from DeepSeek right now." : "DEEPSEEK_API_KEY isn't set."}</p>
+          )}
+          <p className="text-xs text-slate-500">
+            {threshold
+              ? `Email to admins once a day while it's below ${threshold.toFixed(2)}${balance ? ` ${balance.currency}` : ""} (DEEPSEEK_BALANCE_ALERT).`
+              : "Set DEEPSEEK_BALANCE_ALERT (in the balance's currency) to get an email when it runs low."}{" "}
+            Top up at platform.deepseek.com.
+          </p>
         </Card>
       )}
       {a.drift.level === "warn" && <Card className="bg-amber-50 text-sm text-amber-900">Cost alert: {a.drift.message}</Card>}
@@ -123,7 +151,8 @@ async function Admin() {
           <h2 className="text-base font-semibold text-slate-900">Where the money goes (30 days)</h2>
           <p className="mt-1 text-xs text-slate-500">
             Real cost per step and model from usage_costs. Lab rows are the Quality Lab and model bake-offs; they&apos;re not in the customer margin above. Models per step:{" "}
-            {STEPS.map((st) => `${st} ${STEP_MODELS[st].model.replace("claude-", "")}${STEP_MODELS[st].batch ? " (batch)" : ""}`).join(" · ")}.
+            {STEPS.map((st) => `${st} ${config.models[st].model.replace("claude-", "")}${config.models[st].batch ? (config.llmProvider === "anthropic" ? " (batch)" : " (off-peak)") : ""}`).join(" · ")}{" "}
+            (provider: {config.llmProvider}).
           </p>
         </div>
         {breakdown.length === 0 ? (

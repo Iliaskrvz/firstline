@@ -11,7 +11,7 @@ import { serverPool } from "@/server/db";
 import { AutoRefresh } from "../../campaigns/[id]/preview/auto-refresh";
 import { NewTestSet, RunForm } from "./lab-forms";
 import { BakeoffForm } from "./bakeoff-forms";
-import { BAKEOFF, STEP_MODELS } from "@/config/models";
+import { BAKEOFF } from "@/config/models";
 import { engineConfig } from "@/engine/config";
 import { listBakeoffs } from "@/engine/bakeoff-pg";
 import { bakeoffPlan } from "@/engine/bakeoff";
@@ -85,7 +85,7 @@ async function Lab() {
         )}
         <p className="text-xs text-slate-500">
           Versions live in code (src/engine/skills.ts). Live now: {LIVE_SKILL_VERSION}. To ship a winner, set LIVE_SKILL_VERSION to it and deploy. Research comes from the
-          30-day domain cache. The side-by-side comparison uses the test-set judge ({STEP_MODELS.testset_judge.model}, effort {STEP_MODELS.testset_judge.effort}).
+          30-day domain cache. The side-by-side comparison uses the test-set judge ({config.models.testset_judge.model}).
         </p>
       </Card>
 
@@ -93,9 +93,10 @@ async function Lab() {
         <div>
           <h2 className="text-base font-semibold text-slate-900">Model bake-off</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Every writer ({plan.writers.map((w) => w.model.replace("claude-", "")).join(", ")}) writes from the same facts. The test-set judge scores each email and compares
-            each writer with Sonnet, blind and in both orders; Haiku judges the same pairs to see if it agrees. Extraction: Haiku vs Sonnet on the first {BAKEOFF.extractionLeads}{" "}
-            leads. Ends with a blind sheet of {BAKEOFF.blindPairs} pairs for you. Nothing changes in production.
+            Every writer ({plan.writers.map((w) => w.model.replace("claude-", "")).join(", ")}) writes from the same facts. {plan.judge} scores each email and compares
+            each writer with {plan.writers[0].model}, blind and in both orders; {plan.agreementJudge} judges the same pairs to see if it agrees. Extraction:{" "}
+            {plan.extractors.join(" vs ")} on the first {BAKEOFF.extractionLeads} leads. Ends with a blind sheet of {BAKEOFF.blindPairs} pairs for you. Nothing changes in
+            production.
           </p>
         </div>
         {sets.length ? (

@@ -9,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
-import { HAS_SERVER_FALLBACK, type StepModel } from "@/config/models";
+import { HAS_SERVER_FALLBACK, type Effort, type StepModel } from "@/config/models";
 import type { EngineConfig } from "./config";
 import { anthropicCostEntry } from "./costs";
 import { Semaphore, type Gate } from "./limiter";
@@ -36,6 +36,9 @@ import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
 import type { Fact, JudgeScores, WriterOutput } from "./types";
 
+/** Claude has no "thinking off" on these models: "none" maps to its lowest effort. */
+const claudeEffort = (e: Effort): "low" | "medium" | "high" => (e === "none" ? "low" : e);
+
 const cachedSystem = (text: string) => [{ type: "text" as const, text, cache_control: { type: "ephemeral" as const } }];
 
 function factsBlock(facts: Fact[]) {
@@ -51,7 +54,7 @@ export class AnthropicLLM implements LLM {
   /** gate: shared across workers in production (requests per minute + at once); in-process by default. */
   constructor(private config: EngineConfig, gate?: Gate) {
     this.client = new Anthropic({ apiKey: config.anthropicApiKey!, maxRetries: 4, timeout: 120_000 });
-    this.gate = gate ?? new Semaphore(config.concurrency.anthropic);
+    this.gate = gate ?? new Semaphore(config.concurrency.llm);
     this.extractorId = `${config.models.extraction.model}:${EXTRACT_VERSION}`;
   }
 
@@ -72,7 +75,7 @@ export class AnthropicLLM implements LLM {
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
           system: req.system,
-          output_config: { format: betaZodOutputFormat(schema), effort: sm.effort },
+          output_config: { format: betaZodOutputFormat(schema), effort: claudeEffort(sm.effort) },
           messages: req.messages,
         }),
       );
@@ -83,7 +86,7 @@ export class AnthropicLLM implements LLM {
         model: sm.model,
         max_tokens: req.max_tokens,
         system: req.system,
-        output_config: { format: zodOutputFormat(schema), effort: sm.effort },
+        output_config: { format: zodOutputFormat(schema), effort: claudeEffort(sm.effort) },
         messages: req.messages,
       }),
     );
@@ -196,7 +199,7 @@ export class AnthropicLLM implements LLM {
             const { model, step, schema, system, messages } = this.writeRequest(it.input, { batch: true });
             return {
               custom_id: it.id,
-              params: { model, max_tokens: 8000, system, output_config: { format: zodOutputFormat(schema), effort: step.effort }, messages },
+              params: { model, max_tokens: 8000, system, output_config: { format: zodOutputFormat(schema), effort: claudeEffort(step.effort) }, messages },
             };
           }),
         }),

@@ -7,6 +7,8 @@ export const ENV_GROUPS = {
   firecrawl: ["FIRECRAWL_API_KEY"],
   /** The pg-boss queue + the worker's database writes (Supabase session pooler string). */
   database: ["DATABASE_URL"],
+  /** Only needed when LLM_PROVIDER=deepseek. Without it, AI steps report "DeepSeek key missing". */
+  deepseek: ["DEEPSEEK_API_KEY"],
   /** Only needed when LLM_PROVIDER=anthropic. Without it, AI steps report "Anthropic key missing". */
   anthropic: ["ANTHROPIC_API_KEY"],
 } as const;
@@ -29,6 +31,7 @@ const WHERE: Record<string, string> = {
   NEXT_PUBLIC_SUPABASE_URL: "Supabase → Project Settings → API → Project URL",
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "Supabase → Project Settings → API Keys → publishable key",
   ANTHROPIC_API_KEY: "console.anthropic.com → Settings → API Keys",
+  DEEPSEEK_API_KEY: "platform.deepseek.com → API keys (prepaid: top up the balance there)",
   FIRECRAWL_API_KEY: "firecrawl.dev → Dashboard → API Keys",
   DATABASE_URL:
     "Supabase → Connect → Session pooler (port 5432), with your database password. It starts with postgresql://, not https://",

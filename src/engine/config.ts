@@ -1,19 +1,23 @@
 // Engine settings. Everything tunable lives here; read from env with safe defaults.
-import { STEP_MODELS, type StepModels } from "@/config/models";
+import { stepModels, type StepModels } from "@/config/models";
 
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) ? Number(v) : d);
 
-export type LlmProvider = "fake" | "anthropic";
+export type LlmProvider = "fake" | "anthropic" | "deepseek";
 
 export function engineConfig(env: Record<string, string | undefined> = process.env, models: Partial<StepModels> = {}) {
-  const provider: LlmProvider = env.LLM_PROVIDER === "anthropic" ? "anthropic" : "fake";
+  const p = env.LLM_PROVIDER?.trim();
+  const provider: LlmProvider = p === "deepseek" || p === "anthropic" ? p : "fake";
+  /** Provider-neutral names first; the old ANTHROPIC_ names still work. */
+  const pick = (name: string, old: string) => env[name]?.trim() || env[old]?.trim() || undefined;
   return {
-    /** "fake" = realistic test output, no AI used. Set LLM_PROVIDER=anthropic to use Claude. */
+    /** "fake" = realistic test output, no AI used. LLM_PROVIDER=deepseek (default for AI) or anthropic. */
     llmProvider: provider,
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,
+    deepseekApiKey: env.DEEPSEEK_API_KEY?.trim() || null,
     firecrawlApiKey: env.FIRECRAWL_API_KEY?.trim() || null,
     /** Model per step: src/config/models.ts. `models` overrides some (the Lab and the bake-off do). */
-    models: { ...STEP_MODELS, ...models } as StepModels,
+    models: { ...stepModels(provider), ...models } as StepModels,
     research: {
       maxPages: 4, // homepage + about/team + services + newest news (§5)
       maxPagesLite: 2,
@@ -27,12 +31,14 @@ export function engineConfig(env: Record<string, string | undefined> = process.e
       perWorker: num(env.WORKER_CONCURRENCY, 10),
       perWorkspace: num(env.WORKSPACE_CONCURRENCY, 5),
       firecrawl: num(env.FIRECRAWL_CONCURRENCY, 5),
-      anthropic: num(env.ANTHROPIC_CONCURRENCY, 5),
+      /** AI requests at once across all workers (LLM_CONCURRENCY, formerly ANTHROPIC_CONCURRENCY). */
+      llm: num(pick("LLM_CONCURRENCY", "ANTHROPIC_CONCURRENCY"), 5),
       /**
-       * Requests per minute to Anthropic across all workers: the limit shown in your Anthropic Console
-       * (a bit under it). Not set = no per-minute limit of ours; Anthropic's own 429s are retried by the SDK.
+       * AI requests per minute across all workers (LLM_RPM, formerly ANTHROPIC_RPM). Anthropic: the limit in
+       * your Console. DeepSeek has no per-minute limit, only a concurrency limit; set this to keep spend steady.
+       * Not set = no per-minute limit of ours.
        */
-      anthropicPerMinute: env.ANTHROPIC_RPM?.trim() ? num(env.ANTHROPIC_RPM, 0) || null : null,
+      llmPerMinute: pick("LLM_RPM", "ANTHROPIC_RPM") ? num(pick("LLM_RPM", "ANTHROPIC_RPM"), 0) || null : null,
     },
     /**
      * Deep research (search the contact's own professional content). OFF and hidden until the lawyer
