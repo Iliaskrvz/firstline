@@ -1,6 +1,6 @@
-// Claude implementation. Haiku extracts facts and judges; Sonnet (Pro) or Haiku
-// (Lite) writes. Structured outputs guarantee the JSON shape; the engine still
-// validates the content.
+// Claude implementation. Which model does what (and at what effort) comes from
+// src/config/models.ts through config.models. Structured outputs guarantee the
+// JSON shape; the engine still validates the content.
 // Prompt caching: the writer's skill prompt and campaign block are cached (see
 // writeRequest). The extract and judge prompts are shorter than the 512-token
 // minimum for these models, so their cache markers do nothing yet; they start
@@ -8,6 +8,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { z } from "zod";
+import { HAS_SERVER_FALLBACK, type StepModel } from "@/config/models";
 import type { EngineConfig } from "./config";
 import { anthropicCostEntry } from "./costs";
 import { Semaphore, type Gate } from "./limiter";
@@ -19,6 +21,7 @@ import {
   type CompareInput,
   type CompareOutput,
   type ExtractInput,
+  type FactCheckInput,
   type JudgeInput,
   type LLM,
   type LLMResult,
@@ -26,9 +29,9 @@ import {
   type WriteInput,
 } from "./llm";
 import { EXTRACT_PROMPT, EXTRACT_VERSION } from "./prompts/extract";
-import { COMPARE_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
+import { COMPARE_PROMPT, FACT_CHECK_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
 import { PERSON_PROMPT } from "./prompts/person";
-import { CompareSchema, PersonFactsSchema, type PersonFactsOutput, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
+import { CompareSchema, FactCheckSchema, type FactCheckOutput, PersonFactsSchema, type PersonFactsOutput, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
 import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
 import type { Fact, JudgeScores, WriterOutput } from "./types";
@@ -49,7 +52,42 @@ export class AnthropicLLM implements LLM {
   constructor(private config: EngineConfig, gate?: Gate) {
     this.client = new Anthropic({ apiKey: config.anthropicApiKey!, maxRetries: 4, timeout: 120_000 });
     this.gate = gate ?? new Semaphore(config.concurrency.anthropic);
-    this.extractorId = `${config.models.extract}:${EXTRACT_VERSION}`;
+    this.extractorId = `${config.models.extraction.model}:${EXTRACT_VERSION}`;
+  }
+
+  /**
+   * One structured-output call with the step's model and effort. Sonnet and Opus get the server-side
+   * refusal fallback (routes a declined request to another model); Haiku has none.
+   */
+  private async parse(
+    sm: StepModel,
+    schema: z.ZodType,
+    req: { max_tokens: number; system: Anthropic.TextBlockParam[]; messages: Anthropic.MessageParam[] },
+  ): Promise<{ output: unknown; stop: string | null; usage: Anthropic.Usage }> {
+    if (HAS_SERVER_FALLBACK[sm.model]) {
+      const res = await this.call(() =>
+        this.client.beta.messages.parse({
+          model: sm.model,
+          max_tokens: req.max_tokens,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          system: req.system,
+          output_config: { format: betaZodOutputFormat(schema), effort: sm.effort },
+          messages: req.messages,
+        }),
+      );
+      return { output: res.parsed_output, stop: res.stop_reason, usage: res.usage as unknown as Anthropic.Usage };
+    }
+    const res = await this.call(() =>
+      this.client.messages.parse({
+        model: sm.model,
+        max_tokens: req.max_tokens,
+        system: req.system,
+        output_config: { format: zodOutputFormat(schema), effort: sm.effort },
+        messages: req.messages,
+      }),
+    );
+    return { output: res.parsed_output, stop: res.stop_reason, usage: res.usage };
   }
 
   private async call<T>(fn: () => Promise<T>): Promise<T> {
@@ -63,20 +101,17 @@ export class AnthropicLLM implements LLM {
   }
 
   async extractFacts(input: ExtractInput): Promise<LLMResult<{ facts: Fact[] }>> {
-    const model = this.config.models.extract;
+    const sm = this.config.models.extraction;
     const data = wrapPagesAsData(input.pages.map((p, i) => ({ id: `P${i + 1}`, ...p })));
-    const res = await this.call(() =>
-      this.client.messages.parse({
-        model,
-        max_tokens: 4000,
-        system: cachedSystem(EXTRACT_PROMPT),
-        output_config: { format: zodOutputFormat(FactsSchema), effort: "low" },
-        messages: [{ role: "user", content: `Company: ${input.company ?? "unknown"} (${input.domain})\n\n${data}` }],
-      }),
-    );
-    if (res.stop_reason === "refusal") throw new LLMRefusalError();
-    const facts = sanitiseFacts(res.parsed_output?.facts ?? [], input.pages.map((p) => p.url));
-    return { output: { facts }, costs: [anthropicCostEntry("extract", model, res.usage)] };
+    const res = await this.parse(sm, FactsSchema, {
+      max_tokens: 4000,
+      system: cachedSystem(EXTRACT_PROMPT),
+      messages: [{ role: "user", content: `Company: ${input.company ?? "unknown"} (${input.domain})\n\n${data}` }],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    const parsed = res.output as { facts: { id: string; text: string; src: string; tier: string }[] } | null;
+    const facts = sanitiseFacts(parsed?.facts ?? [], input.pages.map((p) => p.url));
+    return { output: { facts }, costs: [anthropicCostEntry("extract", sm.model, res.usage)] };
   }
 
   /**
@@ -86,8 +121,9 @@ export class AnthropicLLM implements LLM {
    *   3. the lead and its facts, in the user message: different every time.
    * Both system blocks carry a cache breakpoint, so each lead after the first reads 1 and 2 at the cache price.
    */
-  writeRequest(input: WriteInput) {
-    const model = input.writer === "lite" ? this.config.models.writerLite : this.config.models.writerPro;
+  writeRequest(input: WriteInput, opts: { batch?: boolean } = {}) {
+    const step = input.writer === "lite" ? this.config.models.writer_lite : opts.batch ? this.config.models.writer_economy : this.config.models.writer_pro;
+    const model = step.model;
     const rules = input.styleRules;
     const campaign = [
       `Language: ${input.language}`,
@@ -131,6 +167,7 @@ export class AnthropicLLM implements LLM {
     ].join("\n");
     return {
       model,
+      step,
       schema: writerSchema(input.template.slots.map((s) => s.key)),
       system: [...cachedSystem(skillPrompt(input.skillVersion)), ...cachedSystem(campaign)],
       messages: [{ role: "user" as const, content: user }] satisfies Anthropic.MessageParam[],
@@ -138,43 +175,12 @@ export class AnthropicLLM implements LLM {
   }
 
   async write(input: WriteInput): Promise<LLMResult<WriterOutput>> {
-    const { model, schema, system, messages } = this.writeRequest(input);
-    let output: WriterOutput | null;
-    let stop: string | null;
-    let usage;
-    if (model === this.config.models.writerPro) {
-      // Sonnet: server-side refusal fallback (routes a declined request to another model).
-      const res = await this.call(() =>
-        this.client.beta.messages.parse({
-          model,
-          max_tokens: 8000,
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
-          system,
-          output_config: { format: betaZodOutputFormat(schema), effort: "medium" },
-          messages,
-        }),
-      );
-      output = res.parsed_output as WriterOutput | null;
-      stop = res.stop_reason;
-      usage = res.usage;
-    } else {
-      const res = await this.call(() =>
-        this.client.messages.parse({
-          model,
-          max_tokens: 8000,
-          system,
-          output_config: { format: zodOutputFormat(schema), effort: "medium" },
-          messages,
-        }),
-      );
-      output = res.parsed_output as WriterOutput | null;
-      stop = res.stop_reason;
-      usage = res.usage;
-    }
-    if (stop === "refusal") throw new LLMRefusalError();
-    if (!output) throw new Error(`Writer returned no valid JSON (stop_reason: ${stop})`);
-    return { output, costs: [anthropicCostEntry("write", model, usage)] };
+    const { step, schema, system, messages } = this.writeRequest(input);
+    const res = await this.parse(step, schema, { max_tokens: 8000, system, messages });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    const output = res.output as WriterOutput | null;
+    if (!output) throw new Error(`Writer returned no valid JSON (stop_reason: ${res.stop})`);
+    return { output, costs: [anthropicCostEntry("write", step.model, res.usage)] };
   }
 
   /**
@@ -187,10 +193,10 @@ export class AnthropicLLM implements LLM {
       const batch = await this.call(() =>
         this.client.messages.batches.create({
           requests: items.map((it) => {
-            const { model, schema, system, messages } = this.writeRequest(it.input);
+            const { model, step, schema, system, messages } = this.writeRequest(it.input, { batch: true });
             return {
               custom_id: it.id,
-              params: { model, max_tokens: 8000, system, output_config: { format: zodOutputFormat(schema), effort: "medium" as const }, messages },
+              params: { model, max_tokens: 8000, system, output_config: { format: zodOutputFormat(schema), effort: step.effort }, messages },
             };
           }),
         }),
@@ -212,7 +218,7 @@ export class AnthropicLLM implements LLM {
           continue;
         }
         const msg = r.result.message;
-        const { model, schema } = this.writeRequest(input);
+        const { model, schema } = this.writeRequest(input, { batch: true });
         const costs = [anthropicCostEntry("write", model, msg.usage, { batch: true })];
         const text = msg.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text;
         let parsed: WriterOutput | null = null;
@@ -229,69 +235,73 @@ export class AnthropicLLM implements LLM {
   };
 
   async personFacts(input: PersonInput): Promise<LLMResult<PersonFactsOutput>> {
-    const model = this.config.models.extract;
+    const sm = this.config.models.extraction;
     const data = wrapPagesAsData(input.pages.map((p, i) => ({ id: `W${i + 1}`, url: p.url, type: "web", markdown: p.markdown.slice(0, 8000) })));
     const p = input.person;
-    const res = await this.call(() =>
-      this.client.messages.parse({
-        model,
-        max_tokens: 1500,
-        system: cachedSystem(PERSON_PROMPT),
-        output_config: { format: zodOutputFormat(PersonFactsSchema), effort: "low" },
-        messages: [
-          {
-            role: "user",
-            content: `Contact: ${p.first_name} ${p.last_name}\nCompany: ${p.company ?? "unknown"} (${p.domain})\nJob title: ${p.title ?? "unknown"}\n\n${data}`,
-          },
-        ],
-      }),
-    );
-    if (res.stop_reason === "refusal") throw new LLMRefusalError();
-    if (!res.parsed_output) throw new Error("Person check returned no valid JSON");
-    return { output: res.parsed_output, costs: [anthropicCostEntry("search", model, res.usage)] };
+    const res = await this.parse(sm, PersonFactsSchema, {
+      max_tokens: 1500,
+      system: cachedSystem(PERSON_PROMPT),
+      messages: [
+        {
+          role: "user",
+          content: `Contact: ${p.first_name} ${p.last_name}\nCompany: ${p.company ?? "unknown"} (${p.domain})\nJob title: ${p.title ?? "unknown"}\n\n${data}`,
+        },
+      ],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    if (!res.output) throw new Error("Person check returned no valid JSON");
+    return { output: res.output as PersonFactsOutput, costs: [anthropicCostEntry("search", sm.model, res.usage)] };
   }
 
+  /** Quality Lab and bake-off comparisons: the test-set judge (Opus, lowest effort, by default). */
   async compare(input: CompareInput): Promise<LLMResult<CompareOutput>> {
-    const model = this.config.models.judge;
-    const res = await this.call(() =>
-      this.client.messages.parse({
-        model,
-        max_tokens: 2000,
-        system: cachedSystem(COMPARE_PROMPT),
-        output_config: { format: zodOutputFormat(CompareSchema), effort: "low" },
-        messages: [
-          {
-            role: "user",
-            content: `Language: ${input.language}\nReader's role: ${input.role ?? "unknown"}\n\nFacts:\n${factsBlock(input.facts)}\n\nVersion A:\n${input.a}\n\nVersion B:\n${input.b}`,
-          },
-        ],
-      }),
-    );
-    if (res.stop_reason === "refusal") throw new LLMRefusalError();
-    if (!res.parsed_output) throw new Error("Compare returned no valid JSON");
-    return { output: res.parsed_output, costs: [anthropicCostEntry("judge", model, res.usage)] };
+    const sm = this.config.models.testset_judge;
+    const res = await this.parse(sm, CompareSchema, {
+      max_tokens: 4000,
+      system: cachedSystem(COMPARE_PROMPT),
+      messages: [
+        {
+          role: "user",
+          content: `Language: ${input.language}\nReader's role: ${input.role ?? "unknown"}\n\nFacts:\n${factsBlock(input.facts)}\n\nVersion A:\n${input.a}\n\nVersion B:\n${input.b}`,
+        },
+      ],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    if (!res.output) throw new Error("Compare returned no valid JSON");
+    return { output: res.output as CompareOutput, costs: [anthropicCostEntry("compare", sm.model, res.usage)] };
   }
 
+  /** The judge that scores every email before the customer sees it. */
   async judge(input: JudgeInput): Promise<LLMResult<JudgeScores>> {
-    const model = this.config.models.judge;
-    const res = await this.call(() =>
-      this.client.messages.parse({
-        model,
-        max_tokens: 3000,
-        system: cachedSystem(JUDGE_PROMPT),
-        output_config: { format: zodOutputFormat(JudgeSchema), effort: "low" },
-        messages: [
-          {
-            role: "user",
-            content: `Language: ${input.language}\nReader's role: ${input.role ?? "unknown"}\n\nFacts:\n${factsBlock(input.facts)}\n\nPersonalised lines:\n${Object.entries(input.slots)
-              .map(([k, v]) => `${k}: ${v}`)
-              .join("\n")}\n\nFull email for context:\n${input.emailPreview}`,
-          },
-        ],
-      }),
-    );
-    if (res.stop_reason === "refusal") throw new LLMRefusalError();
-    if (!res.parsed_output) throw new Error("Judge returned no valid JSON");
-    return { output: res.parsed_output, costs: [anthropicCostEntry("judge", model, res.usage)] };
+    const sm = this.config.models.judge;
+    const res = await this.parse(sm, JudgeSchema, {
+      max_tokens: 4000,
+      system: cachedSystem(JUDGE_PROMPT),
+      messages: [
+        {
+          role: "user",
+          content: `Language: ${input.language}\nReader's role: ${input.role ?? "unknown"}\n\nFacts:\n${factsBlock(input.facts)}\n\nPersonalised lines:\n${Object.entries(input.slots)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join("\n")}\n\nFull email for context:\n${input.emailPreview}`,
+        },
+      ],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    if (!res.output) throw new Error("Judge returned no valid JSON");
+    return { output: res.output as JudgeScores, costs: [anthropicCostEntry("judge", sm.model, res.usage)] };
+  }
+
+  /** Bake-off: the test-set judge checks extracted facts against the pages they cite. */
+  async checkFacts(input: FactCheckInput): Promise<LLMResult<FactCheckOutput>> {
+    const sm = this.config.models.testset_judge;
+    const data = wrapPagesAsData(input.pages.map((p, i) => ({ id: `P${i + 1}`, url: p.url, type: "web", markdown: p.markdown })));
+    const res = await this.parse(sm, FactCheckSchema, {
+      max_tokens: 4000,
+      system: cachedSystem(FACT_CHECK_PROMPT),
+      messages: [{ role: "user", content: `Company website: ${input.domain}\n\nFacts to check:\n${factsBlock(input.facts)}\n\n${data}` }],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    if (!res.output) throw new Error("Fact check returned no valid JSON");
+    return { output: res.output as FactCheckOutput, costs: [anthropicCostEntry("fact_check", sm.model, res.usage)] };
   }
 }

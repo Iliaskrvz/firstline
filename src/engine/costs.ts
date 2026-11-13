@@ -1,14 +1,6 @@
-// Real cost per call (§9: log every AI and API call to usage_costs).
+// Real cost per call (§9: log every AI and API call to usage_costs). Prices: src/config/models.ts.
+import { BATCH_DISCOUNT, PRICES, type ModelId } from "@/config/models";
 import type { CostEntry } from "./types";
-
-/** USD per million tokens. Cache writes (5 min) are 1.25x input; cache reads 0.1x on Haiku 5.5, 0.05x on Sonnet 5.5. */
-export const ANTHROPIC_PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
-  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
-  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
-};
-
-/** The Message Batches API bills every token at half price (Economy mode). */
-export const BATCH_DISCOUNT = 0.5;
 
 export type TokenUsage = {
   input_tokens: number;
@@ -18,14 +10,13 @@ export type TokenUsage = {
 };
 
 export function anthropicCost(model: string, u: TokenUsage, opts: { batch?: boolean } = {}): number {
-  const p = ANTHROPIC_PRICES[model];
-  if (!p) return 0;
-  const usd =
-    (u.input_tokens * p.input +
-      u.output_tokens * p.output +
-      (u.cache_read_input_tokens ?? 0) * p.cacheRead +
-      (u.cache_creation_input_tokens ?? 0) * p.cacheWrite) /
-    1_000_000;
+  const base = PRICES[model as ModelId];
+  if (!base) return 0;
+  const read = u.cache_read_input_tokens ?? 0;
+  const write = u.cache_creation_input_tokens ?? 0;
+  const promptTokens = u.input_tokens + read + write;
+  const p = base.longPrompt && promptTokens > base.longPrompt.overTokens ? base.longPrompt : base;
+  const usd = (u.input_tokens * p.input + u.output_tokens * p.output + read * p.cacheRead + write * p.cacheWrite) / 1_000_000;
   return Math.round(usd * (opts.batch ? BATCH_DISCOUNT : 1) * 1e6) / 1e6;
 }
 

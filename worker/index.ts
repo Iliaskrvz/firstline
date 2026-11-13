@@ -15,9 +15,10 @@ import { chainGates, effectiveConcurrency } from "@/engine/limiter";
 import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, pruneProviderWindows, releaseWorkspaceSlot, workerCapacity, workspaceLimit } from "@/engine/limiter-pg";
 import { jobContext, PRIORITY } from "@/engine/job-context";
 import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
-import { selectLLM } from "@/engine/llm";
+import { llmFactory, selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
+import { runQueuedBakeoff } from "@/engine/bakeoff-pg";
 import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
@@ -53,6 +54,7 @@ async function main() {
   const anthropicGate = anthropicPerMinute ? chainGates(new PgRateGate(pool, "anthropic", anthropicPerMinute), anthropicSlots) : anthropicSlots;
   if (config.llmProvider === "anthropic" && !anthropicPerMinute) log("ANTHROPIC_RPM not set: no per-minute limit of ours (set it to your Anthropic Console limit).");
   const llm = await selectLLM(config, { anthropicGate });
+  const llmFor = await llmFactory(config, { anthropicGate });
   if (config.llmProvider === "anthropic" && !config.anthropicApiKey) {
     log("⚠ LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is missing: research runs, AI steps will show 'Anthropic key missing'.");
   }
@@ -171,6 +173,10 @@ async function main() {
       await asSingleton(pool, "quality-lab", async () => {
         while ((await runQueuedEval(pool, { store, reader, llm, config }, log)) != null) {
           /* next queued run */
+        }
+        // Model bake-offs: queued only by an admin who approved the budget on /admin/lab.
+        while ((await runQueuedBakeoff(pool, { reader, config, llmFor }, log)) != null) {
+          /* next queued bake-off */
         }
       });
     } catch (e) {

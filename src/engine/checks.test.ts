@@ -96,6 +96,11 @@ describe("language, costs, fallback", () => {
     expect(anthropicCost("claude-sonnet-5-5", { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 2000 }, { batch: true })).toBe(0.0036);
     expect(anthropicCost("claude-haiku-5-5", { input_tokens: 10_000, output_tokens: 1000 })).toBe(0.0015);
     expect(anthropicCost("unknown", { input_tokens: 1, output_tokens: 1 })).toBe(0);
+    // Opus 5.5: $4 in, $20 out (thinking counts as output), cache read $0.20, cache write $5.
+    expect(anthropicCost("claude-opus-5-5", { input_tokens: 1000, output_tokens: 1000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 1000 })).toBe(0.031);
+    // Haiku 5.5 over 100k prompt tokens: 5x on every token of that request.
+    expect(anthropicCost("claude-haiku-5-5", { input_tokens: 100_001, output_tokens: 0 })).toBe(0.050001);
+    expect(anthropicCost("claude-haiku-5-5", { input_tokens: 60_000, output_tokens: 0, cache_read_input_tokens: 50_000 })).toBe(0.0325);
     expect(firecrawlCostEntry("scrape", 1, 0.00083)).toEqual({ step: "scrape", model: "firecrawl-scrape", provider_units: 1, cost_usd: 0.00083 });
   });
 

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { engineConfig } from "@/engine/config";
 import { MAX_TEST_LEADS } from "@/engine/lab";
 import { queueEvalRun, saveTestSet, upsertSkills } from "@/engine/lab-pg";
+import { queueBakeoff, saveBlindPick } from "@/engine/bakeoff-pg";
 import { LIVE_SKILL_VERSION, SKILLS } from "@/engine/skills";
 import { requireAdmin } from "@/lib/auth";
 import { hasErrors, parseTemplate } from "@/lib/template";
@@ -54,4 +55,27 @@ export async function startEvalRun(input: { testSetId: string; candidate: string
   await upsertSkills(pool, LIVE_SKILL_VERSION);
   await queueEvalRun(pool, { ...input, provider: engineConfig().llmProvider });
   revalidatePath("/admin/lab");
+}
+
+/**
+ * Queue a model bake-off. Spends real money with LLM_PROVIDER=anthropic (hard budget in src/config/models.ts),
+ * so it needs the admin's explicit approval, and only one runs at a time.
+ */
+export async function startBakeoff(input: { testSetIds: string[]; approved: boolean }): Promise<{ error: string } | undefined> {
+  const { user } = await requireAdmin();
+  if (!input.approved) return { error: "Tick the box to approve the spend first." };
+  const ids = [...new Set(input.testSetIds)].filter((id) => /^[a-z0-9-]{1,40}$/.test(id));
+  if (!ids.length) return { error: "Choose at least one test set." };
+  const pool = serverPool();
+  const { rows } = await pool.query("select count(*)::int n from public.bakeoff_runs where status in ('queued', 'running')");
+  if (rows[0].n > 0) return { error: "A bake-off is already queued or running." };
+  await queueBakeoff(pool, { testSetIds: ids, provider: engineConfig().llmProvider, approvedBy: user.email ?? "admin" });
+  revalidatePath("/admin/lab");
+}
+
+export async function pickBlind(input: { id: number; n: number; pick: "a" | "b" | "same" }): Promise<void> {
+  await requireAdmin();
+  if (!Number.isInteger(input.id) || !Number.isInteger(input.n) || !["a", "b", "same"].includes(input.pick)) return;
+  await saveBlindPick(serverPool(), input.id, input.n, input.pick);
+  revalidatePath(`/admin/lab/bakeoff/${input.id}`);
 }

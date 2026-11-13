@@ -59,3 +59,9 @@ export const PersonFactsSchema = z.object({
   facts: z.array(z.object({ text: z.string(), src: z.string(), kind: z.enum(PERSON_KINDS), date: z.string().nullable() })),
 });
 export type PersonFactsOutput = z.infer<typeof PersonFactsSchema>;
+
+/** Model bake-off: verdict per extracted fact. */
+export const FactCheckSchema = z.object({
+  checks: z.array(z.object({ id: z.string(), verdict: z.enum(["supported", "unsupported", "wrong"]), note: z.string() })),
+});
+export type FactCheckOutput = z.infer<typeof FactCheckSchema>;

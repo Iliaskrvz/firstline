@@ -70,7 +70,7 @@ export type LeadJob = {
 
 /** One provider call, as logged to usage_costs. */
 export type CostEntry = {
-  step: "scrape" | "extract" | "write" | "validate" | "judge" | "search";
+  step: "scrape" | "extract" | "write" | "validate" | "judge" | "search" | "compare" | "fact_check";
   model: string;
   input_tokens?: number;
   output_tokens?: number;

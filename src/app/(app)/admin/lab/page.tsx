@@ -10,6 +10,11 @@ import { MIN_SENT_FOR_RATE, replyRates, type OutcomeCount } from "@/lib/outcomes
 import { serverPool } from "@/server/db";
 import { AutoRefresh } from "../../campaigns/[id]/preview/auto-refresh";
 import { NewTestSet, RunForm } from "./lab-forms";
+import { BakeoffForm } from "./bakeoff-forms";
+import { BAKEOFF, STEP_MODELS } from "@/config/models";
+import { engineConfig } from "@/engine/config";
+import { listBakeoffs } from "@/engine/bakeoff-pg";
+import { bakeoffPlan } from "@/engine/bakeoff";
 
 export const metadata: Metadata = { title: "Quality Lab" };
 
@@ -56,14 +61,18 @@ const VERDICT: Record<EvalSummary["verdict"], "green" | "red" | "gray"> = { ship
 async function Lab() {
   await requireAdmin();
   const pool = serverPool();
-  const [{ rows: sets }, { rows: runs }, { rows: outcomeCounts }] = await Promise.all([
+  const [{ rows: sets }, { rows: runs }, { rows: outcomeCounts }, bakeoffs] = await Promise.all([
     pool.query("select id, name, jsonb_array_length(leads)::int n from public.test_sets order by created_at"),
     pool.query("select * from public.eval_runs order by created_at desc limit 20"),
     pool.query<OutcomeCount>("select skill_version, channel, personalised, status, count(*)::int n from public.outcomes group by 1, 2, 3, 4"),
+    listBakeoffs(pool),
   ]);
+  const config = engineConfig();
+  const plan = bakeoffPlan([], config);
+  const bakeoffBusy = bakeoffs.some((b) => b.status === "queued" || b.status === "running");
   const rates = replyRates(outcomeCounts);
   const versions = Object.keys(SKILLS);
-  const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running");
+  const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running") || bakeoffBusy;
   return (
     <div className="space-y-6">
       <AutoRefresh active={busy} intervalMs={10_000} />
@@ -76,8 +85,56 @@ async function Lab() {
         )}
         <p className="text-xs text-slate-500">
           Versions live in code (src/engine/skills.ts). Live now: {LIVE_SKILL_VERSION}. To ship a winner, set LIVE_SKILL_VERSION to it and deploy. Research comes from the
-          30-day domain cache; Claude costs about $0.01–0.02 per company per run.
+          30-day domain cache. The side-by-side comparison uses the test-set judge ({STEP_MODELS.testset_judge.model}, effort {STEP_MODELS.testset_judge.effort}).
         </p>
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Model bake-off</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Every writer ({plan.writers.map((w) => w.model.replace("claude-", "")).join(", ")}) writes from the same facts. The test-set judge scores each email and compares
+            each writer with Sonnet, blind and in both orders; Haiku judges the same pairs to see if it agrees. Extraction: Haiku vs Sonnet on the first {BAKEOFF.extractionLeads}{" "}
+            leads. Ends with a blind sheet of {BAKEOFF.blindPairs} pairs for you. Nothing changes in production.
+          </p>
+        </div>
+        {sets.length ? (
+          <BakeoffForm
+            sets={sets.map((s) => ({ id: s.id, name: s.name, n: s.n }))}
+            maxLeads={BAKEOFF.maxLeads}
+            creditsPerLead={1 + config.research.maxPages}
+            budgetUsd={BAKEOFF.budgetUsd}
+            provider={config.llmProvider}
+            writers={plan.writers.map((w) => w.model.replace("claude-", ""))}
+            busy={bakeoffBusy}
+          />
+        ) : (
+          <p className="text-sm text-slate-500">Add a test set first.</p>
+        )}
+        {bakeoffs.length > 0 && (
+          <ul className="divide-y divide-slate-100 text-sm">
+            {bakeoffs.map((b) => (
+              <li key={b.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span>
+                  <Link href={`/admin/lab/bakeoff/${b.id}`} className="font-medium text-brand-700 hover:underline">
+                    Bake-off #{b.id}
+                  </Link>{" "}
+                  <span className="text-slate-500">
+                    · {b.test_set_ids.join(" + ")} · {formatDate(b.created_at)}
+                    {b.provider === "fake" ? " · test output" : ""}
+                  </span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <Badge tone={b.status === "done" ? "green" : b.status === "failed" || b.status === "over_budget" ? "red" : "indigo"}>{b.status.replace("_", " ")}</Badge>
+                  <span className="tabular-nums text-slate-600">
+                    ${Number(b.cost_usd).toFixed(2)} of ${Number(b.budget_usd).toFixed(0)}
+                    {b.status === "running" && b.progress.phase ? ` · ${b.progress.phase} ${b.progress.done ?? 0}/${b.progress.total ?? "?"}` : ""}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       <Card className="space-y-3">

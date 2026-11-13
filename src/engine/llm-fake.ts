@@ -1,8 +1,8 @@
 // Fake LLM for building and testing without Claude. Output is realistic and
 // grounded in the real page text, but it is NOT AI writing: the UI labels it
 // "Test output, no AI used". Costs $0.
-import type { BatchWriter, CompareOutput, ExtractInput, LLM, LLMResult, PersonInput, WriteInput } from "./llm";
-import type { PersonFactsOutput } from "./schemas";
+import type { BatchWriter, CompareOutput, ExtractInput, FactCheckInput, LLM, LLMResult, PersonInput, WriteInput } from "./llm";
+import type { FactCheckOutput, PersonFactsOutput } from "./schemas";
 import type { Fact, JudgeScores, Language, WriterOutput } from "./types";
 import { countWords } from "@/lib/template";
 
@@ -115,6 +115,21 @@ export class FakeLLM implements LLM {
 
   async compare(): Promise<LLMResult<CompareOutput>> {
     return { output: { winner: "tie", reason: "Test output, no AI used" }, costs: [] };
+  }
+
+  /** Bake-off stand-in: a fact counts as supported when its first words are on the page it cites. */
+  async checkFacts(input: FactCheckInput): Promise<LLMResult<FactCheckOutput>> {
+    const norm = (t: string) => t.toLowerCase().replace(/\s+/g, " ");
+    return {
+      output: {
+        checks: input.facts.map((f) => {
+          const page = input.pages.find((p) => p.url === f.src);
+          const head = norm(f.text).split(" ").slice(1, 5).join(" ");
+          return { id: f.id, verdict: page && norm(page.markdown).includes(head) ? ("supported" as const) : ("unsupported" as const), note: "Test output, no AI used" };
+        }),
+      },
+      costs: [],
+    };
   }
 
   /**

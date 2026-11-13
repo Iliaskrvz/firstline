@@ -5,7 +5,8 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { PRICE_MULTIPLE, TARGET_COST_EUR } from "@/lib/admin";
 import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
-import { loadAdmin, loadRefunds } from "@/billing/admin-db";
+import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
+import { STEP_MODELS, STEPS } from "@/config/models";
 import { anthropicBudget, firecrawlBudget } from "@/billing/budgets";
 import { createFirecrawl } from "@/engine/firecrawl";
 import { serverPool } from "@/server/db";
@@ -43,11 +44,12 @@ async function Admin() {
   await requireAdmin();
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
-  const [a, fcBudget, anBudget, refunds] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     anthropicBudget(pool),
     loadRefunds(pool),
+    loadCostBreakdown(pool),
   ]);
   const budgets = [fcBudget, anBudget];
   const flagged = a.workspaces.filter((w) => (w.personalShare ?? 0) > 0.5 && w.leads >= 200);
@@ -115,6 +117,50 @@ async function Admin() {
         Target: about €{TARGET_COST_EUR.toFixed(3)} real cost per email and a price of {PRICE_MULTIPLE}× cost (§9). Revenue per used credit now €{a.perCreditEur.toFixed(4)}. USD costs are
         converted at USD_EUR_RATE (default 0.92).
       </p>
+
+      <Card className="overflow-hidden p-0">
+        <div className="px-6 py-4">
+          <h2 className="text-base font-semibold text-slate-900">Where the money goes (30 days)</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Real cost per step and model from usage_costs. Lab rows are the Quality Lab and model bake-offs; they&apos;re not in the customer margin above. Models per step:{" "}
+            {STEPS.map((st) => `${st} ${STEP_MODELS[st].model.replace("claude-", "")}${STEP_MODELS[st].batch ? " (batch)" : ""}`).join(" · ")}.
+          </p>
+        </div>
+        {breakdown.length === 0 ? (
+          <p className="px-6 pb-6 text-sm text-slate-500">No costs logged yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-6 py-2 font-medium">Step</th>
+                  <th className="px-3 py-2 font-medium">Model</th>
+                  <th className="px-3 py-2 font-medium">For</th>
+                  <th className="px-3 py-2 text-right font-medium">Calls</th>
+                  <th className="px-3 py-2 text-right font-medium">Tokens in / out</th>
+                  <th className="px-3 py-2 text-right font-medium">Cost</th>
+                  <th className="px-6 py-2 text-right font-medium">Share</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {breakdown.map((r) => (
+                  <tr key={`${r.step}-${r.model}-${r.source}`}>
+                    <td className="px-6 py-2 text-slate-900">{r.step}</td>
+                    <td className="px-3 py-2 text-slate-600">{r.model}</td>
+                    <td className="px-3 py-2">{r.source === "lab" ? <Badge tone="amber">Lab</Badge> : <Badge>Customers</Badge>}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{n(r.calls)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                      {n(Math.round(r.inputTokens))} / {n(Math.round(r.outputTokens))}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">${r.costUsd.toFixed(r.costUsd < 1 ? 4 : 2)}</td>
+                    <td className="px-6 py-2 text-right tabular-nums text-slate-600">{Math.round(r.share * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       <Card className="overflow-hidden p-0">
         <h2 className="px-6 py-4 text-base font-semibold text-slate-900">Per campaign</h2>

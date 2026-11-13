@@ -109,6 +109,30 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
 - **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and Anthropic's requests per minute are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
 - **Packs:** `src/config/packs.ts`. Lite credits pay for Lite-writer campaigns only. Load test: `npx tsx scripts/load-test.ts 5000`.
 
+## Models and costs
+
+- **One file:** `src/config/models.ts` holds the model and effort per step, the Anthropic price table (checked against the pricing page on 2026-11-13) and the bake-off settings. No model names anywhere else. Anthropic only.
+- **Steps:**
+
+  | Step | Model |
+  |---|---|
+  | extraction | Haiku 5.5 |
+  | writer_pro | Sonnet 5.5 |
+  | writer_lite | Haiku 5.5 |
+  | writer_economy | Sonnet 5.5 through the Batch API |
+  | judge | Haiku 5.5 |
+  | judge_sample | Sonnet 5.5 (planned 5% double-check, not wired yet) |
+  | testset_judge | Opus 5.5, low effort (Quality Lab comparisons and the bake-off) |
+
+- **Costs:** every call's real cost goes to `usage_costs`. /admin shows the spend per step and model over the last 30 days. Lab and bake-off rows have no workspace and are left out of the customer margins.
+- **Model bake-off** (/admin/lab):
+  - Writers: Sonnet, Haiku, Sonnet batch and Opus all write from the same facts.
+  - Judging: Opus scores every email and compares each writer with Sonnet blind, in both orders. Haiku judges the same pairs, to measure how often it agrees.
+  - Extraction: Haiku vs Sonnet on 30 leads, with every fact checked against its page.
+  - Output: a blind sheet of 20 pairs for the owner.
+  - Budget: hard $20. After 5 leads the whole run is projected, and it stops if that would go over.
+  - It starts only when an admin ticks the approval box. It never changes defaults.
+
 ## Sign-in methods
 
 People sign in with an email address and password, a passkey, Google, or a sign-in link by email (`/login`, `/signup`, `/forgot-password`, Settings → Account). Passwords: at least 10 characters (`src/lib/auth-messages.ts`). Sign-up needs a confirmed email address before the 25 welcome credits arrive. The Google and passkey buttons only show when the Supabase project has them switched on (read from `/auth/v1/settings`, `src/lib/auth-options.ts`), so a half-configured project never shows a broken button.

@@ -1,18 +1,19 @@
 // Engine settings. Everything tunable lives here; read from env with safe defaults.
-import { MODELS } from "@/lib/config/models";
+import { STEP_MODELS, type StepModels } from "@/config/models";
 
 const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) ? Number(v) : d);
 
 export type LlmProvider = "fake" | "anthropic";
 
-export function engineConfig(env: Record<string, string | undefined> = process.env) {
+export function engineConfig(env: Record<string, string | undefined> = process.env, models: Partial<StepModels> = {}) {
   const provider: LlmProvider = env.LLM_PROVIDER === "anthropic" ? "anthropic" : "fake";
   return {
     /** "fake" = realistic test output, no AI used. Set LLM_PROVIDER=anthropic to use Claude. */
     llmProvider: provider,
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,
     firecrawlApiKey: env.FIRECRAWL_API_KEY?.trim() || null,
-    models: { extract: MODELS.fast, judge: MODELS.fast, writerPro: MODELS.writer, writerLite: MODELS.fast },
+    /** Model per step: src/config/models.ts. `models` overrides some (the Lab and the bake-off do). */
+    models: { ...STEP_MODELS, ...models } as StepModels,
     research: {
       maxPages: 4, // homepage + about/team + services + newest news (§5)
       maxPagesLite: 2,

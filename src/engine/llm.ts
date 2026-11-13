@@ -42,6 +42,7 @@ export type PersonInput = {
 /** Two versions of the personalised lines for the same lead, for the Quality Lab. */
 export type CompareInput = { language: Language; facts: Fact[]; role: string | null; a: string; b: string };
 export type CompareOutput = { winner: "a" | "b" | "tie"; reason: string };
+export type FactCheckInput = { domain: string; facts: Fact[]; pages: { url: string; markdown: string }[] };
 
 /** Economy mode (§9): the first write of each lead goes through a batch at half price. */
 export type BatchItem = { id: string; input: WriteInput };
@@ -65,6 +66,8 @@ export interface LLM {
   personFacts?(input: PersonInput): Promise<LLMResult<import("./schemas").PersonFactsOutput>>;
   /** Quality Lab: which of two versions is the better cold-email personalisation? */
   compare?(input: CompareInput): Promise<LLMResult<CompareOutput>>;
+  /** Model bake-off: is each fact really on the page it cites? */
+  checkFacts?(input: FactCheckInput): Promise<LLMResult<import("./schemas").FactCheckOutput>>;
   /** Present when the provider can write in batches (Economy mode). */
   readonly batch?: BatchWriter;
 }
@@ -101,6 +104,20 @@ export class MissingKeyLLM implements LLM {
   async judge(): Promise<never> {
     this.fail();
   }
+}
+
+/**
+ * A factory for LLMs whose steps use other models than the production config (Quality Lab, model
+ * bake-off). Same provider, key and shared rate limits as the production LLM.
+ */
+export async function llmFactory(config: EngineConfig, opts: { anthropicGate?: import("./limiter").Gate } = {}): Promise<(models: Partial<import("@/config/models").StepModels>) => LLM> {
+  if (config.llmProvider === "fake") {
+    const { FakeLLM } = await import("./llm-fake");
+    return () => new FakeLLM();
+  }
+  if (!config.anthropicApiKey) return () => new MissingKeyLLM();
+  const { AnthropicLLM } = await import("./llm-anthropic");
+  return (models) => new AnthropicLLM({ ...config, models: { ...config.models, ...models } }, opts.anthropicGate);
 }
 
 export async function selectLLM(config: EngineConfig, opts: { anthropicGate?: import("./limiter").Gate } = {}): Promise<LLM> {
