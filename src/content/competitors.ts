@@ -84,6 +84,6 @@ export function anchorRange300(list: Competitor[] = COMPETITORS) {
 }
 
 /** "16 Nov 2026" */
-export function checkedOnLabel(date = COMPETITORS_CHECKED_ON) {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export function checkedOnLabel(date = COMPETITORS_CHECKED_ON, lang: "en" | "nl" = "en") {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(lang === "nl" ? "nl-NL" : "en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }

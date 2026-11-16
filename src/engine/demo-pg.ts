@@ -2,7 +2,7 @@
 // cache per domain, cost logging to usage_costs tagged with demo_run_id, and the /admin numbers.
 import { createHash } from "node:crypto";
 import type pg from "pg";
-import type { DemoResult } from "./demo";
+import type { DemoLang, DemoResult } from "./demo";
 import type { CostEntry } from "./types";
 
 export const DEMO_PER_IP_PER_DAY = 3;
@@ -28,7 +28,7 @@ export type DemoAdmission = { ok: true; id: number } | { ok: false; reason: "ip_
  * Admit one demo request, or say why not. Counted and inserted under one lock, so parallel requests
  * can't go over either limit.
  */
-export async function admitDemo(pool: pg.Pool, input: { ipHash: string; domain: string; sells: string; now?: Date; cap?: number; perIp?: number }): Promise<DemoAdmission> {
+export async function admitDemo(pool: pg.Pool, input: { ipHash: string; domain: string; sells: string; lang?: DemoLang; now?: Date; cap?: number; perIp?: number }): Promise<DemoAdmission> {
   const now = input.now ?? new Date();
   const c = await pool.connect();
   try {
@@ -46,10 +46,11 @@ export async function admitDemo(pool: pg.Pool, input: { ipHash: string; domain: 
       await c.query("rollback");
       return { ok: false, reason: "daily_cap" };
     }
-    const ins = await c.query<{ id: number }>("insert into public.demo_runs (ip_hash, domain, sells, created_at) values ($1, $2, $3, $4) returning id", [
+    const ins = await c.query<{ id: number }>("insert into public.demo_runs (ip_hash, domain, sells, lang, created_at) values ($1, $2, $3, $4, $5) returning id", [
       input.ipHash,
       input.domain,
       input.sells,
+      input.lang ?? "en",
       now,
     ]);
     await c.query("commit");
@@ -62,12 +63,12 @@ export async function admitDemo(pool: pg.Pool, input: { ipHash: string; domain: 
   }
 }
 
-/** A finished example for the same domain and "what you sell" line in the last 30 days: shown again, for free. */
-export async function cachedDemo(pool: pg.Pool, domain: string, sells: string, now = new Date()): Promise<DemoResult | null> {
+/** A finished example for the same domain, "what you sell" line and language in the last 30 days: shown again, for free. */
+export async function cachedDemo(pool: pg.Pool, domain: string, sells: string, now = new Date(), lang: DemoLang = "en"): Promise<DemoResult | null> {
   const { rows } = await pool.query<{ result: DemoResult }>(
-    `select result from public.demo_runs where domain = $1 and sells = $2 and status in ('done', 'no_facts') and result is not null
+    `select result from public.demo_runs where domain = $1 and sells = $2 and lang = $5 and status in ('done', 'no_facts') and result is not null
        and created_at > $3::timestamptz - make_interval(days => $4) order by created_at desc limit 1`,
-    [domain, sells, now, DEMO_CACHE_DAYS],
+    [domain, sells, now, DEMO_CACHE_DAYS, lang],
   );
   return rows[0]?.result ?? null;
 }

@@ -16,7 +16,8 @@ import type { CostEntry, Fact, WriterOutput } from "./types";
 export const DEMO_TIMEOUT_MS = 20_000;
 export const MAX_SELLS_CHARS = 140;
 
-export type DemoInput = { domain: string; sells?: string | null };
+export type DemoLang = "en" | "nl";
+export type DemoInput = { domain: string; sells?: string | null; lang?: DemoLang };
 export type DemoSource = { n: number; id: string; text: string; url: string };
 export type DemoResult =
   | { status: "done"; domain: string; opener: string; sources: DemoSource[]; cached: boolean }
@@ -35,11 +36,17 @@ export function cleanSells(sells: string | null | undefined): string {
     .slice(0, MAX_SELLS_CHARS);
 }
 
-export function demoTemplate(sells: string) {
-  const about = sells ? `What we do: ${sells.replace(/\.$/, "")}.` : "We help companies like yours with their outreach.";
+export function demoTemplate(sells: string, lang: DemoLang = "en") {
+  const s = sells.replace(/\.$/, "");
+  if (lang === "nl") {
+    return {
+      subject: "Vraagje",
+      body: `Hoi,\n\n[[opener · één zin over iets specifieks en recents op hun eigen website, gezegd zoals een vakgenoot het zou zeggen · 25]]\n\n${s ? `Wat wij doen: ${s}.` : "Wij helpen bedrijven zoals het jouwe met hun outreach."}\n\nMet vriendelijke groet`,
+    };
+  }
   return {
     subject: "Quick question",
-    body: `Hi,\n\n[[opener · one sentence about something specific and recent on their own website, said the way a peer would · 25]]\n\n${about}\n\nBest regards`,
+    body: `Hi,\n\n[[opener · one sentence about something specific and recent on their own website, said the way a peer would · 25]]\n\n${s ? `What we do: ${s}.` : "We help companies like yours with their outreach."}\n\nBest regards`,
   };
 }
 
@@ -73,24 +80,49 @@ async function demoFacts(domain: string, deps: DemoDeps, costs: CostEntry[]): Pr
   return { facts: ex.output.facts, cached: false, status: "ok" };
 }
 
-const NO_FACTS_REASON: Record<string, string> = {
-  unreachable: "We couldn't reach this website.",
-  blocked: "This website asks robots not to read its pages, so we don't.",
-  refused: "This website blocks automated reading.",
-  no_content: "This website had no readable text.",
-  ok: "We didn't find anything specific enough on this website.",
-};
+/** What the visitor sees when no line was written, per language. */
+const MESSAGES = {
+  en: {
+    noFacts: {
+      unreachable: "We couldn't reach this website.",
+      blocked: "This website asks robots not to read its pages, so we don't.",
+      refused: "This website blocks automated reading.",
+      no_content: "This website had no readable text.",
+      ok: "We didn't find anything specific enough on this website.",
+    } as Record<string, string>,
+    neutral: "In a real campaign this lead would get a neutral line and cost 0 credits.",
+    notWritten: "The example couldn't be written. Try another website.",
+    refusal: "The example couldn't be written for this website.",
+    error: "Something went wrong reading this website. Try another one.",
+    timeout: "This website took too long to read. Try another one, or try again in a minute.",
+  },
+  nl: {
+    noFacts: {
+      unreachable: "We konden deze website niet bereiken.",
+      blocked: "Deze website vraagt robots om de pagina's niet te lezen, dus dat doen we niet.",
+      refused: "Deze website blokkeert automatisch lezen.",
+      no_content: "Op deze website stond geen leesbare tekst.",
+      ok: "We vonden niets specifieks genoeg op deze website.",
+    } as Record<string, string>,
+    neutral: "In een echte campagne krijgt deze lead een neutrale zin en kost hij 0 credits.",
+    notWritten: "Het voorbeeld kon niet worden geschreven. Probeer een andere website.",
+    refusal: "Voor deze website kon geen voorbeeld worden geschreven.",
+    error: "Er ging iets mis bij het lezen van deze website. Probeer een andere.",
+    timeout: "Het lezen van deze website duurde te lang. Probeer een andere, of probeer het over een minuut opnieuw.",
+  },
+} as const;
 
 async function run(input: DemoInput, deps: DemoDeps, costs: CostEntry[]): Promise<DemoResult> {
   const { domain } = input;
+  const m = MESSAGES[input.lang ?? "en"];
   const f = await demoFacts(domain, deps, costs);
   if (!f.facts.length) {
-    return { status: "no_facts", domain, cached: f.cached, reason: `${NO_FACTS_REASON[f.status] ?? NO_FACTS_REASON.ok} In a real campaign this lead would get a neutral line and cost 0 credits.` };
+    return { status: "no_facts", domain, cached: f.cached, reason: `${m.noFacts[f.status] ?? m.noFacts.ok} ${m.neutral}` };
   }
   const sells = cleanSells(input.sells);
-  const t = demoTemplate(sells);
+  const t = demoTemplate(sells, input.lang);
   const tpl = parseTemplate(t);
-  const language = detectLanguage(sells || t.body);
+  const language = input.lang ?? detectLanguage(sells || t.body);
   const ctx: CheckContext = { slots: tpl.slots, facts: f.facts, language, skillVersion: LIVE_SKILL_VERSION, company: null };
   let feedback: string[] | undefined;
   let previous: WriterOutput | undefined;
@@ -117,7 +149,7 @@ async function run(input: DemoInput, deps: DemoDeps, costs: CostEntry[]): Promis
     previous = w.output;
   }
   const opener = last?.slots.opener?.trim();
-  if (!opener) return { status: "failed", domain, reason: "The example couldn't be written. Try another website." };
+  if (!opener) return { status: "failed", domain, reason: m.notWritten };
   const used = (last?.facts_used ?? []).map((id) => f.facts.find((x) => x.id === id)).filter((x): x is Fact => !!x && x.src !== "csv");
   const sources = used.map((x, i) => ({ n: i + 1, id: x.id, text: x.text, url: x.src }));
   return { status: "done", domain, opener, sources, cached: f.cached };
@@ -126,15 +158,16 @@ async function run(input: DemoInput, deps: DemoDeps, costs: CostEntry[]): Promis
 /** Run the demo with a hard time limit. `costs` collects every paid call, also when it times out. */
 export async function runDemo(input: DemoInput, deps: DemoDeps, costs: CostEntry[] = []): Promise<DemoResult> {
   const limit = deps.timeoutMs ?? DEMO_TIMEOUT_MS;
+  const m = MESSAGES[input.lang ?? "en"];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<DemoResult>((resolve) => {
-    timer = setTimeout(() => resolve({ status: "timeout", domain: input.domain, reason: "This website took too long to read. Try another one, or try again in a minute." }), limit);
+    timer = setTimeout(() => resolve({ status: "timeout", domain: input.domain, reason: m.timeout }), limit);
   });
   try {
     return await Promise.race([
       run(input, deps, costs).catch((e): DemoResult => {
-        if (e instanceof LLMRefusalError) return { status: "failed", domain: input.domain, reason: "The example couldn't be written for this website." };
-        return { status: "failed", domain: input.domain, reason: "Something went wrong reading this website. Try another one." };
+        if (e instanceof LLMRefusalError) return { status: "failed", domain: input.domain, reason: m.refusal };
+        return { status: "failed", domain: input.domain, reason: m.error };
       }),
       timeout,
     ]);

@@ -61,6 +61,15 @@ describe("homepage demo", () => {
     expect(demoTemplate("").body).toContain("[[opener");
   });
 
+  it("writes in Dutch for the Dutch homepage, with Dutch messages", async () => {
+    expect(demoTemplate("Boekhouding", "nl").body).toContain("Wat wij doen: Boekhouding.");
+    expect(demoTemplate("", "nl").body).toMatch(/^Hoi,/);
+    const empty: WebReader = { robots: async () => null, map: async () => ({ links: [], credits: 0 }), scrape: async () => ({ markdown: "", statusCode: 404, credits: 0 }) };
+    const r = await runDemo({ domain: "leeg.example.org", lang: "nl" }, deps(empty));
+    expect(r.status === "no_facts" && r.reason).toMatch(/0 credits/);
+    expect(r.status === "no_facts" && r.reason).toMatch(/neutrale zin/);
+  });
+
   it("is off unless a real AI key, Firecrawl and Turnstile are all set; test mode only outside production", () => {
     const full = { LLM_PROVIDER: "deepseek", DEEPSEEK_API_KEY: "k", FIRECRAWL_API_KEY: "f", TURNSTILE_SITE_KEY: "s", TURNSTILE_SECRET_KEY: "t", NODE_ENV: "production" };
     expect(demoMode(full)).toBe("live");

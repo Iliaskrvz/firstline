@@ -1,56 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import Script from "next/script";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useTurnstile } from "@/components/marketing/turnstile";
 import { buttonClass, inputClass } from "@/components/ui";
-import { HOME } from "@/content/home";
+import type { HomeCopy } from "@/content/home";
+import type { Locale } from "@/content/site";
 
 type Source = { n: number; id: string; text: string; url: string };
 type Result =
   | { status: "done"; domain: string; opener: string; sources: Source[]; cached: boolean }
   | { status: "no_facts" | "failed" | "timeout"; domain: string; reason: string; cached?: boolean };
 
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (el: HTMLElement, opts: { sitekey: string; callback: (t: string) => void; "expired-callback"?: () => void; "error-callback"?: () => void; size?: string }) => string;
-      reset: (id?: string) => void;
-    };
-  }
-}
-
-const T = HOME.liveDemo;
-
 /** The homepage demo box. In test mode (local only) there's no captcha and the result is test output. */
-export function LiveDemo({ siteKey, test }: { siteKey: string | null; test: boolean }) {
+export function LiveDemo({ t: T, lang, siteKey, test }: { t: HomeCopy["liveDemo"]; lang: Locale; siteKey: string | null; test: boolean }) {
   const [url, setUrl] = useState("");
   const [sells, setSells] = useState("");
-  const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const widget = useRef<HTMLDivElement>(null);
-  const widgetId = useRef<string | null>(null);
-
-  const renderWidget = () => {
-    if (!siteKey || !widget.current || !window.turnstile || widgetId.current) return;
-    widgetId.current = window.turnstile.render(widget.current, {
-      sitekey: siteKey,
-      size: "flexible",
-      callback: (t) => setToken(t),
-      "expired-callback": () => setToken(null),
-      "error-callback": () => setToken(null),
-    });
-  };
-  useEffect(renderWidget);
+  const ts = useTurnstile(test ? null : siteKey);
+  const token = ts.token;
+  const steps = T.working.length;
 
   useEffect(() => {
     if (!busy) return;
-    const t = window.setInterval(() => setStep((s) => Math.min(s + 1, T.working.length - 1)), 4000);
+    const t = window.setInterval(() => setStep((s) => Math.min(s + 1, steps - 1)), 4000);
     return () => window.clearInterval(t);
-  }, [busy]);
+  }, [busy, steps]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,23 +37,22 @@ export function LiveDemo({ siteKey, test }: { siteKey: string | null; test: bool
     setStep(0);
     setBusy(true);
     try {
-      const res = await fetch("/api/demo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, sells, token }) });
-      const j = await res.json().catch(() => ({ error: "Something went wrong. Try again." }));
-      if (!res.ok) setError(j.error ?? "Something went wrong. Try again.");
+      const res = await fetch("/api/demo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, sells, token, lang }) });
+      const j = await res.json().catch(() => ({ error: T.errorGeneric }));
+      if (!res.ok) setError(j.error ?? T.errorGeneric);
       else setResult(j as Result);
     } catch {
-      setError("Couldn't reach FirstLine. Check your connection and try again.");
+      setError(T.errorNetwork);
     } finally {
       setBusy(false);
-      setToken(null);
-      if (widgetId.current) window.turnstile?.reset(widgetId.current);
+      ts.reset();
     }
   }
 
-  const needsToken = !test && !!siteKey;
+  const needsToken = ts.needed;
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
-      {siteKey && !test && <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" strategy="lazyOnload" onLoad={renderWidget} />}
+      {ts.script}
       <form onSubmit={submit} className="space-y-4 rounded-2xl bg-white p-6 ring-1 ring-slate-200">
         <label className="block">
           <span className="text-sm font-medium text-slate-800">{T.urlLabel}</span>
@@ -94,7 +71,7 @@ export function LiveDemo({ siteKey, test }: { siteKey: string | null; test: bool
           <span className="text-sm font-medium text-slate-800">{T.sellsLabel}</span>
           <input className={`${inputClass} mt-1.5`} value={sells} onChange={(e) => setSells(e.target.value)} placeholder={T.sellsPlaceholder} maxLength={140} />
         </label>
-        {needsToken && <div ref={widget} className="min-h-[65px]" />}
+        {ts.widget}
         <button type="submit" className={buttonClass("accent", "w-full rounded-full py-3 text-[15px]")} disabled={busy || !url.trim() || (needsToken && !token)}>
           {busy ? T.working[step] : T.submit}
         </button>
@@ -102,7 +79,7 @@ export function LiveDemo({ siteKey, test }: { siteKey: string | null; test: bool
       </form>
 
       <div className="min-h-[220px] rounded-2xl border border-dashed border-slate-300 p-6" aria-live="polite">
-        {!result && !error && !busy && <p className="font-mono text-[12px] text-slate-600">{T.resultLabel("…")}</p>}
+        {!result && !error && !busy && <p className="font-mono text-[12px] text-slate-600">{T.resultLabel.replace("{domain}", "…")}</p>}
         {busy && (
           <ol className="space-y-2 font-mono text-[13px] text-slate-700">
             {T.working.map((w, i) => (
@@ -115,7 +92,7 @@ export function LiveDemo({ siteKey, test }: { siteKey: string | null; test: bool
         {error && <p className="text-[15px] text-rose-800">{error}</p>}
         {result?.status === "done" && (
           <div>
-            <p className="font-mono text-[12px] text-slate-600">{T.resultLabel(result.domain)}</p>
+            <p className="font-mono text-[12px] text-slate-600">{T.resultLabel.replace("{domain}", result.domain)}</p>
             <p className="font-display mt-3 text-[22px] leading-snug text-slate-900">
               {result.opener}
               {result.sources.map((s) => (

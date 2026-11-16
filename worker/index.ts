@@ -20,6 +20,7 @@ import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
 import { runQueuedBakeoff } from "@/engine/bakeoff-pg";
 import { purgeDemoRuns } from "@/engine/demo-pg";
+import { purgeContacts } from "@/lib/contact";
 import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
@@ -283,6 +284,7 @@ async function main() {
         await apiHousekeeping(pool);
         await pruneProviderWindows(pool);
         await purgeDemoRuns(pool); // public demo rows (domain + IP hash) after 30 days
+        await purgeContacts(pool); // agencies contact requests after 180 days
         return runRetention(pool);
       });
       if (!r) return;

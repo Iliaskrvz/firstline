@@ -5,6 +5,8 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  // Absolute URLs for canonical, hreflang and share images (the server's address in production).
+  metadataBase: new URL(process.env.PUBLIC_APP_URL?.trim() || "http://localhost:3000"),
   title: { default: "FirstLine", template: "%s · FirstLine" },
   description: "Your own cold email copy, researched per lead, with a source for every line. From €0.03 per email, no subscription.",
 };

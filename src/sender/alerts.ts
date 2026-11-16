@@ -3,7 +3,7 @@
 import type pg from "pg";
 import { inboxHealth, type SendWindow } from "@/lib/sender/schedule";
 
-export type AlertEmail = { to: string; subject: string; text: string };
+export type AlertEmail = { to: string; subject: string; text: string; replyTo?: string };
 export interface Mailer {
   send(msg: AlertEmail): Promise<void>;
 }
@@ -18,7 +18,7 @@ export function resendMailer(apiKey: string, from: string, fetchImpl: typeof fet
         const res = await fetchImpl("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, text: msg.text }),
+          body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, text: msg.text, ...(msg.replyTo ? { reply_to: msg.replyTo } : {}) }),
           signal: ctrl.signal,
         });
         if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);

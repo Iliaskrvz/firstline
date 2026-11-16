@@ -26,6 +26,6 @@ export const SUBPROCESSORS = [
   { name: "Anthropic PBC", purpose: "AI: reading facts from websites, writing and checking the personalised lines", data: "Company website text, lead first name, company, job title", location: "United States (SCCs)" },
   { name: "Firecrawl (Mendable Inc.)", purpose: "Reading public company websites", data: "Company website addresses", location: "United States (SCCs)" },
   { name: "Polar Software, Inc.", purpose: "Payments and invoicing (merchant of record)", data: "Billing name, email, address, VAT number, payment details", location: "United States (SCCs)" },
-  { name: "Resend Inc.", purpose: "Service emails (e.g. inbox offline alerts)", data: "Account email address", location: "United States (SCCs)" },
+  { name: "Resend Inc.", purpose: "Service emails (e.g. inbox offline alerts, contact requests to our team)", data: "Account email address; name, email and message from contact forms", location: "United States (SCCs)" },
   { name: hostName, purpose: "Running the FirstLine application and worker", data: "All data passes through it", location: hostLocation },
 ] as const;

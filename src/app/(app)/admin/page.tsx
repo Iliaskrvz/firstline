@@ -7,6 +7,7 @@ import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
 import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
 import { demoStats } from "@/engine/demo-pg";
+import { recentContacts } from "@/lib/contact";
 import { demoMode } from "@/server/demo";
 import { STEPS } from "@/config/models";
 import { engineConfig } from "@/engine/config";
@@ -49,7 +50,7 @@ async function Admin() {
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
   const config = engineConfig();
-  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     llmBudget(pool, process.env, new Date(), config.llmProvider),
@@ -57,6 +58,7 @@ async function Admin() {
     loadCostBreakdown(pool),
     config.llmProvider === "deepseek" && config.deepseekApiKey ? fetchDeepSeekBalance(config.deepseekApiKey) : Promise.resolve(null),
     demoStats(pool),
+    recentContacts(pool, 10),
   ]);
   const demoToday = demo[0];
   const demoWeekUsd = demo.reduce((s, d) => s + d.costUsd, 0);
@@ -103,6 +105,22 @@ async function Admin() {
           Last 7 days ${demoWeekUsd.toFixed(2)} · {demoMode() === "live" ? "on" : demoMode() === "test" ? "test mode" : "off (needs an AI key, Firecrawl and Turnstile keys)"} · cap: DEMO_DAILY_CAP
         </span>
       </Card>
+      {contacts.length > 0 && (
+        <Card className="space-y-3 text-sm">
+          <p className="font-semibold text-slate-900">Contact requests (/agencies), latest 10</p>
+          <ul className="divide-y divide-slate-100">
+            {contacts.map((c) => (
+              <li key={c.id} className="py-2">
+                <p>
+                  <span className="font-medium text-slate-900">{c.name}</span> · <a className="text-brand-700 underline" href={`mailto:${c.email}`}>{c.email}</a>
+                  {c.company && ` · ${c.company}`} · {c.volume} · <span className="text-slate-500">{c.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC{c.notified ? " · emailed" : " · not emailed"}</span>
+                </p>
+                {c.message && <p className="mt-1 whitespace-pre-line text-slate-600">{c.message}</p>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {refunds.length > 0 && (
         <Card className="space-y-2 bg-amber-50 text-sm text-amber-900">
           <p className="font-medium">Refunds in Polar (last 90 days): credits were not taken back automatically.</p>

@@ -1,0 +1,49 @@
+// Proof content: case studies and the demo video. EVERYTHING HERE IS A PLACEHOLDER until the owner
+// replaces it with real content. Placeholders are never shown in production (src/lib/proof.ts).
+// To publish a real case study: fill in the fields, set placeholder: false, set SHOW_PROOF=1, deploy.
+
+export type CaseStudy = {
+  placeholder: boolean;
+  /** Who: role and kind of company, e.g. "Founder of a 4-person bookkeeping firm". Only with their written OK. */
+  who: string;
+  /** Optional company name, only with their written OK. */
+  company?: string;
+  /** Reply rate before and after, as percentages, with the number of emails each is based on. */
+  before: { replyRate: number; emails: number };
+  after: { replyRate: number; emails: number };
+  /** Three numbers that tell the story, e.g. { value: "312", label: "emails sent in 3 weeks" }. */
+  numbers: [{ value: string; label: string }, { value: string; label: string }, { value: string; label: string }];
+  /** One sentence in their words, approved by them. */
+  quote: string;
+  /** Name and role under the quote. */
+  quoteBy: string;
+};
+
+export const CASE_STUDIES: CaseStudy[] = [
+  {
+    placeholder: true,
+    who: "PLACEHOLDER · Founder of a small B2B service company",
+    before: { replyRate: 0, emails: 0 },
+    after: { replyRate: 0, emails: 0 },
+    numbers: [
+      { value: "000", label: "PLACEHOLDER · emails sent" },
+      { value: "00", label: "PLACEHOLDER · replies" },
+      { value: "0", label: "PLACEHOLDER · meetings booked" },
+    ],
+    quote: "PLACEHOLDER · a real quote from a real customer goes here.",
+    quoteBy: "PLACEHOLDER · Name, role",
+  },
+];
+
+/**
+ * The 60 to 90 second demo video on the homepage. Hidden while src is null.
+ * Put the file in public/video/ (MP4, H.264, under ~15 MB) and set src to "/video/<file>.mp4".
+ * Script: docs/marketing/demo-video-script.md.
+ */
+export const DEMO_VIDEO: { src: string | null; poster: string | null; captions: string | null; durationLabel: string } = {
+  src: null,
+  poster: null,
+  /** Optional WebVTT subtitles, e.g. "/video/demo.en.vtt". */
+  captions: null,
+  durationLabel: "1:20",
+};

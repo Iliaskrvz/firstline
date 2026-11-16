@@ -1,5 +1,5 @@
 // Homepage copy (English). Components read from here; no marketing copy in the page itself.
-// Voice: calm, factual, direct. No exclamation marks, no hype words. Dutch version: batch 4 (/nl).
+// Voice: calm, factual, direct. No exclamation marks, no hype words. Dutch version: home.nl.ts (same shape).
 // Numbers must stay true: prices from src/config/packs.ts, sending limits from src/lib/sender/schedule.ts,
 // competitor prices from src/content/competitors.ts.
 import { anchorRange300, checkedOnLabel } from "./competitors";
@@ -15,7 +15,6 @@ export const HOME = {
     ogDescription: "Your own copy, researched per lead, with a source for every line. From €0.03 per email, no subscription, sent free from your Gmail.",
   },
 
-  nav: { cta: "Personalise 25 leads free", api: "For developers / API" },
 
   hero: {
     /** Chosen: outcome first, then price with "from" (Agency is €0.030; Starter €0.038). */
@@ -26,12 +25,6 @@ export const HOME = {
     secondary: "See pricing",
     note: "25 free emails after you confirm your address. No card.",
     footnote: "Every personal line cites the page it came from.",
-    /** The three options shown to the owner in batch 1. */
-    options: [
-      { text: "Cold emails that sound like you researched every lead. From €0.03 each, no subscription.", why: "Outcome first, then price. \"From\" keeps it true: €0.030 is the Agency rate." },
-      { text: "Your own cold email, researched per lead, with a source for every line. From €0.03.", why: "Leads with the differentiators (your copy, sources). Less emotional pull." },
-      { text: "Stop sending openers nobody reads. Researched first lines from €0.03 per email.", why: "Pain first, strong hook. Slightly more negative than the brand voice." },
-    ],
   },
 
   problem: {
@@ -79,12 +72,14 @@ export const HOME = {
     sellsPlaceholder: "Bookkeeping for small agencies",
     submit: "Write my example line",
     working: ["Reading the website\u2026", "Finding facts\u2026", "Writing the line\u2026"],
-    resultLabel: (domain: string) => `Example opener for ${domain}`,
+    resultLabel: "Example opener for {domain}",
     sourcesLabel: "Sources",
     cachedNote: "Shown from an example made in the last 30 days.",
     cta: "Personalise 25 of your own leads free",
     limitNote: "3 tries per day. Results are examples; your campaign uses your own email and checks every line before you send.",
     testNote: "Test mode: test output from a sample page, no AI used.",
+    errorGeneric: "Something went wrong. Try again.",
+    errorNetwork: "Couldn't reach FirstLine. Check your connection and try again.",
   },
 
   integrations: { label: "Send or export to", names: ["Gmail", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
@@ -185,5 +180,89 @@ export const HOME = {
     cta: "Personalise 25 leads free",
   },
 
-  footer: { privacy: "Privacy", terms: "Terms", dpa: "DPA", subprocessors: "Sub-processors" },
-} as const;
+  /** Answers to the four doubts people raise most, each with one link to the proof. */
+  objections: {
+    eyebrow: "Before you try it",
+    title: "Four doubts, answered",
+    items: [
+      {
+        q: "“AI emails sound fake.”",
+        a: "FirstLine writes only the spots you mark, from facts on the lead's own website. Everything else is your email, word for word, and you check 5 leads in a free preview first.",
+        link: { label: "See the preview", href: "#proof" },
+      },
+      {
+        q: "“My Gmail will get blocked.”",
+        a: "A new inbox starts at 10 emails a day and grows to 30, sent 6 to 14 minutes apart in office hours. Sending slows down by itself when bounces go above 3%.",
+        link: { label: "How sending works", href: "/for-small-business#sending" },
+      },
+      {
+        q: "“What about GDPR?”",
+        a: "Research uses public company websites only, never LinkedIn. Lead data is deleted 30 days after a campaign ends, and the sub-processors are listed openly.",
+        link: { label: "Trust and data", href: "/trust" },
+      },
+      {
+        q: "“I already use Instantly.”",
+        a: "Keep it. FirstLine writes the personal lines and pushes the finished emails to Instantly, Smartlead or Lemlist, so it fits next to the tool you have.",
+        link: { label: "FirstLine and Instantly", href: "/compare/instantly" },
+      },
+    ],
+  },
+
+  /** The demo video section (shown only when src/content/proof.ts has a video). */
+  video: {
+    eyebrow: "In 90 seconds",
+    title: "Upload, preview, send",
+    text: "One campaign from a CSV to the first email in Gmail, without cuts.",
+    label: "Video: a FirstLine campaign from upload to sending",
+  },
+
+  /** Case-study labels (the component stays hidden until there's a real one, see src/content/proof.ts). */
+  caseStudy: {
+    eyebrow: "Results",
+    before: "Reply rate before",
+    after: "With FirstLine",
+    basedOn: (n: string) => `based on ${n} emails`,
+    placeholder: "Placeholder: never shown in production",
+  },
+
+  /** Text inside the product pictures (a made-up bakery campaign). */
+  visuals: {
+    leads: [
+      { name: "Sanne de Vos", company: "Bakkerij Vos", site: "bakkerijvos.nl", status: "Written · high", tone: "brand", facts: "4" },
+      { name: "Joris Bakker", company: "Het Zuurdesemhuis", site: "zuurdesemhuis.nl", status: "Written · high", tone: "brand", facts: "6" },
+      { name: "Lotte Peters", company: "Broodhuys Oost", site: "broodhuys.nl", status: "Writing…", tone: "blue", facts: "3" },
+      { name: "Mark Smit", company: "De Korenaar", site: "dekorenaar.nl", status: "Reading website…", tone: "blue", facts: "–" },
+      { name: "Eva Jansen", company: "Bakkerij Jansen", site: "bakkerijjansen.nl", status: "Neutral line · free", tone: "gray", facts: "0" },
+    ] as { name: string; company: string; site: string; status: string; tone: "brand" | "blue" | "gray"; facts: string }[],
+    windowTitle: "Campaigns › Bakeries Utrecht · Preview",
+    campaign: "Bakeries Utrecht",
+    campaignMeta: "5 of 240 leads · free preview",
+    written: "4 written",
+    neutral: "1 neutral · 0 credits",
+    columns: ["Lead", "Website", "Status", "Facts"],
+    factsWord: "facts",
+    emailMeta: "To sanne@bakkerijvos.nl · Subject: Quick question about Utrecht-Oost",
+    signOff: "Tom",
+    sourcesTitle: "Sources on bakkerijvos.nl",
+    used: "used",
+    reviewer: "Reviewer: specific, supported, not salesy",
+    templateLines: ["Hi {{first_name}},", "We help bakeries cut waste…"],
+    readRows: [
+      ["bakkerijvos.nl/", "read"],
+      ["/over-ons", "read"],
+      ["/nieuws", "2 facts"],
+    ],
+    sendRows: [
+      ["Gmail · 30 a day", "sending"],
+      ["Follow-up in 3 days", "queued"],
+      ["Reply received", "sequence stops"],
+    ],
+    apiLabel: "Example API request and response",
+    demoLabel: "Example: a fact on the company's website becomes the personal line in your email, with its source",
+  },
+
+  checkedOn: (date: string) => `Checked on ${date}. Prices change; follow the links for the current ones.`,
+  perMonth: "month",
+};
+
+export type HomeCopy = typeof HOME;
