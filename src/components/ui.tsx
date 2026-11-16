@@ -7,7 +7,8 @@ export function cx(...c: (string | false | null | undefined)[]) {
 type ButtonVariant = "primary" | "accent" | "secondary" | "ghost";
 const BUTTON: Record<ButtonVariant, string> = {
   primary: "bg-slate-950 text-white hover:bg-slate-800 disabled:bg-slate-300 shadow-sm",
-  accent: "bg-brand-600 text-white hover:bg-brand-500 disabled:bg-brand-300 shadow-sm shadow-brand-600/20",
+  // brand-700 (not 600): white text needs 4.5:1 contrast (WCAG AA); 600 is 4.07.
+  accent: "bg-brand-700 text-white hover:bg-brand-800 disabled:bg-brand-300 shadow-sm shadow-brand-700/20",
   secondary: "bg-white text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50 disabled:text-slate-400",
   ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
 };
@@ -81,7 +82,8 @@ export function Skeleton({ className }: { className?: string }) {
 export function Logo() {
   return (
     <span className="inline-flex items-center gap-2 font-semibold tracking-tight text-slate-900">
-      <span className="relative grid size-7 place-items-center rounded-lg bg-slate-950 text-sm text-white">
+      {/* The icon is decoration: screen readers read "FirstLine", not "F FirstLine". */}
+      <span aria-hidden="true" className="relative grid size-7 place-items-center rounded-lg bg-slate-950 text-sm text-white">
         F<span className="absolute right-1 bottom-1 size-1 rounded-full bg-brand-500" />
       </span>
       FirstLine

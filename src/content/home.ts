@@ -1,6 +1,10 @@
 // Homepage copy (English). Components read from here; no marketing copy in the page itself.
 // Voice: calm, factual, direct. No exclamation marks, no hype words. Dutch version: batch 4 (/nl).
-// Numbers must stay true: prices from src/config/packs.ts, sending limits from src/lib/sender/schedule.ts.
+// Numbers must stay true: prices from src/config/packs.ts, sending limits from src/lib/sender/schedule.ts,
+// competitor prices from src/content/competitors.ts.
+import { anchorRange300, checkedOnLabel } from "./competitors";
+
+const range = anchorRange300();
 
 export const HOME = {
   meta: {
@@ -21,6 +25,7 @@ export const HOME = {
     cta: "Personalise 25 leads free",
     secondary: "See pricing",
     note: "25 free emails after you confirm your address. No card.",
+    footnote: "Every personal line cites the page it came from.",
     /** The three options shown to the owner in batch 1. */
     options: [
       { text: "Cold emails that sound like you researched every lead. From €0.03 each, no subscription.", why: "Outcome first, then price. \"From\" keeps it true: €0.030 is the Agency rate." },
@@ -43,10 +48,31 @@ export const HOME = {
       },
       {
         title: "The tools that do it charge every month",
-        // The verified price range comes from src/content/competitors.ts (batch 2); no number until then.
-        text: "Personalisation tools usually charge a monthly subscription, whether you send 50 emails or 5,000 that month.",
+        text: `Tools with AI personalisation charge ${range.currency}${range.min}–${range.max} a month for a plan that covers 300 emails, whether you send them or not.`,
       },
     ],
+  },
+
+  /** The animated example in the hero (a made-up bakery; mirrors what the preview shows). */
+  demo: {
+    url: "bakkerijvos.nl/nieuws",
+    pageTitle: "Nieuws",
+    before: "Ambachtelijk brood sinds 1987, elke ochtend vers uit eigen oven.",
+    fact: "Vanaf 1 maart ook open in Utrecht-Oost.",
+    after: "Kom langs voor een gratis proeverij in de eerste week.",
+    factId: "F2",
+    emailLabel: "Your email, personalised",
+    greeting: "Hi Sanne,",
+    opener: "Saw that Bakkerij Vos just opened a second shop in Utrecht-Oost, congrats.",
+    rest: "We help bakeries cut waste with daily order forecasts. Worth a quick call next week?",
+    source: "bakkerijvos.nl/nieuws",
+  },
+
+  integrations: { label: "Send or export to", names: ["Gmail", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
+
+  preview: {
+    title: "This is the free preview",
+    text: "Before a campaign runs, you see 5 leads like this: every fact with its page, the email with the personal line marked, and the checks it passed.",
   },
 
   how: {
@@ -79,6 +105,16 @@ export const HOME = {
     title: "Pay per email. Nothing else.",
     sub: "Credits never expire. Only finished emails use a credit. Sending from Gmail and plain follow-ups are free.",
     anchor: "300 emails ≈ €10 in credits.",
+    compare: {
+      elsewhere: `Same 300 emails with a personalisation tool elsewhere: ${range.currency}${range.min}–${range.max} a month.`,
+      us: "With FirstLine: about €10 in credits, once. No subscription.",
+      sourcesLabel: `Sources, checked ${checkedOnLabel()}`,
+      sourcesNote:
+        "Cheapest plan on each public pricing page that covers 300 AI-personalised emails a month, monthly billing as shown (some pages show a lower yearly price). Prices in the currency the page shows.",
+    },
+    perEmail: "per email",
+    packLine: (credits: string, price: string) => `${price} for ${credits} emails`,
+    save: (pct: number) => `Save ${pct}%`,
     anchorNote: "The smallest pack is 500 credits for €19.",
     buy: (credits: string) => `Buy ${credits} credits`,
     mostPopular: "Most popular",

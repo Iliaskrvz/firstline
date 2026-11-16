@@ -59,3 +59,76 @@ body {
   border-radius: 0.375rem;
   padding: 0 0.25rem;
 }
+
+/* --- Marketing pages ------------------------------------------------------------------------------
+   Identity: a research paper with footnotes. Warm paper background, serif display headings, and the
+   citation marker ([1]) in brand orange as the recurring motif. */
+.bg-paper {
+  background-color: #fbfaf7;
+}
+.font-display {
+  font-family: var(--font-display), Georgia, "Times New Roman", serif;
+}
+.cite {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--color-brand-700);
+  font-weight: 500;
+}
+
+/* Visible keyboard focus everywhere. */
+:where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Hero demo: the fact gets marked on the page, then the opener is written with its footnote.
+   Without JavaScript, or with reduced motion, the finished state shows. DemoPlayer arms it (hidden) and
+   plays it once when it scrolls into view. */
+@keyframes demo-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes demo-mark {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+.demo-mark {
+  background-image: linear-gradient(var(--color-brand-100), var(--color-brand-100));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+.demo-armed .demo-in {
+  opacity: 0;
+}
+.demo-armed .demo-mark {
+  background-size: 0% 100%;
+}
+.demo-play .demo-in {
+  animation: demo-in 0.35s ease-out forwards;
+}
+.demo-play .demo-mark {
+  animation: demo-mark 0.7s ease-out 0.6s forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-armed .demo-in,
+  .demo-play .demo-in {
+    animation: none;
+    opacity: 1;
+  }
+  .demo-armed .demo-mark,
+  .demo-play .demo-mark {
+    animation: none;
+    background-size: 100% 100%;
+  }
+}
