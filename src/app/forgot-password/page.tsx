@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import { Card, Logo } from "@/components/ui";
 import { ForgotForm } from "./forgot-form";
 
-export const metadata: Metadata = { title: "Reset your password" };
+export const metadata: Metadata = pageMetadata("forgotPassword");
 
 export default function ForgotPasswordPage() {
   return (

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import { company } from "@/lib/legal";
 import { LegalPage } from "../legal-page";
 
-export const metadata: Metadata = { title: "Terms of service" };
+export const metadata: Metadata = pageMetadata("terms");
 
 export default function Terms() {
   const c = company();

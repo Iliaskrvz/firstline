@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Card, Logo } from "@/components/ui";
 import { signInOptions } from "@/lib/auth-options";
 import { SignupForm } from "./signup-form";
 
-export const metadata: Metadata = { title: "Create an account" };
+export const metadata: Metadata = pageMetadata("signup");
 
 export default function SignupPage(props: PageProps<"/signup">) {
   return (

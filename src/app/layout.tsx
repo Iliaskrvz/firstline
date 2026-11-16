@@ -6,7 +6,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: { default: "FirstLine", template: "%s · FirstLine" },
-  description: "Pay-per-use cold email personalisation. Your copy, researched first lines.",
+  description: "Your own cold email copy, researched per lead, with a source for every line. From €0.03 per email, no subscription.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

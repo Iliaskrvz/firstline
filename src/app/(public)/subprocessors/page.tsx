@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import { LegalPage, SubprocessorTable } from "../legal-page";
 
-export const metadata: Metadata = { title: "Sub-processors" };
+export const metadata: Metadata = pageMetadata("subprocessors");
 
 export default function Subprocessors() {
   return (

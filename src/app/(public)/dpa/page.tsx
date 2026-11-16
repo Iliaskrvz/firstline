@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import { company } from "@/lib/legal";
 import { LegalPage, SubprocessorTable } from "../legal-page";
 
-export const metadata: Metadata = { title: "Data Processing Agreement" };
+export const metadata: Metadata = pageMetadata("dpa");
 
 export default function Dpa() {
   const c = company();

@@ -1,5 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { HOME } from "@/content/home";
 import { buttonClass, Logo } from "@/components/ui";
 import { enabledPacks, euro } from "@/lib/credits";
 
@@ -24,13 +26,12 @@ const LEDGER = [
   { label: "Two more leads written", value: "−2", cls: "text-slate-700" },
 ];
 
-const FAQ = [
-  { q: "Do I need a subscription?", a: "No. Buy credits when you need them; they never expire. 1 credit = 1 personalised email." },
-  { q: "Can I try it first?", a: "Yes. You get 25 free credits after confirming your email, and every campaign starts with a free preview of 5 leads." },
-  { q: "How does sending from Gmail work?", a: "You copy a Google Sheet with a small script into your own Google account. It sends from your inbox at a safe pace and stops a sequence when someone replies. We never get your password." },
-  { q: "Does FirstLine scrape LinkedIn?", a: "No. Research uses only the company's public website. Names and job titles come from your own list." },
-  { q: "Which languages?", a: "English and Dutch, picked automatically from the language of your email." },
-];
+export const metadata: Metadata = {
+  title: { absolute: HOME.meta.title },
+  description: HOME.meta.description,
+  openGraph: { title: HOME.meta.ogTitle, description: HOME.meta.ogDescription, type: "website", siteName: "FirstLine" },
+  twitter: { card: "summary_large_image", title: HOME.meta.ogTitle, description: HOME.meta.ogDescription },
+};
 
 function Eyebrow({ children, dark }: { children: ReactNode; dark?: boolean }) {
   return <p className={`text-xs font-semibold tracking-[0.14em] uppercase ${dark ? "text-brand-400" : "text-brand-600"}`}>{children}</p>;
@@ -140,10 +141,13 @@ function ProductWindow() {
   );
 }
 
-function StepCard({ n, title, text, children }: { n: string; title: string; text: string; children: ReactNode }) {
+function StepCard({ n, time, title, text, children }: { n: string; time: string; title: string; text: string; children: ReactNode }) {
   return (
     <li className="flex flex-col gap-4 rounded-2xl bg-white p-6 ring-1 ring-slate-200/80">
-      <span className="font-mono text-sm text-brand-600">{n}</span>
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-mono text-sm text-brand-600">{n}</span>
+        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600">{time}</span>
+      </span>
       <div className="rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700 ring-1 ring-slate-100">{children}</div>
       <div>
         <h3 className="font-semibold">{title}</h3>
@@ -175,12 +179,15 @@ export default function Home() {
           <nav className="hidden items-center gap-8 text-sm text-slate-600 md:flex">
             <a href="#how" className="hover:text-slate-950">How it works</a>
             <a href="#proof" className="hover:text-slate-950">Sources</a>
-            <a href="#api" className="hover:text-slate-950">API</a>
+            <a href="#api" className="hover:text-slate-950">{HOME.nav.api}</a>
             <a href="#pricing" className="hover:text-slate-950">Pricing</a>
           </nav>
           <div className="flex items-center gap-3 sm:gap-4">
             <Link href="/login" className="text-sm font-medium text-slate-700 hover:text-slate-950">Sign in</Link>
-            <Link href="/signup" className={buttonClass("primary", "rounded-full px-4")}>Get started</Link>
+            <Link href="/signup" className={buttonClass("primary", "rounded-full px-4")}>
+              <span className="hidden sm:inline">{HOME.nav.cta}</span>
+              <span className="sm:hidden">Try free</span>
+            </Link>
           </div>
         </div>
       </header>
@@ -190,24 +197,19 @@ export default function Home() {
         <section className="bg-grid relative">
           <div className="mx-auto max-w-6xl px-4 pt-16 sm:px-6 md:pt-24">
             <div className="flex flex-wrap items-end justify-between gap-10">
-              <h1 className="min-w-0 flex-[999_1_520px] text-[2.6rem] leading-[1.03] font-semibold tracking-tight sm:text-6xl lg:text-[76px]">
-                Researched first lines
-                <span className="block text-slate-400">for your cold email</span>
+              <h1 className="min-w-0 flex-[999_1_520px] text-[2.2rem] leading-[1.06] font-semibold tracking-tight sm:text-5xl lg:text-[60px]">
+                {HOME.hero.headline}
+                <span className="block text-slate-400">{HOME.hero.headlineMuted}</span>
               </h1>
               <div className="max-w-sm flex-[1_1_320px] pb-2">
-                <p className="text-lg leading-relaxed text-slate-600">
-                  Keep your own copy.
-                  <br />
-                  We write only the personal lines.
-                  <br />
-                  Every claim comes with a source.
-                </p>
+                <p className="text-lg leading-relaxed text-slate-600">{HOME.hero.sub}</p>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <Link href="/signup" className={buttonClass("accent", "rounded-full px-5 py-2.5 text-[15px]")}>
-                    Get 25 free credits <span aria-hidden>›</span>
+                    {HOME.hero.cta} <span aria-hidden>›</span>
                   </Link>
-                  <a href="#pricing" className={buttonClass("secondary", "rounded-full px-5 py-2.5 text-[15px]")}>See pricing</a>
+                  <a href="#pricing" className={buttonClass("secondary", "rounded-full px-5 py-2.5 text-[15px]")}>{HOME.hero.secondary}</a>
                 </div>
+                <p className="mt-3 text-sm text-slate-500">{HOME.hero.note}</p>
               </div>
             </div>
             <div className="mt-14 md:mt-16">
@@ -222,13 +224,30 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Problem */}
+        <section className="py-20 md:py-24">
+          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+            <Eyebrow>{HOME.problem.eyebrow}</Eyebrow>
+            <H2>{HOME.problem.title}</H2>
+            <div className="mt-10 grid gap-8 md:grid-cols-3">
+              {HOME.problem.items.map((p, i) => (
+                <div key={p.title} className="border-t border-slate-200 pt-5">
+                  <span className="font-mono text-sm text-slate-400">{String(i + 1).padStart(2, "0")}</span>
+                  <h3 className="mt-2 font-semibold">{p.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">{p.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* How it works */}
         <section id="how" className="scroll-mt-20 border-y border-slate-100 bg-slate-50/70 py-20 md:py-24">
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <Eyebrow>How it works</Eyebrow>
-            <H2>Your email. Their website. One good line.</H2>
+            <Eyebrow>{HOME.how.eyebrow}</Eyebrow>
+            <H2>{HOME.how.title}</H2>
             <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <StepCard n="01" title="Upload your leads" text="A CSV with names, companies and websites. Domains cleaned, duplicates removed.">
+              <StepCard n="01" time={HOME.how.steps[0].time} title={HOME.how.steps[0].title} text={HOME.how.steps[0].text}>
                 <p className="font-mono text-[11px] leading-[1.75] text-slate-600">
                   email,first_name,website
                   <br />
@@ -237,23 +256,23 @@ export default function Home() {
                   joris@zuurdesem…,Joris,zuurdesem…
                 </p>
               </StepCard>
-              <StepCard n="02" title="Paste your own email" text="Mark the spots to personalise. Everything else stays word for word.">
+              <StepCard n="02" time={HOME.how.steps[1].time} title={HOME.how.steps[1].title} text={HOME.how.steps[1].text}>
                 Hi {"{{first_name}}"},
                 <br />
                 <span className="tok-slot">[[opener]]</span>
                 <br />
                 We help bakeries cut waste…
               </StepCard>
-              <StepCard n="03" title="We read each website" text="Real facts from the company's own site. Each line cites where it came from.">
+              <StepCard n="03" time={HOME.how.steps[2].time} title={HOME.how.steps[2].title} text={HOME.how.steps[2].text}>
                 <div className="space-y-1.5">
                   <Row left="bakkerijvos.nl/" right="read" cls="text-emerald-700" />
                   <Row left="/over-ons" right="read" cls="text-emerald-700" />
                   <Row left="/nieuws" right="2 facts" cls="text-brand-600" />
                 </div>
               </StepCard>
-              <StepCard n="04" title="Send or export" text="From your own Gmail at a safe pace, or push to your sending tool.">
+              <StepCard n="04" time={HOME.how.steps[3].time} title={HOME.how.steps[3].title} text={HOME.how.steps[3].text}>
                 <div className="space-y-1.5">
-                  <Row left="Gmail · 40 a day" right="sending" cls="text-emerald-700" />
+                  <Row left="Gmail · 30 a day" right="sending" cls="text-emerald-700" />
                   <Row left="Follow-up in 3 days" right="queued" cls="text-slate-500" />
                   <Row left="Reply received" right="sequence stops" cls="text-brand-600" />
                 </div>
@@ -266,14 +285,11 @@ export default function Home() {
         <section id="proof" className="scroll-mt-20 py-20 md:py-24">
           <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 sm:px-6 lg:grid-cols-[1.1fr_1fr]">
             <div>
-              <Eyebrow>Built to be trusted</Eyebrow>
-              <H2>Personal, never made up</H2>
-              <p className="mt-4 max-w-lg text-[17px] leading-relaxed text-slate-600">
-                Code checks and an AI reviewer look at every line before you see it. Generic, salesy or unsupported lines get rewritten. If a website has nothing useful, the lead gets a neutral line and costs
-                nothing.
-              </p>
+              <Eyebrow>{HOME.trust.eyebrow}</Eyebrow>
+              <H2>{HOME.trust.title}</H2>
+              <p className="mt-4 max-w-lg text-[17px] leading-relaxed text-slate-600">{HOME.trust.body}</p>
               <ul className="mt-7 space-y-3.5 text-[15px]">
-                {["Every claim links to its page", "Your offer and tone are never rewritten", "No facts found, no charge"].map((t) => (
+                {HOME.trust.points.map((t) => (
                   <li key={t} className="flex items-center gap-3">
                     <span className="grid size-7 place-items-center rounded-lg bg-slate-950 text-white">
                       <Check />
@@ -308,13 +324,11 @@ export default function Home() {
         <section id="api" className="bg-grid-dark scroll-mt-16 bg-slate-950 py-20 text-white md:py-24">
           <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-[1fr_1.25fr]">
             <div>
-              <Eyebrow dark>API, n8n and Make</Eyebrow>
-              <H2>Plug first lines into your own flow</H2>
-              <p className="mt-4 max-w-md text-[17px] leading-relaxed text-slate-400">
-                Send a lead, get back a personal line with its sources. Same credits, same checks. Use the REST API, our n8n node or the Make app.
-              </p>
+              <Eyebrow dark>{HOME.api.eyebrow}</Eyebrow>
+              <H2>{HOME.api.title}</H2>
+              <p className="mt-4 max-w-md text-[17px] leading-relaxed text-slate-400">{HOME.api.body}</p>
               <Link href="/docs/api" className="mt-6 inline-flex rounded-full px-[18px] py-2.5 text-sm font-medium text-white ring-1 ring-white/20 hover:bg-white/5">
-                Read the API docs <span aria-hidden className="ml-1">›</span>
+                {HOME.api.cta} <span aria-hidden className="ml-1">›</span>
               </Link>
             </div>
             <div className="min-w-0 overflow-hidden rounded-2xl bg-[#0b1220] ring-1 ring-white/10">
@@ -355,9 +369,12 @@ export default function Home() {
         {/* Pricing */}
         <section id="pricing" className="scroll-mt-20 py-20 md:py-24">
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <Eyebrow>Pricing</Eyebrow>
-            <H2>Pay per email. Nothing else.</H2>
-            <p className="mt-3 text-[17px] text-slate-600">Credits never expire. Sending from Gmail and plain follow-ups are free.</p>
+            <Eyebrow>{HOME.pricing.eyebrow}</Eyebrow>
+            <H2>{HOME.pricing.title}</H2>
+            <p className="mt-3 text-[17px] text-slate-600">{HOME.pricing.sub}</p>
+            <p className="mt-2 text-[17px] text-slate-900">
+              <strong className="font-semibold">{HOME.pricing.anchor}</strong> <span className="text-slate-500">{HOME.pricing.anchorNote}</span>
+            </p>
             <div className="mt-10 grid gap-4 md:grid-cols-3">
               {packs.map((p) => {
                 const featured = p.id === "growth";
@@ -365,21 +382,21 @@ export default function Home() {
                   <div key={p.id} className={`flex flex-col rounded-3xl p-7 ${featured ? "bg-slate-950 text-white shadow-[0_24px_60px_rgb(15_23_42/0.25)]" : "ring-1 ring-slate-200/80"}`}>
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold">{p.name}</h3>
-                      {featured && <span className="rounded-full bg-brand-600 px-2.5 py-0.5 text-xs font-medium">Most popular</span>}
+                      {featured && <span className="rounded-full bg-brand-600 px-2.5 py-0.5 text-xs font-medium">{HOME.pricing.mostPopular}</span>}
                     </div>
                     <p className="mt-6 text-[44px] leading-none font-semibold tracking-tight">{euro(p.priceCents)}</p>
-                    <p className={`mt-2 text-sm ${featured ? "text-slate-400" : "text-slate-500"}`}>excl. VAT · one-time</p>
+                    <p className={`mt-2 text-sm ${featured ? "text-slate-400" : "text-slate-500"}`}>{HOME.pricing.perPack}</p>
                     <p className={`mt-6 border-t pt-4 text-sm ${featured ? "border-white/10 text-slate-300" : "border-slate-100 text-slate-700"}`}>
                       {p.credits.toLocaleString("en-US")} emails · {perEmail(p)} each
                     </p>
                     <Link href="/signup" className={buttonClass(featured ? "accent" : "secondary", "mt-6 w-full rounded-full py-2.5")}>
-                      Start free
+                      {HOME.pricing.buy(p.credits.toLocaleString("en-US"))}
                     </Link>
                   </div>
                 );
               })}
             </div>
-            <p className="mt-6 text-sm text-slate-500">Only leads that get a finished email use a credit. Economy mode (results within hours) and extra research options are available inside the app.</p>
+            <p className="mt-6 text-sm text-slate-500">{HOME.pricing.footnote}</p>
           </div>
         </section>
 
@@ -387,11 +404,11 @@ export default function Home() {
         <section id="faq" className="scroll-mt-20 border-t border-slate-100 bg-slate-50/70 py-20 md:py-24">
           <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 md:grid-cols-[1fr_2fr]">
             <div>
-              <Eyebrow>FAQ</Eyebrow>
-              <H2>Questions</H2>
+              <Eyebrow>{HOME.faq.eyebrow}</Eyebrow>
+              <H2>{HOME.faq.title}</H2>
             </div>
             <div className="divide-y divide-slate-200 rounded-2xl bg-white ring-1 ring-slate-200/80">
-              {FAQ.map((f) => (
+              {HOME.faq.items.map((f) => (
                 <details key={f.q} className="group px-6 py-5">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium [&::-webkit-details-marker]:hidden">
                     {f.q}
@@ -409,11 +426,15 @@ export default function Home() {
         {/* CTA */}
         <section className="px-4 py-20 sm:px-6 md:py-24">
           <div className="bg-grid-dark mx-auto max-w-6xl rounded-[32px] bg-slate-950 px-6 py-16 text-center text-white sm:px-12 md:py-[72px]">
-            <h2 className="text-3xl font-semibold tracking-tight sm:text-[44px]">Try it on your own leads</h2>
-            <p className="mt-3 text-[17px] text-slate-400">25 free credits after you confirm your email. No card needed.</p>
+            <h2 className="text-3xl font-semibold tracking-tight sm:text-[44px]">{HOME.finalCta.title}</h2>
+            <p className="mt-3 text-[17px] text-slate-400">{HOME.finalCta.sub}</p>
             <Link href="/signup" className={buttonClass("accent", "mt-8 rounded-full px-6 py-3 text-[15px]")}>
-              Get started <span aria-hidden>›</span>
+              {HOME.finalCta.cta} <span aria-hidden>›</span>
             </Link>
+          </div>
+          <div className="mx-auto mt-10 max-w-2xl space-y-2 text-center text-[15px] text-slate-600">
+            <p>{HOME.honestLine}</p>
+            <p className="text-slate-500">{HOME.founderNote}</p>
           </div>
         </section>
       </main>
@@ -425,10 +446,10 @@ export default function Home() {
             <span>© 2026</span>
           </div>
           <nav className="flex flex-wrap gap-5">
-            <Link href="/privacy" className="hover:text-slate-950">Privacy</Link>
-            <Link href="/terms" className="hover:text-slate-950">Terms</Link>
-            <Link href="/dpa" className="hover:text-slate-950">DPA</Link>
-            <Link href="/subprocessors" className="hover:text-slate-950">Sub-processors</Link>
+            <Link href="/privacy" className="hover:text-slate-950">{HOME.footer.privacy}</Link>
+            <Link href="/terms" className="hover:text-slate-950">{HOME.footer.terms}</Link>
+            <Link href="/dpa" className="hover:text-slate-950">{HOME.footer.dpa}</Link>
+            <Link href="/subprocessors" className="hover:text-slate-950">{HOME.footer.subprocessors}</Link>
           </nav>
         </div>
       </footer>

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Logo } from "@/components/ui";
 import { MAX_BATCH, MAX_WAIT_S, RATE_LIMIT_PER_MIN } from "@/api/schemas";
 import { RETRY_DELAYS_S } from "@/api/webhooks-pg";
 
-export const metadata: Metadata = { title: "API docs" };
+export const metadata: Metadata = pageMetadata("apiDocs");
 
 const BASE = (process.env.PUBLIC_APP_URL?.trim().replace(/\/+$/, "") || "https://your-firstline-address") + "/api/v1";
 

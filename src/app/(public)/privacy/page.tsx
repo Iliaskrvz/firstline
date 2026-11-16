@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import { company } from "@/lib/legal";
 import { LegalPage } from "../legal-page";
 
-export const metadata: Metadata = { title: "Privacy policy" };
+export const metadata: Metadata = pageMetadata("privacy");
 
 export default function Privacy() {
   const c = company();
