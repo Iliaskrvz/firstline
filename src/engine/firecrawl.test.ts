@@ -36,7 +36,7 @@ describe("Firecrawl client timeouts", () => {
   }, 10_000);
 
   it("treats a stalled robots.txt body as 'no robots.txt' instead of hanging", async () => {
-    const fc = createFirecrawl("test", stallingBodyFetch({ n: 0 }), { robotsMs: 40 });
+    const fc = createFirecrawl("test", stallingBodyFetch({ n: 0 }), { robotsMs: 40 }, async () => true);
     const started = Date.now();
     await expect(fc.robots("example.com")).resolves.toBeNull();
     expect(Date.now() - started).toBeLessThan(2_000);

@@ -6,6 +6,8 @@ import { PRICE_MULTIPLE, TARGET_COST_EUR } from "@/lib/admin";
 import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
 import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
+import { demoStats } from "@/engine/demo-pg";
+import { demoMode } from "@/server/demo";
 import { STEPS } from "@/config/models";
 import { engineConfig } from "@/engine/config";
 import { balanceThreshold, fetchDeepSeekBalance, isLow } from "@/billing/deepseek-balance";
@@ -47,14 +49,17 @@ async function Admin() {
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
   const config = engineConfig();
-  const [a, fcBudget, anBudget, refunds, breakdown, balance] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     llmBudget(pool, process.env, new Date(), config.llmProvider),
     loadRefunds(pool),
     loadCostBreakdown(pool),
     config.llmProvider === "deepseek" && config.deepseekApiKey ? fetchDeepSeekBalance(config.deepseekApiKey) : Promise.resolve(null),
+    demoStats(pool),
   ]);
+  const demoToday = demo[0];
+  const demoWeekUsd = demo.reduce((s, d) => s + d.costUsd, 0);
   const threshold = balanceThreshold();
   const budgets = [fcBudget, anBudget];
   const flagged = a.workspaces.filter((w) => (w.personalShare ?? 0) > 0.5 && w.leads >= 200);
@@ -88,6 +93,15 @@ async function Admin() {
             );
           })}
         </div>
+      </Card>
+      <Card className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+        <span>
+          <span className="font-semibold text-slate-900">Homepage demo today:</span> {demoToday.runs} of {demoToday.cap} runs ({demoToday.cached} from cache) · $
+          {demoToday.costUsd.toFixed(3)}
+        </span>
+        <span className="text-slate-500">
+          Last 7 days ${demoWeekUsd.toFixed(2)} · {demoMode() === "live" ? "on" : demoMode() === "test" ? "test mode" : "off (needs an AI key, Firecrawl and Turnstile keys)"} · cap: DEMO_DAILY_CAP
+        </span>
       </Card>
       {refunds.length > 0 && (
         <Card className="space-y-2 bg-amber-50 text-sm text-amber-900">

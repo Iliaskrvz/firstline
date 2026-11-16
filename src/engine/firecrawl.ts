@@ -1,4 +1,5 @@
 // Thin Firecrawl v2 client (map + scrape to markdown) with timeouts and retries.
+import { isPublicHost } from "@/lib/public-host";
 import { HttpError, parseRetryAfter, TimeoutError, withRetry } from "./retry";
 
 export type MapLink = { url: string; title?: string; description?: string };
@@ -50,7 +51,13 @@ async function timed<T>(
 export type FirecrawlTimeouts = { mapMs: number; scrapeExtraMs: number; robotsMs: number };
 const DEFAULT_TIMEOUTS: FirecrawlTimeouts = { mapMs: 30_000, scrapeExtraMs: 10_000, robotsMs: 8_000 };
 
-export function createFirecrawl(apiKey: string, fetchImpl: typeof fetch = fetch, timeouts: Partial<FirecrawlTimeouts> = {}): WebReader {
+export function createFirecrawl(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+  timeouts: Partial<FirecrawlTimeouts> = {},
+  /** SSRF guard for our own robots.txt fetch: may this host be fetched? (src/lib/public-host.ts) */
+  hostAllowed: (host: string) => Promise<boolean> = (h) => isPublicHost(h),
+): WebReader {
   const to = { ...DEFAULT_TIMEOUTS, ...timeouts };
   const post = (path: string, body: object, timeoutMs: number) =>
     timed(
@@ -130,19 +137,32 @@ export function createFirecrawl(apiKey: string, fetchImpl: typeof fetch = fetch,
       }
     },
     async robots(domain) {
+      // Redirects are followed by hand (at most 3), and every host on the way must be a public one:
+      // our server must never be pointed at a private or internal address.
       try {
-        return await timed(
-          `https://${domain}/robots.txt`,
-          { headers: { "User-Agent": "FirstLineBot/1.0 (+robots check)" }, redirect: "follow" },
-          to.robotsMs,
-          fetchImpl,
-          async (res) => {
-            if (res.status >= 500) return "User-agent: *\nDisallow: /"; // server trouble: treat as "don't crawl" for now
-            if (!res.ok) return null;
-            const text = await res.text();
-            return /<html/i.test(text) ? null : text; // some sites serve an HTML page instead
-          },
-        );
+        let url = `https://${domain}/robots.txt`;
+        for (let hop = 0; hop <= 3; hop++) {
+          const host = new URL(url).hostname;
+          if (!(await hostAllowed(host))) return null;
+          const step = await timed(
+            url,
+            { headers: { "User-Agent": "FirstLineBot/1.0 (+robots check)" }, redirect: "manual" },
+            to.robotsMs,
+            fetchImpl,
+            async (res): Promise<{ next: string } | { text: string | null }> => {
+              const loc = res.headers.get("location");
+              if (res.status >= 300 && res.status < 400 && loc) return { next: new URL(loc, url).toString() };
+              if (res.status >= 500) return { text: "User-agent: *\nDisallow: /" }; // server trouble: treat as "don't crawl" for now
+              if (!res.ok) return { text: null };
+              const text = await res.text();
+              return { text: /<html/i.test(text) ? null : text }; // some sites serve an HTML page instead
+            },
+          );
+          if ("text" in step) return step.text;
+          if (!/^https?:$/.test(new URL(step.next).protocol)) return null;
+          url = step.next;
+        }
+        return null;
       } catch {
         return null; // unreachable robots.txt: the scrape itself will tell us if the site is down
       }

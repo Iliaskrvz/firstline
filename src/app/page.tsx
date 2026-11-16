@@ -3,6 +3,8 @@ import { Newsreader } from "next/font/google";
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { DemoPlayer } from "@/components/marketing/demo-player";
+import { LiveDemo } from "@/components/marketing/live-demo";
+import { demoMode, turnstileSiteKey } from "@/server/demo";
 import { buttonClass, Logo } from "@/components/ui";
 import { COMPETITORS, checkedOnLabel } from "@/content/competitors";
 import { HOME } from "@/content/home";
@@ -271,6 +273,10 @@ export default function Home() {
   const perEmail = (p: (typeof packs)[number]) => Math.round((p.priceCents / p.credits) * 10) / 1000;
   const base = packs.length ? perEmail(packs[0]) : 0;
   const anchor = COMPETITORS.filter((c) => c.inAnchor && c.for300);
+  const demo = demoMode();
+  // Section labels count up ([1], [2], …), skipping the live demo when it's off.
+  let section = 0;
+  const n = () => ++section;
   return (
     <div className={`${display.variable} bg-paper min-h-screen text-slate-900`}>
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2">
@@ -336,11 +342,25 @@ export default function Home() {
           </div>
         </section>
 
-        {/* [1] Problem: an editorial list, not cards */}
+        {/* Live demo: only when it's switched on (else the hero's static example is the demo) */}
+        {demo !== "off" && (
+          <section id="try" className="scroll-mt-20 pt-20 md:pt-28">
+            <div className="mx-auto max-w-6xl px-4 sm:px-6">
+              <Eyebrow n={n()}>{HOME.liveDemo.eyebrow}</Eyebrow>
+              <H2>{HOME.liveDemo.title}</H2>
+              <p className="mt-3 max-w-2xl text-[17px] leading-relaxed text-slate-700">{HOME.liveDemo.text}</p>
+              <div className="mt-8">
+                <LiveDemo siteKey={turnstileSiteKey()} test={demo === "test"} />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Problem: an editorial list, not cards */}
         <section className="py-20 md:py-28">
           <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 lg:grid-cols-[0.9fr_1.1fr]">
             <div className="lg:sticky lg:top-28 lg:self-start">
-              <Eyebrow n={1}>{HOME.problem.eyebrow}</Eyebrow>
+              <Eyebrow n={n()}>{HOME.problem.eyebrow}</Eyebrow>
               <H2>{HOME.problem.title}</H2>
             </div>
             <ol className="divide-y divide-slate-200 border-y border-slate-200">
@@ -360,7 +380,7 @@ export default function Home() {
         {/* [2] How it works: four steps with a picture each */}
         <section id="how" className="scroll-mt-20 bg-white py-20 md:py-28">
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <Eyebrow n={2}>{HOME.how.eyebrow}</Eyebrow>
+            <Eyebrow n={n()}>{HOME.how.eyebrow}</Eyebrow>
             <H2>{HOME.how.title}</H2>
             <ol className="mt-12 grid gap-px overflow-hidden rounded-2xl bg-slate-200 ring-1 ring-slate-200 sm:grid-cols-2 lg:grid-cols-4">
               {HOME.how.steps.map((s, i) => (
@@ -385,7 +405,7 @@ export default function Home() {
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr] lg:items-start">
               <div>
-                <Eyebrow n={3}>{HOME.trust.eyebrow}</Eyebrow>
+                <Eyebrow n={n()}>{HOME.trust.eyebrow}</Eyebrow>
                 <H2>
                   {HOME.trust.title}
                   <Cite n={1} className="ml-1" />
@@ -418,7 +438,7 @@ export default function Home() {
         <section id="api" className="bg-grid-dark scroll-mt-16 bg-slate-950 py-20 text-white md:py-28">
           <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-[1fr_1.25fr]">
             <div>
-              <Eyebrow n={4} dark>
+              <Eyebrow n={n()} dark>
                 {HOME.api.eyebrow}
               </Eyebrow>
               <H2>{HOME.api.title}</H2>
@@ -467,7 +487,7 @@ export default function Home() {
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr] lg:items-end">
               <div>
-                <Eyebrow n={5}>{HOME.pricing.eyebrow}</Eyebrow>
+                <Eyebrow n={n()}>{HOME.pricing.eyebrow}</Eyebrow>
                 <H2>{HOME.pricing.title}</H2>
                 <p className="mt-3 text-[17px] text-slate-700">{HOME.pricing.sub}</p>
               </div>
@@ -532,7 +552,7 @@ export default function Home() {
         <section id="faq" className="scroll-mt-20 bg-white py-20 md:py-28">
           <div className="mx-auto grid max-w-6xl gap-10 px-4 sm:px-6 md:grid-cols-[1fr_2fr]">
             <div>
-              <Eyebrow n={6}>{HOME.faq.eyebrow}</Eyebrow>
+              <Eyebrow n={n()}>{HOME.faq.eyebrow}</Eyebrow>
               <H2>{HOME.faq.title}</H2>
             </div>
             <div className="divide-y divide-slate-200 border-y border-slate-200">

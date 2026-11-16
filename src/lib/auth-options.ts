@@ -1,4 +1,5 @@
 import "server-only";
+import { connection } from "next/server";
 import { supabaseEnv } from "@/lib/supabase/env";
 
 /**
@@ -17,7 +18,11 @@ export function parseSignInOptions(settings: unknown): SignInOptions {
   return { google: s.external?.google === true, passkeys: s.passkeys_enabled === true };
 }
 
-export async function signInOptions(fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<SignInOptions> {
+export async function signInOptions(fetchImpl: typeof fetch = fetch, now?: number): Promise<SignInOptions> {
+  if (now === undefined) {
+    await connection(); // read per request, not at build time
+    now = Date.now();
+  }
   if (cached && now - cached.at < TTL_MS) return cached.value;
   try {
     const { url, key } = supabaseEnv();

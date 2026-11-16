@@ -19,6 +19,7 @@ import { llmFactory, selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
 import { runQueuedBakeoff } from "@/engine/bakeoff-pg";
+import { purgeDemoRuns } from "@/engine/demo-pg";
 import { LIVE_SKILL_VERSION } from "@/engine/skills";
 import { PgStore } from "@/engine/store-pg";
 import { missingEnv, missingEnvMessage } from "@/lib/env";
@@ -281,6 +282,7 @@ async function main() {
       const r = await asSingleton(pool, "retention", async () => {
         await apiHousekeeping(pool);
         await pruneProviderWindows(pool);
+        await purgeDemoRuns(pool); // public demo rows (domain + IP hash) after 30 days
         return runRetention(pool);
       });
       if (!r) return;

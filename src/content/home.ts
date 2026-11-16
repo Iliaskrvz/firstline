@@ -68,6 +68,25 @@ export const HOME = {
     source: "bakkerijvos.nl/nieuws",
   },
 
+  /** The live demo box (shown only when the demo is switched on). */
+  liveDemo: {
+    eyebrow: "Live demo",
+    title: "Try it on any company website",
+    text: "Paste a website. FirstLine reads two of its pages and writes one example opener, with the sources it used. No account needed.",
+    urlLabel: "Company website",
+    urlPlaceholder: "acme.com",
+    sellsLabel: "What you sell, in one line (optional)",
+    sellsPlaceholder: "Bookkeeping for small agencies",
+    submit: "Write my example line",
+    working: ["Reading the website\u2026", "Finding facts\u2026", "Writing the line\u2026"],
+    resultLabel: (domain: string) => `Example opener for ${domain}`,
+    sourcesLabel: "Sources",
+    cachedNote: "Shown from an example made in the last 30 days.",
+    cta: "Personalise 25 of your own leads free",
+    limitNote: "3 tries per day. Results are examples; your campaign uses your own email and checks every line before you send.",
+    testNote: "Test mode: test output from a sample page, no AI used.",
+  },
+
   integrations: { label: "Send or export to", names: ["Gmail", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
 
   preview: {
