@@ -5,6 +5,7 @@ export type Locale = "en" | "nl";
 
 export type SiteCopy = {
   skip: string;
+  menu: string;
   home: string;
   nav: { label: string; href: string }[];
   signIn: string;
@@ -24,6 +25,7 @@ export type SiteCopy = {
 export const SITE: Record<Locale, SiteCopy> = {
   en: {
     skip: "Skip to content",
+    menu: "Menu",
     home: "FirstLine, home",
     nav: [
       { label: "How it works", href: "/#how" },
@@ -67,6 +69,7 @@ export const SITE: Record<Locale, SiteCopy> = {
   },
   nl: {
     skip: "Naar de inhoud",
+    menu: "Menu",
     home: "FirstLine, home",
     nav: [
       { label: "Zo werkt het", href: "/nl#how" },

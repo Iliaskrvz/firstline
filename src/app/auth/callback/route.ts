@@ -1,10 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { publicOrigin } from "@/lib/public-origin";
+import { safeNext } from "@/lib/safe-next";
 import { createClient } from "@/lib/supabase/server";
 
-function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/campaigns";
-}
 
 // Magic link and Google both land here with ?code=... (PKCE).
 export async function GET(request: NextRequest) {

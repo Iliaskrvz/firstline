@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SIGNUP } from "@/content/auth";
 import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -16,8 +17,18 @@ export default function SignupPage(props: PageProps<"/signup">) {
         <Logo />
       </div>
       <Card className="w-full max-w-sm">
-        <h1 className="text-lg font-semibold text-slate-900">Create your account</h1>
-        <p className="mt-1 text-sm text-slate-500">25 free credits after you confirm your email address.</p>
+        <h1 className="text-lg font-semibold text-slate-900">{SIGNUP.title}</h1>
+        <p className="mt-1 text-sm text-slate-500">{SIGNUP.sub}</p>
+        <ul className="mt-3 space-y-1 text-sm text-slate-700">
+          {SIGNUP.reassure.map((r) => (
+            <li key={r} className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" className="size-3.5 text-emerald-700" aria-hidden>
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              {r}
+            </li>
+          ))}
+        </ul>
         <Suspense>
           <Inner searchParams={props.searchParams} />
         </Suspense>

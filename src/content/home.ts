@@ -133,7 +133,14 @@ export const HOME = {
     /** Shown only when REFUND_OFFER=1 (see src/content/refund.ts). */
     refund: "Unused credits refunded within 30 days of purchase.",
     buy: (credits: string) => `Buy ${credits} credits`,
-    mostPopular: "Most popular",
+    /** Not "most popular": that would be a claim about customers we can't back up yet. */
+    mostPopular: "Recommended",
+    /** Who each pack suits; the months follow from the pack size (credits never expire). */
+    fit: {
+      starter: "To try it on a real campaign. Lasts about 2 months at 300 emails a month.",
+      growth: "For steady outreach. Lasts more than half a year at 300 emails a month.",
+      agency: "For several clients, or 2,000+ emails a month.",
+    } as Record<string, string>,
     perPack: "excl. VAT · one-time",
     footnote: "Leads where the website has nothing useful get a neutral line and use no credit. Economy mode (results within hours) and extra research options are available inside the app.",
   },
@@ -165,6 +172,10 @@ export const HOME = {
       {
         q: "Is it GDPR-compliant?",
         a: "FirstLine is built for lawful B2B outreach. Research uses only public company websites, never LinkedIn. Lead data is deleted 30 days after a campaign ends. A data processing agreement is available, and the sub-processors are listed openly. You still need a lawful basis, such as legitimate interest, to email your leads.",
+      },
+      {
+        q: "Why not just use ChatGPT?",
+        a: "You could paste each website into ChatGPT yourself. That takes a few minutes per lead, and nothing checks whether the facts are real. FirstLine reads the site for you, shows the page behind every line, rewrites generic or salesy lines, and charges nothing when it finds nothing useful.",
       },
       {
         q: "How is this different from Instantly or Clay?",

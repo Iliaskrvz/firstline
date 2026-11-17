@@ -38,7 +38,7 @@ ssh "$HOST" "cd $APP && sed -i '/^PUBLIC_APP_URL=/d' .env.local.new && echo 'PUB
   && mv .env.local.new .env.local && chmod 600 .env.local && chown -R firstline:firstline $APP"
 
 say "4/5 Installing, building and (re)starting (takes a few minutes)"
-ssh "$HOST" "su - firstline -c 'cd $APP && npm ci --no-audit --no-fund --loglevel=error && npm run build && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save'"
+ssh "$HOST" "su - firstline -c 'cd $APP && npm ci --no-audit --no-fund --loglevel=error && npm run build && (pm2 describe pm2-logrotate >/dev/null 2>&1 || (pm2 install pm2-logrotate >/dev/null && pm2 set pm2-logrotate:max_size 10M >/dev/null && pm2 set pm2-logrotate:retain 14 >/dev/null)) && pm2 startOrReload deploy/ecosystem.config.cjs --update-env && pm2 save'"
 
 say "5/5 Checks"
 sleep 5

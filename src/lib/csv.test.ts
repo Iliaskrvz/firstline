@@ -344,3 +344,13 @@ describe("Dutch exports: semicolons, accents, encodings", () => {
     expect(r.stats).toMatchObject({ total: 7, imported: 4, duplicates: 1, invalid_email: 1, missing_email: 1, no_website: 1 });
   });
 });
+
+describe("the downloadable CSV template", () => {
+  it("maps every column to a lead field without any manual mapping", async () => {
+    const { readFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const header = readFileSync(path.resolve(__dirname, "../../public/firstline-leads-template.csv"), "utf8").trim().split(",");
+    const map = autoMapColumns(header);
+    expect(Object.values(map)).toEqual(["email", "first_name", "last_name", "company", "title", "website"]);
+  });
+});

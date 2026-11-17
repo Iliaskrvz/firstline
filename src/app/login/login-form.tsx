@@ -1,5 +1,6 @@
 "use client";
 
+import { safeNext } from "@/lib/safe-next";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
@@ -36,7 +37,6 @@ export function Divider() {
   );
 }
 
-const safeNext = (next: string | null) => (next && next.startsWith("/") && !next.startsWith("//") ? next : "/campaigns");
 
 export function LoginForm({ initialError, next, options }: { initialError: string | null; next: string | null; options: SignInOptions }) {
   const router = useRouter();

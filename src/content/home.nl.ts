@@ -129,7 +129,12 @@ export const HOME_NL: HomeCopy = {
     anchorNote: "Het kleinste pakket is 500 credits voor €19.",
     refund: "Ongebruikte credits terug binnen 30 dagen na aankoop.",
     buy: (credits: string) => `Koop ${credits} credits`,
-    mostPopular: "Meest gekozen",
+    mostPopular: "Aanbevolen",
+    fit: {
+      starter: "Om het op een echte campagne te proberen. Gaat ongeveer 2 maanden mee bij 300 e-mails per maand.",
+      growth: "Voor vaste outreach. Gaat ruim een half jaar mee bij 300 e-mails per maand.",
+      agency: "Voor meerdere klanten, of meer dan 2.000 e-mails per maand.",
+    },
     perPack: "excl. btw · eenmalig",
     footnote: "Leads waarvan de website niets bruikbaars heeft, krijgen een neutrale zin en kosten geen credit. Economy-modus (resultaat binnen een paar uur) en extra onderzoeksopties vind je in de app.",
   },
@@ -161,6 +166,10 @@ export const HOME_NL: HomeCopy = {
       {
         q: "Is het AVG-proof?",
         a: "FirstLine is gemaakt voor rechtmatige B2B-outreach. Het onderzoek gebruikt alleen openbare bedrijfswebsites, nooit LinkedIn. Leadgegevens worden 30 dagen na het einde van een campagne verwijderd. Er is een verwerkersovereenkomst en de subverwerkers staan openbaar. Je hebt zelf wel een rechtsgrond nodig om je leads te mailen, zoals gerechtvaardigd belang.",
+      },
+      {
+        q: "Waarom niet gewoon ChatGPT?",
+        a: "Je kunt elke website zelf in ChatGPT plakken. Dat kost een paar minuten per lead, en niets controleert of de feiten kloppen. FirstLine leest de site voor je, laat bij elke zin de pagina zien, herschrijft algemene of verkoperige zinnen, en rekent niets als er niets bruikbaars is.",
       },
       {
         q: "Wat is het verschil met Instantly of Clay?",

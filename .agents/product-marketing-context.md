@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-11-16 (V1, drafted from SPEC.md, the codebase and the owner's positioning decisions)*
+*Last updated: 2026-11-17 (V1.1: site review; drafted from SPEC.md, the codebase and the owner's positioning decisions)*
 
 ## Product Overview
 **One-liner:** Your copy, researched per lead, with sources. From €0.03 per email, no subscription, sent free from your Gmail.
@@ -134,5 +134,6 @@
 ## Open items before this copy goes live
 - **AI provider:** production must run on a real AI provider (DeepSeek pending the lawyer, or Anthropic). Without one, the app shows test output, and promises like "researched first lines" aren't true for visitors yet.
 - **"First emails in about 10 minutes":** check on real runs once the AI provider is live.
-- **Competitor price range in the problem section:** fill from verified prices in src/content/competitors.ts (batch 2/4).
 - **Editing single emails inside the app isn't available yet.** The FAQ says so honestly.
+- **No usage data yet:** pricing badges say "Recommended", not "Most popular", until real purchase data backs a popularity claim.
+- **Pricing research to do once there are customers:** a short Van Westendorp survey (4 questions) with the first 20–30 users before any price change.

@@ -105,6 +105,26 @@ export function MarketingShell({ locale, alternate, children }: { locale: Locale
             ))}
           </nav>
           <div className="flex items-center gap-3 sm:gap-4">
+            {/* Below desktop width the nav lives in this menu (no JavaScript needed) */}
+            <details className="group relative lg:hidden">
+              <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-2 py-1 text-sm text-slate-700 ring-1 ring-slate-300 hover:text-slate-950 [&::-webkit-details-marker]:hidden">
+                <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
+                  <path d="M4 7h16M4 12h16M4 17h16" className="group-open:hidden" />
+                  <path d="M6 6l12 12M18 6 6 18" className="hidden group-open:block" />
+                </svg>
+                <span className="sr-only sm:not-sr-only">{t.menu}</span>
+              </summary>
+              <nav aria-label="Main" className="fixed inset-x-4 top-[68px] z-40 rounded-2xl bg-white p-2 shadow-[0_18px_50px_rgb(15_23_42/0.16)] ring-1 ring-slate-200 sm:absolute sm:inset-x-auto sm:top-auto sm:right-0 sm:mt-2 sm:w-60">
+                {t.nav.map((l) => (
+                  <Link key={l.href} href={l.href as "/"} className="block rounded-lg px-3 py-2.5 text-[15px] text-slate-800 hover:bg-slate-50">
+                    {l.label}
+                  </Link>
+                ))}
+                <Link href="/login" className="mt-1 block rounded-lg border-t border-slate-100 px-3 py-2.5 text-[15px] text-slate-800 hover:bg-slate-50 sm:hidden">
+                  {t.signIn}
+                </Link>
+              </nav>
+            </details>
             <Link
               href={other as "/"}
               hrefLang={t.switchLang}

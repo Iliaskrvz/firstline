@@ -510,7 +510,8 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
                     {featured && <span className="rounded-full bg-brand-700 px-2.5 py-0.5 text-xs font-medium text-white">{t.pricing.mostPopular}</span>}
                     {!featured && save >= 10 && <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">{t.pricing.save(save)}</span>}
                   </div>
-                  <p className="mt-6 font-display text-[52px] leading-none font-medium tracking-tight">{fmtEuro(pe, locale, 3)}</p>
+                  {t.pricing.fit[p.id] && <p className={`mt-2 text-sm leading-snug ${featured ? "text-slate-300" : "text-slate-600"}`}>{t.pricing.fit[p.id]}</p>}
+                  <p className="mt-5 font-display text-[52px] leading-none font-medium tracking-tight">{fmtEuro(pe, locale, 3)}</p>
                   <p className={`mt-1 text-sm ${featured ? "text-slate-300" : "text-slate-600"}`}>{t.pricing.perEmail}</p>
                   <p className={`mt-6 border-t pt-4 text-sm ${featured ? "border-white/15 text-slate-200" : "border-slate-100 text-slate-700"}`}>
                     {t.pricing.packLine(fmtInt(p.credits, locale), fmtEuro(p.priceCents / 100, locale))} · {t.pricing.perPack}
