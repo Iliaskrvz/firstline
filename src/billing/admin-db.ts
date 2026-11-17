@@ -97,7 +97,7 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
 
 export type RefundRow = { at: string; workspaceId: string; workspace: string; pack: string | null; refunded: string | null; order: string | null; credits: number | null };
 
-/** Polar refunds in the last 90 days (from the activity log). Credits are not taken back automatically. */
+/** Payment refunds in the last 90 days (from the activity log). Credits are not taken back automatically. */
 export async function loadRefunds(pool: pg.Pool): Promise<RefundRow[]> {
   const { rows } = await pool.query(
     `select a.created_at, a.workspace_id, w.name, a.target, a.details

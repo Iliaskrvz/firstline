@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { enabledPacks, isPackId, PACKS } from "@/lib/credits";
 import { packFromNote, revenuePerCreditEur } from "@/lib/admin";
-import { packForProduct, polarProductIds } from "@/billing/polar";
+import { dodoProductIds, packForProduct } from "@/billing/dodo";
 import { PACK_CONFIG } from "./packs";
 
 describe("pack config", () => {
@@ -20,8 +20,8 @@ describe("pack config", () => {
     expect(isPackId("nope")).toBe(false);
   });
 
-  it("each pack maps to its Polar product through POLAR_PRODUCT_<ID>", () => {
-    const products = polarProductIds({ POLAR_PRODUCT_STARTER: " prod-starter ", POLAR_PRODUCT_LITE_50K: "prod-lite", POLAR_PRODUCT_GROWTH: "" });
+  it("each pack maps to its Dodo product through DODO_PRODUCT_<ID>", () => {
+    const products = dodoProductIds({ DODO_PRODUCT_STARTER: " prod-starter ", DODO_PRODUCT_LITE_50K: "prod-lite", DODO_PRODUCT_GROWTH: "" });
     expect(products).toEqual({ starter: "prod-starter", "lite-50k": "prod-lite" });
     expect(packForProduct(products, "prod-lite")).toBe("lite-50k");
     expect(packForProduct(products, "other")).toBeNull();
@@ -30,7 +30,7 @@ describe("pack config", () => {
 
   it("purchases are recognised from old and new ledger notes", () => {
     expect(packFromNote("Starter pack: 500 credits · Kelviq")).toBe("starter");
-    expect(packFromNote("Lite 50k pack (lite-50k): 50,000 Lite credits · Polar · 569.00 EUR paid")).toBe("lite-50k");
+    expect(packFromNote("Lite 50k pack (lite-50k): 50,000 Lite credits · Dodo · 569.00 EUR paid")).toBe("lite-50k");
     expect(revenuePerCreditEur([{ credits: 50_000, note: "Lite 50k pack (lite-50k): x" }])).toBeCloseTo(PACKS["lite-50k"].priceCents / 50_000 / 100);
   });
 });

@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { PolarEvent } from "@/billing/polar";
 import { addPurchase, balance, reserveForRun, stopRun } from "@/billing/db";
 import { engineConfig } from "@/engine/config";
 import type { WebReader } from "@/engine/firecrawl";
@@ -120,79 +119,65 @@ describe("credits", () => {
   });
 });
 
-describe("Polar", () => {
-  const SECRET = "test-only-not-a-real-secret";
-  const products = { starter: "prod-starter", growth: "prod-growth", agency: "prod-agency" };
-  const order = (over: Record<string, unknown> = {}) => ({
-    id: "11111111-0000-4000-8000-000000000001",
-    status: "paid",
-    paid: true,
-    total_amount: 1900,
-    refunded_amount: 0,
-    currency: "eur",
-    billing_reason: "purchase",
-    product_id: "prod-starter",
-    customer_id: "c0ffee00-0000-4000-8000-000000000001",
-    customer: { id: "c0ffee00-0000-4000-8000-000000000001", external_id: ws },
-    metadata: { workspace_id: ws, pack: "starter", credits: 500 },
+describe("Dodo Payments", () => {
+  const products = { starter: "pdt_starter", growth: "pdt_growth", agency: "pdt_agency" };
+  const payment = (over: Record<string, unknown> = {}) => ({
+    payload_type: "Payment",
+    payment_id: "pay_test_0001",
+    business_id: "bus_test_1",
+    status: "succeeded",
+    total_amount: 2299,
+    currency: "EUR",
+    customer: { customer_id: "cus_test_1", email: "owner@bos-bill.nl", name: "Owner" },
+    metadata: { workspace_id: ws, pack: "starter", credits: "500" },
+    product_cart: [{ product_id: "pdt_starter", quantity: 1 }],
     ...over,
   });
-  const event = (type: string, data: Record<string, unknown>) => ({ type, timestamp: "2026-11-12T20:00:00Z", api_version: "2026-10", data }) as unknown as PolarEvent;
+  const event = (type: string, data: Record<string, unknown>) => ({ business_id: "bus_test_1", type, timestamp: "2026-11-17T12:00:00Z", data });
 
-  it("pack checkout: the pack's product, the workspace as customer, metadata for the webhook", async () => {
-    const { createPackCheckout, fakePolarCheckouts } = await import("@/billing/polar");
-    const fake = fakePolarCheckouts("https://app.test");
-    expect(await createPackCheckout(fake, { workspaceId: ws, pack: "growth", origin: "https://app.test", products, email: "me@x.nl" })).toBe("https://app.test/credits?fake_checkout=fake_1");
-    expect(fake.calls[0]).toEqual({
-      products: ["prod-growth"],
-      external_customer_id: ws,
-      customer_email: "me@x.nl",
-      success_url: "https://app.test/credits?paid=1",
-      metadata: { workspace_id: ws, pack: "growth", credits: 2000 },
-    });
-    await expect(createPackCheckout(fake, { workspaceId: ws, pack: "lite-50k", origin: "https://app.test", products })).rejects.toThrow(/POLAR_PRODUCT_LITE_50K/);
-  });
-
-  it("a paid order adds the pack's credits once, however often Polar delivers it (signed delivery)", async () => {
+  it("a successful payment adds the pack's credits once, however often Dodo delivers it (signed delivery)", async () => {
     const { createHmac } = await import("node:crypto");
-    const { handlePolarEvent, verifyPolarWebhook } = await import("@/billing/polar");
-    const raw = JSON.stringify(event("order.paid", order()));
+    const { handleDodoEvent, verifyDodoWebhook } = await import("@/billing/dodo");
+    const SECRET = `whsec_${Buffer.from("test-only-not-a-real-secret-123").toString("base64")}`;
+    const raw = JSON.stringify(event("payment.succeeded", payment()));
     const ts = Math.floor(Date.now() / 1000);
-    const headers = { "webhook-id": "msg_1", "webhook-timestamp": String(ts), "webhook-signature": `v1,${createHmac("sha256", SECRET).update(`msg_1.${ts}.${raw}`).digest("base64")}` };
-    const verified = await verifyPolarWebhook(raw, headers, SECRET);
+    const sig = createHmac("sha256", Buffer.from(SECRET.slice(6), "base64")).update(`msg_1.${ts}.${raw}`).digest("base64");
+    const verified = verifyDodoWebhook(raw, { "webhook-id": "msg_1", "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}` }, SECRET);
     const before = (await balance(pool, ws)).available;
-    expect(await handlePolarEvent(pool, verified, products)).toMatchObject({ handled: true, added: 500 });
-    expect(await handlePolarEvent(pool, verified, products)).toMatchObject({ handled: true, added: 0, note: "already credited" });
+    expect(await handleDodoEvent(pool, verified, products)).toMatchObject({ handled: true, added: 500 });
+    expect(await handleDodoEvent(pool, verified, products)).toMatchObject({ handled: true, added: 0, note: "already credited" });
     expect((await balance(pool, ws)).available).toBe(before + 500);
-    const note = (await pool.query("select note from public.credit_ledger where stripe_event_id = $1", [`polar:${order().id}`])).rows[0].note;
-    expect(note).toBe("Starter pack (starter): 500 credits · Polar · 19.00 EUR paid");
+    const note = (await pool.query("select note from public.credit_ledger where stripe_event_id = $1", ["dodo:pay_test_0001"])).rows[0].note;
+    expect(note).toBe("Starter pack (starter): 500 credits · Dodo · 22.99 EUR paid");
     const act = (await pool.query("select actor, action, target from public.activity_log where workspace_id = $1 and action = 'credits.bought' order by id desc limit 1", [ws])).rows[0];
-    expect(act).toEqual({ actor: "Payment (Polar)", action: "credits.bought", target: "Starter pack" });
+    expect(act).toEqual({ actor: "Payment (Dodo)", action: "credits.bought", target: "Starter pack" });
   });
 
-  it("without our metadata: workspace from the customer, pack from the product; anything else is ignored, never an error", async () => {
-    const { handlePolarEvent } = await import("@/billing/polar");
-    const noMeta = order({ id: "11111111-0000-4000-8000-000000000002", product_id: "prod-agency", total_amount: 29900, metadata: {} });
-    expect(await handlePolarEvent(pool, event("order.paid", noMeta), products)).toMatchObject({ handled: true, added: 10000 });
-    const other = order({ id: "11111111-0000-4000-8000-000000000003", product_id: "prod-something-else", metadata: {} });
-    expect(await handlePolarEvent(pool, event("order.paid", other), products)).toMatchObject({ handled: false, added: 0, note: "not a FirstLine credit pack" });
-    const ghost = order({ id: "11111111-0000-4000-8000-000000000004", metadata: { workspace_id: "99999999-0000-4000-8000-000000000000", pack: "starter" }, customer: { external_id: null } });
-    expect(await handlePolarEvent(pool, event("order.paid", ghost), products)).toMatchObject({ handled: false, added: 0, note: "no known workspace on this order" });
-    const unpaid = order({ id: "11111111-0000-4000-8000-000000000005", status: "pending", paid: false });
-    expect((await handlePolarEvent(pool, event("order.paid", unpaid), products)).added).toBe(0);
-    expect((await handlePolarEvent(pool, event("order.created", order()), products)).handled).toBe(false);
-    expect((await pool.query("select count(*)::int n from public.credit_ledger where stripe_event_id like 'polar:%'")).rows[0].n).toBe(2);
+  it("without our pack in metadata the product decides; anything else is ignored, never an error", async () => {
+    const { handleDodoEvent } = await import("@/billing/dodo");
+    const byProduct = payment({ payment_id: "pay_test_0002", total_amount: 29900, metadata: { workspace_id: ws }, product_cart: [{ product_id: "pdt_agency", quantity: 1 }] });
+    expect(await handleDodoEvent(pool, event("payment.succeeded", byProduct), products)).toMatchObject({ handled: true, added: 10000 });
+    const other = payment({ payment_id: "pay_test_0003", metadata: { workspace_id: ws }, product_cart: [{ product_id: "pdt_something_else", quantity: 1 }] });
+    expect(await handleDodoEvent(pool, event("payment.succeeded", other), products)).toMatchObject({ handled: false, added: 0, note: "not a FirstLine credit pack" });
+    const ghost = payment({ payment_id: "pay_test_0004", metadata: { workspace_id: "99999999-0000-4000-8000-000000000000", pack: "starter" } });
+    expect(await handleDodoEvent(pool, event("payment.succeeded", ghost), products)).toMatchObject({ handled: false, added: 0, note: "no known workspace on this payment" });
+    const noWorkspace = payment({ payment_id: "pay_test_0005", metadata: {} });
+    expect(await handleDodoEvent(pool, event("payment.succeeded", noWorkspace), products)).toMatchObject({ handled: false, added: 0 });
+    const failed = payment({ payment_id: "pay_test_0006", status: "failed" });
+    expect((await handleDodoEvent(pool, event("payment.succeeded", failed), products)).added).toBe(0);
+    expect((await handleDodoEvent(pool, event("payment.failed", payment()), products)).handled).toBe(false);
+    expect((await pool.query("select count(*)::int n from public.credit_ledger where stripe_event_id like 'dodo:%'")).rows[0].n).toBe(2);
   });
 
-  it("a refund is logged for the workspace and shown on /admin; credits stay", async () => {
-    const { handlePolarEvent } = await import("@/billing/polar");
+  it("a refund is logged for the workspace that bought it and shown on /admin; credits stay", async () => {
+    const { handleDodoEvent } = await import("@/billing/dodo");
     const { loadRefunds } = await import("@/billing/admin-db");
     const before = (await balance(pool, ws)).available;
-    const refunded = order({ status: "refunded", refunded_amount: 1900 });
-    expect(await handlePolarEvent(pool, event("order.refunded", refunded), products)).toMatchObject({ handled: true, added: 0 });
+    const refund = { payload_type: "Refund", refund_id: "ref_test_1", payment_id: "pay_test_0001", business_id: "bus_test_1", status: "succeeded", amount: 2299, currency: "EUR", is_partial: false, created_at: "2026-11-17T13:00:00Z", metadata: {} };
+    expect(await handleDodoEvent(pool, event("refund.succeeded", refund), products)).toMatchObject({ handled: true, added: 0 });
     expect((await balance(pool, ws)).available).toBe(before);
-    const r = await loadRefunds(pool);
-    expect(r[0]).toMatchObject({ workspaceId: ws, pack: "Starter pack", refunded: "19.00 EUR", order: order().id });
+    expect((await loadRefunds(pool))[0]).toMatchObject({ workspaceId: ws, pack: "Starter pack", refunded: "22.99 EUR", order: "pay_test_0001", credits: 500 });
+    expect(await handleDodoEvent(pool, event("refund.succeeded", { ...refund, payment_id: "pay_unknown" }), products)).toMatchObject({ handled: false, note: "refund for a payment that isn't a FirstLine pack" });
   });
 });
 
@@ -206,7 +191,7 @@ describe("admin margin view", () => {
     expect(c.emails).toBe(1);
     expect(c.costUsd).toBeCloseTo(0.05);
     expect(c.m.costEur).toBeCloseTo(0.05 * 0.92);
-    // Purchases in these tests: Starter (Polar order) and Agency (product fallback) → weighted price per credit.
+    // Purchases in these tests: Starter (Dodo payment) and Agency (product fallback) → weighted price per credit.
     expect(a.perCreditEur).toBeGreaterThan(0.029);
     expect(a.perCreditEur).toBeLessThan(0.039);
     expect(a.days).toHaveLength(30);
@@ -265,7 +250,7 @@ describe("data retention (§11)", () => {
     expect(f).toMatchObject({ days: 30 });
     expect(f.signups).toBeGreaterThanOrEqual(1);
     expect(f.firstCampaigns).toBeGreaterThanOrEqual(1);
-    expect(f.firstPurchases).toBeGreaterThanOrEqual(1); // the Polar purchases earlier in this file
+    expect(f.firstPurchases).toBeGreaterThanOrEqual(1); // the Dodo purchases earlier in this file
     expect((await loadFunnel(pool, 30, new Date(Date.now() + 60 * 86_400_000))).signups).toBe(0);
   });
 

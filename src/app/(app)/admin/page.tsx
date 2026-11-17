@@ -146,7 +146,7 @@ async function Admin() {
       )}
       {refunds.length > 0 && (
         <Card className="space-y-2 bg-amber-50 text-sm text-amber-900">
-          <p className="font-medium">Refunds in Polar (last 90 days): credits were not taken back automatically.</p>
+          <p className="font-medium">Refunds in Dodo Payments (last 90 days): credits were not taken back automatically.</p>
           <ul className="list-disc space-y-1 pl-5">
             {refunds.map((r) => (
               <li key={`${r.order}-${r.at}`}>

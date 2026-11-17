@@ -49,5 +49,5 @@ the switch is on (`src/content/refund.ts`):
 > refund the unused credits of that pack at the price you paid, through our payment provider, and remove
 > them from your balance. Credits already used are not refunded.
 
-How a refund works today: you refund the order in Polar. /admin then lists it under "Refunds in Polar",
+How a refund works today: you refund the payment in Dodo Payments. /admin then lists it under "Refunds in Dodo Payments",
 because the credits are not taken back automatically. Remove the unused credits by hand.
