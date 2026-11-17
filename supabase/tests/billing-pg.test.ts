@@ -243,6 +243,32 @@ describe("data retention (§11)", () => {
     expect((await runRetention(pool, new Date(Date.now() + 32 * 86_400_000))).purged).toBe(0); // once
   });
 
+  it("the homepage counter keeps counting leads after retention deletes them, exactly once", async () => {
+    const { endCampaign, runRetention } = await import("@/billing/retention");
+    const { proofCounts } = await import("@/lib/proof-counts");
+    const c = (await pool.query("insert into public.campaigns (workspace_id, name, status) values ($1, 'Counted', 'done') returning id", [ws])).rows[0].id;
+    for (const [i, status] of ["done", "done", "fallback", "failed"].entries()) {
+      await pool.query("insert into public.leads (workspace_id, campaign_id, email, status) values ($1, $2, $3, $4)", [ws, c, `p${i}@count.nl`, status]);
+    }
+    const before = await proofCounts(pool);
+    expect(await endCampaign(pool, ws, c)).toBe(true);
+    await runRetention(pool, new Date(Date.now() + 31 * 86_400_000));
+    expect((await pool.query("select count(*)::int n from public.leads where campaign_id = $1", [c])).rows[0].n).toBe(0);
+    expect(await proofCounts(pool)).toEqual(before); // moved from live leads into the lifetime totals
+    await runRetention(pool, new Date(Date.now() + 32 * 86_400_000));
+    expect(await proofCounts(pool)).toEqual(before); // not added twice
+  });
+
+  it("the /admin funnel counts demos, sign-ups, first campaigns and first purchases", async () => {
+    const { loadFunnel } = await import("@/lib/funnel");
+    const f = await loadFunnel(pool, 30);
+    expect(f).toMatchObject({ days: 30 });
+    expect(f.signups).toBeGreaterThanOrEqual(1);
+    expect(f.firstCampaigns).toBeGreaterThanOrEqual(1);
+    expect(f.firstPurchases).toBeGreaterThanOrEqual(1); // the Polar purchases earlier in this file
+    expect((await loadFunnel(pool, 30, new Date(Date.now() + 60 * 86_400_000))).signups).toBe(0);
+  });
+
   it("a campaign without any activity for 90 days ends by itself", async () => {
     const { runRetention } = await import("@/billing/retention");
     const c = (await pool.query("insert into public.campaigns (workspace_id, name, status, created_at) values ($1, 'Idle', 'preview', now() - interval '100 days') returning id", [ws])).rows[0].id;

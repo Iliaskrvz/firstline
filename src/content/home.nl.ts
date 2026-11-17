@@ -127,6 +127,7 @@ export const HOME_NL: HomeCopy = {
     packLine: (credits: string, price: string) => `${price} voor ${credits} e-mails`,
     save: (pct: number) => `${pct}% voordeliger`,
     anchorNote: "Het kleinste pakket is 500 credits voor €19.",
+    refund: "Ongebruikte credits terug binnen 30 dagen na aankoop.",
     buy: (credits: string) => `Koop ${credits} credits`,
     mostPopular: "Meest gekozen",
     perPack: "excl. btw · eenmalig",
@@ -216,6 +217,16 @@ export const HOME_NL: HomeCopy = {
     before: "Reactiepercentage eerst",
     after: "Met FirstLine",
     basedOn: (n: string) => `op basis van ${n} e-mails`,
+    placeholder: "Placeholder: nooit zichtbaar in productie",
+  },
+
+  proof: {
+    counter: "{personalised} e-mails gepersonaliseerd · {neutral} leads gratis overgeslagen",
+    counterNote: "Live uit de database van FirstLine, elk uur bijgewerkt.",
+    counterPreview: "Preview: de drempel wordt lokaal genegeerd",
+    testimonialsEyebrow: "Van mensen die het gebruiken",
+    testimonialsTitle: "In hun eigen woorden",
+    logosLabel: "Gebruikt door teams van",
     placeholder: "Placeholder: nooit zichtbaar in productie",
   },
 

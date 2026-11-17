@@ -1,3 +1,4 @@
+import { TrackOnce } from "@/components/track-once";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
@@ -56,7 +57,11 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
   const campaigns = new Map((camps ?? []).map((c) => [c.id, c.name as string]));
   const ledger = (rows ?? []) as { id: number; type: string; amount: number; note: string | null; campaign_id: string | null; lead_id: string | null; stripe_event_id: string | null; source: string | null; created_at: string }[];
   const justPaid = typeof paid === "string" && paid.length > 0;
-  const arrived = justPaid && boughtJustNow(ledger);
+  // A purchase in the last 10 minutes shows as received, also after the ?paid marker left the address.
+  const arrived = boughtJustNow(ledger);
+  // The workspace's first purchase ever: one analytics event, sent once (the marker leaves the address).
+  const firstPurchase =
+    justPaid && arrived && (await supabase.from("credit_ledger").select("id", { count: "exact", head: true }).eq("workspace_id", workspace.id).eq("type", "purchase")).count === 1;
 
   // Per-lead rows (reserve / use / return) are summed per campaign so the history stays readable.
   type Row = { key: string; label: string; tone: (typeof TYPE)[string]["tone"]; amount: number; text: string; at: string };
@@ -82,7 +87,8 @@ async function Credits({ searchParams }: { searchParams: PageProps<"/credits">["
   return (
     <div className="space-y-6">
       <AutoRefresh active={justPaid && !arrived} intervalMs={3000} />
-      {justPaid && (
+      {firstPurchase && <TrackOnce event="First purchase" param="paid" />}
+      {(justPaid || arrived) && (
         <Card className={arrived ? "bg-emerald-50 text-sm text-emerald-900" : "bg-brand-50 text-sm text-brand-900"}>
           {arrived ? "Payment received: your credits are added." : "Payment received. Your credits appear here in a few seconds…"}
         </Card>

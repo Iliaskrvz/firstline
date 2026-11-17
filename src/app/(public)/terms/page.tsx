@@ -1,3 +1,4 @@
+import { REFUND_TERMS_CLAUSE, refundOffer } from "@/content/refund";
 import type { Metadata } from "next";
 import { pageMetadata } from "@/content/meta";
 import Link from "next/link";
@@ -33,6 +34,7 @@ export default function Terms() {
         <li>You buy credit packs in advance. Prices are shown before you pay. Payments are processed by Polar, our merchant of record, which also issues the invoice.</li>
         <li>Credits are reserved when a run starts and only used for leads that get a finished email. Leads without usable facts and stopped runs are returned to your balance.</li>
         <li>Credits never expire. They are not refundable, except where the law requires it or when the service fails on our side.</li>
+        {refundOffer() && <li>{REFUND_TERMS_CLAUSE}</li>}
       </ul>
 
       <h2>5. Your data</h2>

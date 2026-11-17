@@ -130,6 +130,8 @@ export const HOME = {
     packLine: (credits: string, price: string) => `${price} for ${credits} emails`,
     save: (pct: number) => `Save ${pct}%`,
     anchorNote: "The smallest pack is 500 credits for €19.",
+    /** Shown only when REFUND_OFFER=1 (see src/content/refund.ts). */
+    refund: "Unused credits refunded within 30 days of purchase.",
     buy: (credits: string) => `Buy ${credits} credits`,
     mostPopular: "Most popular",
     perPack: "excl. VAT · one-time",
@@ -222,6 +224,17 @@ export const HOME = {
     before: "Reply rate before",
     after: "With FirstLine",
     basedOn: (n: string) => `based on ${n} emails`,
+    placeholder: "Placeholder: never shown in production",
+  },
+
+  /** Social proof: hidden unless SHOW_PROOF is on and the entries are real (src/content/proof.ts). */
+  proof: {
+    counter: "{personalised} emails personalised · {neutral} leads skipped for free",
+    counterNote: "Live from FirstLine's database, updated every hour.",
+    counterPreview: "Preview: the threshold is ignored locally",
+    testimonialsEyebrow: "From people who use it",
+    testimonialsTitle: "In their words",
+    logosLabel: "Used by teams at",
     placeholder: "Placeholder: never shown in production",
   },
 

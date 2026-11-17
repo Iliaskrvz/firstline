@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useTurnstile } from "@/components/marketing/turnstile";
+import { track } from "@/lib/track";
 import { buttonClass, inputClass } from "@/components/ui";
 import type { HomeCopy } from "@/content/home";
 import type { Locale } from "@/content/site";
@@ -40,7 +41,10 @@ export function LiveDemo({ t: T, lang, siteKey, test }: { t: HomeCopy["liveDemo"
       const res = await fetch("/api/demo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url, sells, token, lang }) });
       const j = await res.json().catch(() => ({ error: T.errorGeneric }));
       if (!res.ok) setError(j.error ?? T.errorGeneric);
-      else setResult(j as Result);
+      else {
+        setResult(j as Result);
+        track("Demo used", { status: (j as Result).status, lang, cached: !!(j as Result).cached });
+      }
     } catch {
       setError(T.errorNetwork);
     } finally {

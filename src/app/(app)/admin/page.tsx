@@ -8,6 +8,7 @@ import { n } from "@/lib/format";
 import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
 import { demoStats } from "@/engine/demo-pg";
 import { recentContacts } from "@/lib/contact";
+import { loadFunnel } from "@/lib/funnel";
 import { demoMode } from "@/server/demo";
 import { STEPS } from "@/config/models";
 import { engineConfig } from "@/engine/config";
@@ -50,7 +51,7 @@ async function Admin() {
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
   const config = engineConfig();
-  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts, funnel] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     llmBudget(pool, process.env, new Date(), config.llmProvider),
@@ -59,6 +60,7 @@ async function Admin() {
     config.llmProvider === "deepseek" && config.deepseekApiKey ? fetchDeepSeekBalance(config.deepseekApiKey) : Promise.resolve(null),
     demoStats(pool),
     recentContacts(pool, 10),
+    loadFunnel(pool, 30),
   ]);
   const demoToday = demo[0];
   const demoWeekUsd = demo.reduce((s, d) => s + d.costUsd, 0);
@@ -104,6 +106,27 @@ async function Admin() {
         <span className="text-slate-500">
           Last 7 days ${demoWeekUsd.toFixed(2)} · {demoMode() === "live" ? "on" : demoMode() === "test" ? "test mode" : "off (needs an AI key, Firecrawl and Turnstile keys)"} · cap: DEMO_DAILY_CAP
         </span>
+      </Card>
+      <Card className="text-sm">
+        <p className="font-semibold text-slate-900">Funnel, last {funnel.days} days (from the database)</p>
+        <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {(
+            [
+              ["Homepage demo runs", funnel.demos],
+              ["Sign-ups", funnel.signups],
+              ["First campaigns", funnel.firstCampaigns],
+              ["First purchases", funnel.firstPurchases],
+            ] as const
+          ).map(([label, v]) => (
+            <div key={label} className="rounded-lg bg-slate-50 px-3 py-2">
+              <dt className="text-xs text-slate-500">{label}</dt>
+              <dd className="text-lg font-semibold text-slate-900 tabular-nums">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-2 text-xs text-slate-500">
+          Visitors and page views: {process.env.PLAUSIBLE_SCRIPT_URL?.trim() ? "in your Plausible dashboard." : "off (set PLAUSIBLE_SCRIPT_URL to turn on Plausible)."}
+        </p>
       </Card>
       {contacts.length > 0 && (
         <Card className="space-y-3 text-sm">

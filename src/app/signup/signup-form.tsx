@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, inputClass } from "@/components/ui";
 import { friendlyAuthError, MIN_PASSWORD, normalisePassword, passwordProblem } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/client";
+import { track } from "@/lib/track";
 import { Divider, GoogleButton } from "../login/login-form";
 
 export function SignupForm({ next, google }: { next: string | null; google: boolean }) {
@@ -29,6 +30,7 @@ export function SignupForm({ next, google }: { next: string | null; google: bool
       setState("idle");
       return;
     }
+    track("Signup", { method: "email" });
     setState("sent");
   }
 

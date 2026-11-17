@@ -108,7 +108,9 @@ export async function importLeads(input: z.input<typeof ImportInput>): Promise<I
   }
 
   revalidatePath("/campaigns");
-  redirect(`/campaigns/${campaign.id}`);
+  // The workspace's first campaign in the app: the page sends the "First campaign" analytics event once.
+  const { count } = await supabase.from("campaigns").select("id", { count: "exact", head: true }).eq("workspace_id", workspace.id).eq("source", "app");
+  redirect(count === 1 ? `/campaigns/${campaign.id}?first=1` : `/campaigns/${campaign.id}`);
 }
 
 const SettingsInput = z.object({

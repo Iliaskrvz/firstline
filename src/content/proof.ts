@@ -47,3 +47,42 @@ export const DEMO_VIDEO: { src: string | null; poster: string | null; captions: 
   captions: null,
   durationLabel: "1:20",
 };
+
+export type Testimonial = {
+  placeholder: boolean;
+  /** Their words, unedited apart from typos, approved by them in writing. Keep the original language. */
+  quote: string;
+  name: string;
+  /** Role and company, as they want it shown. */
+  role: string;
+  language: "en" | "nl";
+  /** Optional photo in public/proof/, only with their permission. */
+  photo?: string;
+};
+
+/** 3 to 5 real quotes from beta users. All placeholders until then. */
+export const TESTIMONIALS: Testimonial[] = [1, 2, 3].map((i) => ({
+  placeholder: true,
+  quote: `PLACEHOLDER ${i} · a real quote from a beta user goes here, in their own words.`,
+  name: "PLACEHOLDER · Name",
+  role: "PLACEHOLDER · Role, company",
+  language: "en" as const,
+}));
+
+export type CustomerLogo = {
+  placeholder: boolean;
+  name: string;
+  /** SVG or PNG in public/proof/logos/, used only with the customer's written permission. */
+  src: string;
+  width: number;
+  height: number;
+};
+
+/** Customer logos for the strip under the hero. Placeholders until you have written permission. */
+export const CUSTOMER_LOGOS: CustomerLogo[] = [1, 2, 3, 4, 5].map((i) => ({
+  placeholder: true,
+  name: `Placeholder customer ${i}`,
+  src: "",
+  width: 120,
+  height: 32,
+}));

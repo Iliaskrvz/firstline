@@ -1,3 +1,4 @@
+import { TrackOnce } from "@/components/track-once";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -35,10 +36,20 @@ const PAGE = 50;
 
 export default function CampaignPage(props: PageProps<"/campaigns/[id]">) {
   return (
-    <Suspense fallback={<Skeleton className="h-96" />}>
-      <CampaignDetail params={props.params} />
-    </Suspense>
+    <>
+      <Suspense fallback={<Skeleton className="h-96" />}>
+        <CampaignDetail params={props.params} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <FirstCampaignEvent searchParams={props.searchParams} />
+      </Suspense>
+    </>
   );
+}
+
+/** Right after the workspace's first campaign is created (?first=1): one analytics event. */
+async function FirstCampaignEvent({ searchParams }: { searchParams: PageProps<"/campaigns/[id]">["searchParams"] }) {
+  return (await searchParams).first === "1" ? <TrackOnce event="First campaign" param="first" /> : null;
 }
 
 async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">["params"] }) {

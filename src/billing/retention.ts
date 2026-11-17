@@ -2,6 +2,7 @@
 // A campaign ends when the user ends it, or by itself after 90 days without any activity
 // (no new leads, no generations, no sends). What stays: the campaign row (name, counts),
 // the credit ledger and real costs (they are permanent history and hold no personal data).
+import { archiveLeadCounts } from "@/lib/proof-counts";
 import type pg from "pg";
 
 export const RETENTION_DAYS = 30;
@@ -50,9 +51,21 @@ export async function runRetention(pool: pg.Pool, now: Date = new Date()): Promi
   let leadsDeleted = 0;
   for (const c of due) {
     // Generations, sends and batch items go with their leads (foreign keys cascade); costs keep their campaign.
-    const r = await pool.query("delete from public.leads where campaign_id = $1", [c.id]);
-    leadsDeleted += r.rowCount ?? 0;
-    await pool.query("update public.campaigns set purged_at = $2 where id = $1", [c.id, now]);
+    // The lead counts go into the lifetime totals first, in the same transaction, so they're counted once.
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await archiveLeadCounts(client, c.id);
+      const r = await client.query("delete from public.leads where campaign_id = $1", [c.id]);
+      await client.query("update public.campaigns set purged_at = $2 where id = $1", [c.id, now]);
+      await client.query("commit");
+      leadsDeleted += r.rowCount ?? 0;
+    } catch (e) {
+      await client.query("rollback").catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
   }
   return { ended: idle.length, purged: due.length, leadsDeleted };
 }

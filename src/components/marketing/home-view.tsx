@@ -1,15 +1,17 @@
 // The homepage, in either language: src/app/(marketing)/page.tsx (English) and /nl (Dutch).
 // All copy comes from src/content/home.ts / home.nl.ts.
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import { Suspense, type CSSProperties } from "react";
 import { CaseStudyCard } from "@/components/marketing/case-study";
 import { DemoPlayer } from "@/components/marketing/demo-player";
 import { LiveDemo } from "@/components/marketing/live-demo";
+import { hasTestimonials, LiveCounter, LogoStrip, Testimonials } from "@/components/marketing/proof-blocks";
 import { Check, Cite, Eyebrow, H2, MarketingShell, WindowDots } from "@/components/marketing/site";
 import { buttonClass } from "@/components/ui";
 import { COMPETITORS, checkedOnLabel } from "@/content/competitors";
 import type { HomeCopy } from "@/content/home";
 import { CASE_STUDIES, DEMO_VIDEO } from "@/content/proof";
+import { refundOffer } from "@/content/refund";
 import { fmtEuro, fmtInt, type Locale } from "@/content/site";
 import { enabledPacks } from "@/lib/credits";
 import { visibleProof } from "@/lib/proof";
@@ -276,6 +278,13 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
             </ul>
           </div>
         </div>
+        {/* Social proof: renders nothing unless SHOW_PROOF lets real entries through */}
+        <div className="mx-auto max-w-6xl space-y-4 px-4 empty:hidden sm:px-6 [&>*:first-child]:mt-6">
+          <Suspense fallback={null}>
+            <LiveCounter t={t.proof} locale={locale} />
+          </Suspense>
+          <LogoStrip t={t.proof} />
+        </div>
       </section>
 
       {/* Live demo: only when it's switched on (else the hero's static example is the demo) */}
@@ -426,6 +435,8 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
         </div>
       </section>
 
+      {hasTestimonials() && <Testimonials t={t.proof} n={n()} />}
+
       {/* API (dark) */}
       <section id="api" className="bg-grid-dark scroll-mt-16 bg-slate-950 py-20 text-white md:py-28">
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 sm:px-6 lg:grid-cols-[1fr_1.25fr]">
@@ -484,6 +495,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
             </div>
             <p className="text-[17px] text-slate-900">
               <strong className="font-semibold">{t.pricing.anchor}</strong> <span className="text-slate-600">{t.pricing.anchorNote}</span>
+              {refundOffer() && <span className="mt-1 block text-[15px] text-emerald-800">{t.pricing.refund}</span>}
             </p>
           </div>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
