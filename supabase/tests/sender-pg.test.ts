@@ -327,6 +327,48 @@ describe("3-step sequence across 2 inboxes (Phase 4)", () => {
   });
 });
 
+describe("Download for Outlook", () => {
+  it("exports exactly what the Gmail lane would send: same leads, same texts, same opt-out line", async () => {
+    const { loadOutlookDrafts } = await import("@/sender/outlook-export-db");
+    const inbox = await createInbox(pool, { workspaceId: ws, email: "out@sender.nl", window: DEFAULT_WINDOW, dailyCap: 30 });
+    const c = await campaign("Outlook", [["ok1@ol1.nl", "ol1.nl", "done"], ["fb@ol2.nl", "ol2.nl", "fallback"], ["sup@ol3.nl", "ol3.nl", "done"], ["ok2@ol4.nl", "ol4.nl", "done"]], false);
+    await pool.query("insert into public.suppression (workspace_id, email, reason) values ($1, 'sup@ol3.nl', 'unsub')", [ws]);
+    await pool.query(
+      `insert into public.sequence_steps (campaign_id, workspace_id, step_no, delay_days, kind, template_body) values
+         ($1, $2, 2, 3, 'plain', 'Hi {{first_name}}, a quick follow-up.'),
+         ($1, $2, 3, 3, 'personalised', 'Hi {{first_name}}, [[angle · another fact · 20]]')`,
+      [c.id, ws],
+    );
+    await pool.query("insert into public.generations (lead_id, workspace_id, step_no, subject, full_email, slot_outputs) values ($1, $2, 3, '', 'Hi X, saw your new office.', '{}')", [c.leads[0], ws]);
+    const optOutLine = "Not relevant? Reply 'no'.";
+
+    const out = await loadOutlookDrafts(pool, { workspaceId: ws, campaignId: c.id, includeFollowUps: true, optOutLine });
+    expect(out).toMatchObject({ suppressed: 1, skippedFallbacks: 1, missingFollowUps: 1 });
+    expect(out.leads.map((l) => l.first.to)).toEqual(["ok1@ol1.nl", "ok2@ol4.nl"]);
+    expect(out.leads[0].followUps.map((f) => f.step)).toEqual([2, 3]);
+    expect(out.leads[1].followUps.map((f) => f.step)).toEqual([2]); // step 3 wasn't written for this lead
+    expect(out.leads[0].followUps[0].draft.subject).toBe("Idea for ok1@ol1.nl"); // a new email: no "Re:"
+
+    // The Gmail lane on the same campaign queues the same bodies.
+    await startSending(pool, { workspaceId: ws, campaignId: c.id, inboxIds: [inbox.id], optOutLine });
+    const { rows: sends } = await pool.query("select to_email, step_no, body from public.sends where campaign_id = $1 and status = 'queued' order by to_email, step_no", [c.id]);
+    const exported = out.leads.flatMap((l) => [{ to_email: l.first.to, step_no: 1, body: l.first.text }, ...l.followUps.map((f) => ({ to_email: f.draft.to, step_no: f.step, body: f.draft.text }))]);
+    expect(exported.sort((x, y) => x.to_email.localeCompare(y.to_email) || x.step_no - y.step_no)).toEqual(sends);
+
+    const none = await loadOutlookDrafts(pool, { workspaceId: ws, campaignId: c.id, includeFollowUps: false, optOutLine: null });
+    expect(none.leads.every((l) => l.followUps.length === 0 && !l.first.text.includes("Reply 'no'"))).toBe(true);
+    // The export is counted on its own outcome channel.
+    await pool.query("select public.record_outcomes($1::uuid[], 1, 'outlook', 'exported')", [out.leadIds]);
+    expect((await pool.query("select count(*)::int n from public.outcomes where channel = 'outlook'")).rows[0].n).toBe(2);
+  });
+
+  it("another workspace's campaign can't be exported", async () => {
+    const { loadOutlookDrafts } = await import("@/sender/outlook-export-db");
+    const c = await campaign("Mine", [["m@mine.nl", "mine.nl", "done"]]);
+    await expect(loadOutlookDrafts(pool, { workspaceId: "00000000-0000-4000-8000-000000000000", campaignId: c.id, includeFollowUps: false, optOutLine: null })).rejects.toThrow(/not found/);
+  });
+});
+
 describe("inbox offline alerts", () => {
   it("emails the owner once per outage, and again after it recovers and drops again", async () => {
     const { checkInboxHealth } = await import("@/sender/alerts");

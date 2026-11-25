@@ -1,3 +1,4 @@
+import { OutlookExport } from "./outlook-export";
 import { TrackOnce } from "@/components/track-once";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -249,9 +250,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             )}
           </div>
           {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
-            <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
-              Export CSV for a sending tool (fl_ columns) ↓
-            </a>
+            <div className="space-y-2">
+              <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
+                Export CSV for a sending tool (fl_ columns) ↓
+              </a>
+              <OutlookExport
+                campaignId={c.id}
+                followUpSteps={steps.map((s) => s.step_no).filter((n) => n > 1)}
+                defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
+              />
+            </div>
           )}
           {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
             <div className="border-t border-slate-100 pt-5">

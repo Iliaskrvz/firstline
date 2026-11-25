@@ -47,3 +47,6 @@ next-env.d.ts
 /logs
 
 /.next-local/
+
+# Sample Outlook drafts (scripts/outlook-samples.ts)
+outlook-samples/
