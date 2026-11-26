@@ -8,7 +8,7 @@ import type { OutlookLead } from "@/lib/outlook-export";
 import { composeBody } from "@/lib/sender/messages";
 import { renderPlainStep } from "@/lib/sender/sequence";
 
-export type OutlookDrafts = { leads: OutlookLead[]; suppressed: number; skippedFallbacks: number; missingFollowUps: number; leadIds: string[] };
+export type OutlookDrafts = { leads: OutlookLead[]; suppressed: number; skippedFallbacks: number; missingFollowUps: number; invalid: number; leadIds: string[] };
 
 export async function loadOutlookDrafts(
   pool: pg.Pool,
@@ -19,7 +19,7 @@ export async function loadOutlookDrafts(
   const sendFallbacks: boolean = camp[0].send_fallbacks;
 
   const { rows: leads } = await pool.query(
-    `select l.id, l.email, l.first_name, l.last_name, l.company, l.title, l.linkedin_headline, l.website, l.domain, l.custom, l.status,
+    `select l.id, l.email, l.first_name, l.last_name, l.company, l.title, l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.email_status,
             g.subject, g.full_email,
             exists (select 1 from public.suppression x where x.workspace_id = l.workspace_id
                      and (lower(x.email) = lower(l.email) or x.domain = split_part(lower(l.email), '@', 2))) suppressed
@@ -50,8 +50,12 @@ export async function loadOutlookDrafts(
     : [];
   const followUpText = new Map(written.map((g) => [`${g.lead_id}:${g.step_no}`, g.full_email]));
 
-  const out: OutlookDrafts = { leads: [], suppressed: 0, skippedFallbacks: 0, missingFollowUps: 0, leadIds: [] };
+  const out: OutlookDrafts = { leads: [], suppressed: 0, skippedFallbacks: 0, missingFollowUps: 0, invalid: 0, leadIds: [] };
   for (const l of leads) {
+    if (l.email_status === "invalid") {
+      out.invalid++;
+      continue;
+    }
     if (l.status === "fallback" && !sendFallbacks) {
       out.skippedFallbacks++;
       continue;
@@ -60,7 +64,7 @@ export async function loadOutlookDrafts(
       out.suppressed++;
       continue;
     }
-    const base = { to: l.email as string, firstName: l.first_name, lastName: l.last_name, company: l.company, subject: (l.subject as string).trim() };
+    const base = { to: l.email as string, firstName: l.first_name, lastName: l.last_name, company: l.company, subject: (l.subject as string).trim(), emailStatus: l.email_status as string };
     const vars = leadVars({ ...l, custom: l.custom ?? {} });
     const followUps: OutlookLead["followUps"] = [];
     for (const st of steps) {

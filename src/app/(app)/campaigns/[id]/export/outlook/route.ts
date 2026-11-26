@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/campaigns/[i
   const drafts = await loadOutlookDrafts(pool, { workspaceId: workspace.id, campaignId: id, includeFollowUps, optOutLine: optOutLine || null });
   if (drafts.leads.length === 0) return new Response("Nothing to export yet: no finished emails (or all of them are on the suppression list).", { status: 409 });
 
-  const zip = buildOutlookZip({ campaign: campaign.name, leads: drafts.leads, mailMerge });
+  const zip = buildOutlookZip({ campaign: campaign.name, leads: drafts.leads, mailMerge, invalidLeftOut: drafts.invalid });
 
   const followUps = drafts.leads.reduce((s, l) => s + l.followUps.length, 0);
   await logActivity(pool, {

@@ -37,6 +37,8 @@ import { deliverDue } from "@/api/webhooks-pg";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
 import { microsoftAuth, microsoftGraph, microsoftMode } from "@/sender/microsoft-config";
 import { alertDisconnected, outlookTick } from "@/sender/outlook";
+import { checkLeadEmails, emailCheckTick } from "@/lib/email-check-pg";
+import { systemResolver } from "@/lib/email-dns";
 
 const VERSION = process.env.npm_package_version ?? "dev";
 const WORKER_ID = `${hostname()}-${process.pid}`;
@@ -174,6 +176,24 @@ async function main() {
     }
   };
   const outlookTimer = setInterval(outlookCheck, 60_000);
+
+  // Free email checks (Part A): DNS of new leads' domains (cached 7 days) and the pre-send re-check.
+  // DNS only, never SMTP.
+  const resolver = systemResolver();
+  let emailBusy = false;
+  const emailCheck = async () => {
+    if (emailBusy) return;
+    emailBusy = true;
+    try {
+      const r = await asSingleton(pool, "email-check", () => emailCheckTick(pool, resolver));
+      if (r?.checked) log(`email check: ${r.checked} checked, ${r.invalid} invalid`);
+    } catch (e) {
+      log("email check failed:", (e as Error).message);
+    } finally {
+      emailBusy = false;
+    }
+  };
+  const emailTimer = setInterval(emailCheck, 20_000);
 
 
   // Economy mode (§9): bundle waiting writes into batches and collect finished ones.
@@ -358,6 +378,9 @@ async function main() {
         return { outcome: "deferred", reason: slot.reason };
       }
       try {
+        // Free email check before any paid call: an invalid address is skipped and its credit released
+        // (the pipeline then sees a settled lead). Cached DNS, so usually instant.
+        await checkLeadEmails(pool, resolver, { leadIds: [leadId] }).catch((e) => log(`lead ${leadId}: email check failed, continuing:`, (e as Error).message));
         // Shared provider limits read this to share fairly and to let previews go first.
         const res = await jobContext.run({ workspaceId, priority: preview ? PRIORITY.preview : PRIORITY.run }, () =>
           processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force }),
@@ -422,6 +445,7 @@ async function main() {
     clearInterval(beat);
     clearInterval(inboxTimer);
     clearInterval(outlookTimer);
+    clearInterval(emailTimer);
     clearInterval(economyTimer);
     clearInterval(labTimer);
     clearInterval(retentionTimer);

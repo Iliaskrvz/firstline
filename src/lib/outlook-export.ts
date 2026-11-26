@@ -16,6 +16,8 @@ export type OutlookDraft = {
   subject: string;
   /** The full email as plain text, opt-out line included. */
   text: string;
+  /** Free email check result (valid / risky / pending), shown in the mail-merge CSV. */
+  emailStatus?: string;
 };
 
 export type OutlookLead = {
@@ -121,10 +123,11 @@ export const FOLDERS = {
   followUp: (step: number) => `step-${step}-follow-up`,
 };
 
-export function readme(opts: { campaign: string; drafts: number; followUpSteps: number[]; mailMerge: boolean }): string {
+export function readme(opts: { campaign: string; drafts: number; followUpSteps: number[]; mailMerge: boolean; invalidLeftOut?: number }): string {
   const steps = opts.followUpSteps.length ? opts.followUpSteps.map((s) => `step ${s}`).join(", ") : "";
   const en = [
     `FirstLine · ${opts.campaign} · ${opts.drafts} drafts`,
+    ...(opts.invalidLeftOut ? [`${opts.invalidLeftOut} lead(s) left out: their email address failed FirstLine's free check (invalid).`] : []),
     "",
     "WHAT'S IN THIS ZIP",
     `- ${FOLDERS.first}/: one email per lead, ready to send from Outlook.`,
@@ -151,6 +154,7 @@ export function readme(opts: { campaign: string; drafts: number; followUpSteps: 
     "----------------------------------------------------------------------",
     "",
     `FirstLine · ${opts.campaign} · ${opts.drafts} concepten`,
+    ...(opts.invalidLeftOut ? [`${opts.invalidLeftOut} lead(s) weggelaten: hun e-mailadres haalde de gratis controle van FirstLine niet (ongeldig).`] : []),
     "",
     "WAT ZIT ER IN DEZE ZIP",
     `- ${FOLDERS.first}/: één e-mail per lead, klaar om te versturen vanuit Outlook.`,
@@ -205,12 +209,16 @@ export function mailMergeCsv(leads: OutlookLead[]): string {
     full_email: l.first.text,
     first_name: l.first.firstName ?? "",
     company: l.first.company ?? "",
+    email_status: l.first.emailStatus ?? "",
   }));
-  return "﻿" + Papa.unparse({ fields: ["email", "subject", "full_email", "first_name", "company"], data: rows.map((r) => [r.email, r.subject, r.full_email, r.first_name, r.company]) });
+  return (
+    "\ufeff" +
+    Papa.unparse({ fields: ["email", "subject", "full_email", "first_name", "company", "email_status"], data: rows.map((r) => [r.email, r.subject, r.full_email, r.first_name, r.company, r.email_status]) })
+  );
 }
 
 /** The whole ZIP. `boundary` makes the output deterministic in tests. */
-export function buildOutlookZip(input: { campaign: string; leads: OutlookLead[]; mailMerge: boolean; boundary?: (i: number) => string }): Uint8Array {
+export function buildOutlookZip(input: { campaign: string; leads: OutlookLead[]; mailMerge: boolean; invalidLeftOut?: number; boundary?: (i: number) => string }): Uint8Array {
   const files: Record<string, Uint8Array> = {};
   const usedFirst = new Set<string>();
   const usedFollow = new Map<number, Set<string>>();
@@ -229,7 +237,7 @@ export function buildOutlookZip(input: { campaign: string; leads: OutlookLead[];
     files["mail-merge.csv"] = strToU8(mailMergeCsv(input.leads));
     files["MAIL-MERGE.txt"] = strToU8(MAIL_MERGE_HELP);
   }
-  files["README.txt"] = strToU8(readme({ campaign: input.campaign, drafts: input.leads.length, followUpSteps: [...steps].sort((a, b) => a - b), mailMerge: input.mailMerge }));
+  files["README.txt"] = strToU8(readme({ campaign: input.campaign, drafts: input.leads.length, followUpSteps: [...steps].sort((a, b) => a - b), mailMerge: input.mailMerge, invalidLeftOut: input.invalidLeftOut }));
   return zipSync(files, { level: 6 });
 }
 

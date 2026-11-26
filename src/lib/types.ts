@@ -59,4 +59,8 @@ export type LeadRow = {
   status: string;
   /** Why the lead ended where it did ("Website unreachable", …). */
   status_detail?: string | null;
+  /** Free email check (src/lib/email-check.ts). */
+  email_status?: "pending" | "valid" | "risky" | "invalid";
+  email_reason?: string | null;
+  email_suggestion?: string | null;
 };

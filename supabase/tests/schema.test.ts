@@ -133,6 +133,13 @@ describe("row level security", () => {
     ).rejects.toThrow(/permission denied/);
   });
 
+  it("the DNS cache of the email check is server only", async () => {
+    await db.query("insert into public.email_domain_checks (domain, result) values ('acme.nl', 'mx')");
+    await expect(asUser(USER_A, () => db.query("select * from public.email_domain_checks"))).rejects.toThrow(/permission denied/);
+    await expect(asUser(USER_A, () => db.query("insert into public.email_domain_checks (domain, result) values ('x.nl', 'mx')"))).rejects.toThrow(/permission denied/);
+    await expect(db.query("insert into public.email_domain_checks (domain, result) values ('y.nl', 'smtp_ok')")).rejects.toThrow(/check/);
+  });
+
   it("Outlook tokens are readable by nobody but the server, not even the inbox's own workspace", async () => {
     const inbox = (
       await db.query<{ id: string }>("insert into public.inboxes (workspace_id, email, type) values ($1, 'a@a-tenant.com', 'outlook_oauth') returning id", [wsA])

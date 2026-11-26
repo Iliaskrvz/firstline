@@ -108,7 +108,7 @@ describe("the ZIP", () => {
     expect([...files["mail-merge.csv"].slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]); // UTF-8 BOM for Excel and Word
     const csv = strFromU8(files["mail-merge.csv"]).replace(/^\ufeff/, "");
     const parsed = Papa.parse<Record<string, string>>(csv, { header: true });
-    expect(parsed.meta.fields).toEqual(["email", "subject", "full_email", "first_name", "company"]);
+    expect(parsed.meta.fields).toEqual(["email", "subject", "full_email", "first_name", "company", "email_status"]);
     expect(parsed.data[0]).toMatchObject({ email: "sanne@bakkerijvos.nl", first_name: "Sanne", company: "Bakkerij Vos" });
     expect(parsed.data[0].full_email).toContain("second shop in Utrecht-Oost");
     expect(mailMergeCsv([]).length).toBeGreaterThan(1);

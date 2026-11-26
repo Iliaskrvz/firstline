@@ -26,10 +26,14 @@ import { SendPanel } from "./send-panel";
 import { EndCampaign } from "./end-campaign";
 import { SequenceEditor } from "./sequence-editor";
 import { PushSection } from "./push-section";
+import { EmailCheckCard } from "./email-check-card";
+import { serverPool } from "@/server/db";
+import { emailCheckSummary } from "@/lib/email-check-pg";
+import { REASON_LABEL, type EmailReason } from "@/lib/email-check-labels";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail";
+const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, email_status, email_reason, email_suggestion";
 const IN_FLIGHT = new Set(["queued", "researching", "writing"]);
 const SEND_TONE = { queued: "gray", paused: "amber", sent: "indigo", replied: "green", bounced: "red", stopped: "gray" } as const;
 type SendRow = { id: string; lead_id: string; step_no: number; status: keyof typeof SEND_TONE; status_detail: string | null };
@@ -91,6 +95,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   const parsed = template ? parseTemplate(template, { availableVariables: vars }) : null;
   const sample = rows.find((l) => l.domain) ?? rows[0];
   const total = count ?? 0;
+  const emailCheck = queueConfigured() ? await emailCheckSummary(serverPool(), workspace.id, id) : null;
   const researchable = withSite ?? 0;
 
   // Run + send state.
@@ -136,7 +141,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
 
       {/* Leads that only wait for the batch don't need a refresh every 3 seconds. */}
       <AutoRefresh
-        active={inFlight || c2.send_state === "sending"}
+        active={inFlight || c2.send_state === "sending" || (emailCheck?.byStatus.pending ?? 0) > 0}
         intervalMs={inFlight && waitingForBatch < statuses.filter((l) => IN_FLIGHT.has(l.status)).length ? 3000 : 20_000}
       />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -145,6 +150,12 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
         <Stat label="No website (free fallback)" value={n(total - researchable)} tone={total - researchable ? "amber" : undefined} />
         <Stat label="Removed on import" value={n((c.counts.duplicates ?? 0) + (c.counts.invalid_email ?? 0) + (c.counts.missing_email ?? 0))} />
       </div>
+
+      {emailCheck && total > 0 && (
+        <Card className="mt-6">
+          <EmailCheckCard campaignId={c.id} {...emailCheck} canChange={c.status !== "done"} />
+        </Card>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_340px]">
         <Card>
@@ -337,7 +348,13 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             <tbody className="divide-y divide-slate-100">
               {rows.map((l) => (
                 <tr key={l.id}>
-                  <td className="px-6 py-2.5 text-slate-900">{l.email}</td>
+                  <td className="px-6 py-2.5 text-slate-900">
+                    {l.email}
+                    {l.email_status === "invalid" && <div className="text-xs text-rose-700">Invalid: {l.email_reason ? REASON_LABEL[l.email_reason as EmailReason].toLowerCase() : "failed the check"}</div>}
+                    {l.email_status === "risky" && <div className="text-xs text-amber-800">Risky: {l.email_reason ? REASON_LABEL[l.email_reason as EmailReason].toLowerCase() : ""}</div>}
+                    {l.email_status === "pending" && <div className="text-xs text-slate-400">Checking…</div>}
+                    {l.email_suggestion && <div className="text-xs text-slate-500">Did you mean {l.email_suggestion}?</div>}
+                  </td>
                   <td className="px-6 py-2.5 text-slate-600">{[l.first_name, l.last_name].filter(Boolean).join(" ")}</td>
                   <td className="px-6 py-2.5 text-slate-600">{l.company}</td>
                   <td className="px-6 py-2.5">{l.domain ? <span className="text-slate-600">{l.domain}</span> : <Badge tone="amber">no website</Badge>}</td>

@@ -24,7 +24,7 @@ describe("CSV export", () => {
     );
     expect(headers).toEqual([
       "email", "first_name", "last_name", "company", "title", "linkedin_headline", "website", "domain", "branche",
-      "fl_status", "fl_subject", "fl_opener", "fl_full_email", "fl_followup_2", "fl_sources", "fl_confidence",
+      "fl_status", "fl_subject", "fl_opener", "fl_full_email", "fl_followup_2", "fl_sources", "fl_confidence", "fl_email_status", "fl_email_reason",
     ]);
     const row = Object.fromEntries(headers.map((h, i) => [h, rows[0][i]]));
     expect(row).toMatchObject({ fl_status: "personalised", fl_opener: "Saw your Rotterdam studio.", fl_followup_2: "Hi Anna, follow-up", fl_sources: "https://acme.nl/nieuws", fl_confidence: "high", branche: "Design" });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Badge, Button, Card, cx, Field, inputClass, Stat } from "@/components/ui";
 import {
   analyseColumns,
@@ -18,7 +18,8 @@ import {
 } from "@/lib/csv";
 import { estimateCredits } from "@/lib/credits";
 import { n } from "@/lib/format";
-import { importLeads } from "../actions";
+import { importLeads, previewEmailChecks, type EmailPreview } from "../actions";
+import { REASON_LABEL, type EmailReason } from "@/lib/email-check-labels";
 
 const TARGET_OPTIONS: ColumnTarget[] = ["email", "first_name", "last_name", "full_name", "company", "title", "linkedin_headline", "website", "custom", "ignore"];
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -85,7 +86,24 @@ export function UploadWizard() {
 
   const result = useMemo(() => (file ? applyMapping(file.csv.rows, map, file.csv.rowNumbers) : null), [file, map]);
   const blocker = result ? importBlocker(map, result.stats) ?? (!name.trim() ? "Give the campaign a name." : null) : null;
-  const withWebsite = result ? result.stats.imported - result.stats.no_website : 0;
+  // Free email check before import: invalid addresses are left out (free); risky ones can be excluded.
+  const [emailCheck, setEmailCheck] = useState<{ for: typeof result; data: EmailPreview } | null>(null);
+  const [exclude, setExclude] = useState<EmailReason[]>([]);
+  useEffect(() => {
+    if (!result?.leads.length) return;
+    let live = true;
+    previewEmailChecks(result.leads.map((l) => l.email)).then((data) => {
+      if (live) setEmailCheck({ for: result, data });
+    });
+    return () => {
+      live = false;
+    };
+  }, [result]);
+  const check = emailCheck && emailCheck.for === result ? emailCheck.data : null;
+  const invalidSet = useMemo(() => new Set(check?.invalid ?? []), [check]);
+  const riskyMap = useMemo(() => new Map(check?.risky ?? []), [check]);
+  const leftOut = (email: string) => invalidSet.has(email) || (riskyMap.get(email) ?? []).some((r) => exclude.includes(r));
+  const withWebsite = result ? result.leads.filter((l) => l.domain && !leftOut(l.email)).length : 0;
   const hasEmailColumn = Object.values(map).includes("email");
 
   function acceptSuggestion(header: string) {
@@ -97,7 +115,7 @@ export function UploadWizard() {
     if (!file || blocker) return;
     setError(null);
     startTransition(async () => {
-      const res = await importLeads({ name, rows: file.csv.rows, map });
+      const res = await importLeads({ name, rows: file.csv.rows, map, excludeReasons: exclude.filter((r): r is "typo" | "role" | "personal" => r === "typo" || r === "role" || r === "personal") });
       if (res?.error) setError(res.error);
     });
   }
@@ -280,6 +298,36 @@ export function UploadWizard() {
               <Stat label="With website" value={n(withWebsite)} />
               <Stat label="Duplicates removed" value={n(result.stats.duplicates)} />
               <Stat label="Skipped: no email" value={n(result.stats.missing_email + result.stats.invalid_email)} />
+            </div>
+          )}
+          {result && check && (check.invalid.length > 0 || check.risky.length > 0) && (
+            <div className="space-y-2 rounded-xl border border-slate-200 p-3 text-xs">
+              <p className="font-medium text-slate-800">Email check</p>
+              {check.invalid.length > 0 && (
+                <p className="text-rose-800">
+                  {n(check.invalid.length)} invalid: left out automatically, no credits.{" "}
+                  <span className="text-slate-500">
+                    ({(["syntax", "disposable"] as EmailReason[]).filter((r) => check.byReason[r]).map((r) => `${REASON_LABEL[r].toLowerCase()}: ${n(check.byReason[r]!)}`).join(", ")})
+                  </span>
+                </p>
+              )}
+              {(["typo", "role", "personal"] as const).filter((r) => check.byReason[r]).map((r) => (
+                <label key={r} className="flex items-center justify-between gap-2">
+                  <span className="text-amber-900">
+                    {n(check.byReason[r]!)} risky: {REASON_LABEL[r].toLowerCase()}
+                  </span>
+                  <span className="flex items-center gap-1 text-slate-600">
+                    <input type="checkbox" className="accent-brand-600" checked={exclude.includes(r)} onChange={(e) => setExclude(e.target.checked ? [...exclude, r] : exclude.filter((x) => x !== r))} />
+                    exclude
+                  </span>
+                </label>
+              ))}
+              {check.risky.length > 0 && (
+                <button type="button" className="font-medium text-brand-700 hover:underline" onClick={() => setExclude(["typo", "role", "personal"])}>
+                  Exclude all risky
+                </button>
+              )}
+              <p className="text-slate-500">Each company&apos;s mail server is checked right after import.</p>
             </div>
           )}
           <div className="rounded-xl bg-brand-50 p-4">

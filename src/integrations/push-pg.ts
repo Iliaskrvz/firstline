@@ -151,8 +151,8 @@ export async function createPush(
     );
     if (open[0]) return { error: "A push to this campaign is still running." };
 
-    const { rows: cand } = await c.query<{ id: string; email: string; suppressed: boolean; already: boolean }>(
-      `select l.id, lower(l.email) email,
+    const { rows: cand } = await c.query<{ id: string; email: string; suppressed: boolean; already: boolean; invalid: boolean }>(
+      `select l.id, lower(l.email) email, (l.email_status = 'invalid') invalid,
               exists (select 1 from public.suppression s where s.workspace_id = l.workspace_id
                         and (lower(s.email) = lower(l.email) or (s.email is null and s.domain is not null and s.domain = split_part(lower(l.email), '@', 2)))) suppressed,
               exists (select 1 from public.push_items i where i.integration_id = $3 and i.tool_campaign_id = $4 and i.email = lower(l.email) and i.status = 'added') already
@@ -161,9 +161,9 @@ export async function createPush(
         order by l.created_at, l.id`,
       [p.campaignId, p.workspaceId, p.integrationId, p.toolCampaignId],
     );
-    const fresh = cand.filter((l) => !l.suppressed && !l.already);
+    const fresh = cand.filter((l) => !l.suppressed && !l.already && !l.invalid);
     const pick = p.kind === "dry_run" ? fresh.slice(0, DRY_RUN_LEADS) : fresh;
-    const skippedRows = p.kind === "dry_run" ? [] : cand.filter((l) => l.suppressed || l.already);
+    const skippedRows = p.kind === "dry_run" ? [] : cand.filter((l) => l.suppressed || l.already || l.invalid);
     if (!pick.length && !skippedRows.length) {
       return { error: cand.length ? "Every written lead is already in this campaign or on your suppression list." : "No written leads to push yet: run the campaign first." };
     }
@@ -183,7 +183,7 @@ export async function createPush(
           )
         : null;
     await ins(pick, "pending", () => null);
-    await ins(skippedRows, "skipped", (l) => (l.suppressed ? "On your suppression list" : "Already pushed to this campaign"));
+    await ins(skippedRows, "skipped", (l) => (l.invalid ? "Invalid email address" : l.suppressed ? "On your suppression list" : "Already pushed to this campaign"));
     await refreshCounts(c, push.id);
     return { push: (await c.query<PushRow>(`select ${PUSH_COLS} from public.pushes where id = $1`, [push.id])).rows[0] };
   });

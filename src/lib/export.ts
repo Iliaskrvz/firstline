@@ -15,6 +15,8 @@ export type ExportLead = {
   status: string;
   status_detail: string | null;
   confidence: string | null;
+  email_status?: string | null;
+  email_reason?: string | null;
 };
 
 export type ExportGeneration = {
@@ -61,6 +63,8 @@ export function buildExport(
     ...opts.followUpSteps.map((n) => `fl_followup_${n}`),
     "fl_sources",
     "fl_confidence",
+    "fl_email_status",
+    "fl_email_reason",
   ];
 
   const rows = leads.map((l) => {
@@ -79,6 +83,8 @@ export function buildExport(
       ...opts.followUpSteps.map((n) => (written ? (gens?.get(n)?.full_email ?? "") : "")),
       sources,
       l.confidence ?? "",
+      l.email_status ?? "",
+      l.email_reason ?? "",
     ].map(safeCell);
   });
   return { headers, rows };

@@ -188,6 +188,25 @@ describe("public API, end to end", () => {
     expect(dup.body).toMatchObject({ error: { message: "The batch contains d@y.nl twice." } });
   });
 
+  it("a throwaway address is skipped at once: no credit reserved or used, and the response says why", async () => {
+    const before = await credits();
+    const r = await personalizeBatch(
+      deps({ runNow: true }),
+      req({ leads: [{ email: "temp@mailinator.com", first_name: "T", website: "bakkerij.nl" }, { email: "ok@bakkerij.nl", first_name: "O", website: "bakkerij.nl" }], copy: COPY, wait: 30 }),
+    );
+    expect(r.body, JSON.stringify(r.body)).toHaveProperty("results");
+    const job = r.body as JobView;
+    expect(job.results.find((x) => x.email === "temp@mailinator.com")).toMatchObject({
+      status: "skipped",
+      credits_used: 0,
+      email_check: { status: "invalid", reason: "disposable", suggestion: null },
+    });
+    expect(job.results.find((x) => x.email === "ok@bakkerij.nl")).toMatchObject({ status: "personalised", credits_used: 1, email_check: { status: "pending" } });
+    const after = await credits();
+    expect(after.reserved).toBe(before.reserved);
+    expect(before.available - after.available).toBe(1); // only the valid lead
+  });
+
   it("campaign_id: uses the copy of a campaign made in the app", async () => {
     const t = await pool.query("insert into public.templates (workspace_id, name, subject, body) values ($1, 'App copy', 'Vraagje', $2) returning id", [ws, "Dag {{first_name}},\n\n[[opener · iets specifieks van hun website · 25]]\n\nGroet"]);
     const c = await pool.query("insert into public.campaigns (workspace_id, name, template_id) values ($1, 'App campaign', $2) returning id", [ws, t.rows[0].id]);

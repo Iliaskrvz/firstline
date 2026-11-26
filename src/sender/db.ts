@@ -1,6 +1,7 @@
 // Sender API data layer (§8). Framework-agnostic: takes a pg Pool, used by the
 // /api/sender routes and server actions, and tested on a real Postgres.
 // Scheduling decisions are the pure functions in src/lib/sender.
+import { REASON_LABEL, staticCheck } from "@/lib/email-check";
 import type pg from "pg";
 import { leadVars } from "@/engine/pipeline";
 import { isFreeMailDomain } from "@/lib/domain";
@@ -198,6 +199,13 @@ export async function senderNext(
                          and (lower(x.email) = lower(s.to_email) or x.domain = split_part(lower(s.to_email), '@', 2)))`,
         [inbox.id],
       );
+      // Free email check (Part A): never send to an address that failed it; the send says why.
+      await c.query(
+        `update public.sends s set status = 'stopped', status_detail = 'Invalid email: ' || coalesce(l.email_reason, 'failed the email check')
+           from public.leads l
+          where l.id = s.lead_id and s.inbox_id = $1 and s.status = 'queued' and l.email_status = 'invalid'`,
+        [inbox.id],
+      );
       // Due follow-ups go first (they're time-sensitive), then new first emails in import order.
       const { rows } = await c.query(
         `select s.id, s.to_email, s.subject, s.body, s.step_no,
@@ -212,7 +220,13 @@ export async function senderNext(
           for update of s skip locked`,
         [inbox.id, now, LEASE_MS / 1000, compareVersions(opts.scriptVersion ?? "0", FOLLOW_UP_SCRIPT_VERSION) >= 0],
       );
-      if (rows[0]) {
+      const refused = rows[0] ? staticCheck(rows[0].to_email).invalid[0] : undefined;
+      if (rows[0] && refused) {
+        // Last line of defence, right before sending: the address itself is invalid (format, throwaway domain).
+        await c.query("update public.sends set status = 'stopped', status_detail = $2 where id = $1", [rows[0].id, `Invalid email: ${REASON_LABEL[refused].toLowerCase()}`]);
+        console.warn(`sender: refused send ${rows[0].id}: invalid address (${refused})`);
+        reason = "nothing_queued";
+      } else if (rows[0]) {
         await c.query("update public.sends set handed_out_at = $2 where id = $1", [rows[0].id, now]);
         email = {
           send_id: rows[0].id,

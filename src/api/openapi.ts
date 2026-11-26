@@ -63,6 +63,15 @@ const result = {
     sources: { type: "array", items: { type: "object", properties: { fact: { type: "string" }, url: { type: "string" } } } },
     confidence: { type: ["string", "null"], enum: ["high", "medium", "low", null] },
     credits_used: { type: "integer" },
+    email_check: {
+      type: "object",
+      description: "Free email check (format, throwaway domain, role or personal address, typo, the domain's mail server via DNS). invalid = skipped, 0 credits. No mailbox is ever contacted.",
+      properties: {
+        status: { type: "string", enum: ["pending", "valid", "risky", "invalid"] },
+        reason: { type: ["string", "null"], enum: ["syntax", "disposable", "null_mx", "no_dns", "typo", "a_only", "role", "personal", "dns_unknown", null] },
+        suggestion: { type: ["string", "null"], description: "Possible correct address when the domain looks like a typo. Never applied automatically." },
+      },
+    },
   },
 };
 

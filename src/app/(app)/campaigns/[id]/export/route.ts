@@ -16,7 +16,7 @@ export async function GET(_request: NextRequest, ctx: RouteContext<"/campaigns/[
 
   const pool = serverPool();
   const { rows: leads } = await pool.query<ExportLead>(
-    `select id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, confidence
+    `select id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, confidence, email_status, email_reason
        from public.leads where campaign_id = $1 and workspace_id = $2 order by created_at, id`,
     [id, workspace.id],
   );

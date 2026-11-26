@@ -1,6 +1,8 @@
 // Public API data layer (Phase 9): keys, rate limits, jobs, results. Framework-agnostic (pg Pool);
 // the /api/v1 route handlers stay thin. Each call becomes a hidden "api" campaign, so research,
 // writing, checks, credits (reserve → capture / release) and the 30-day deletion are the app's own.
+import type { EmailReason, EmailStatus } from "@/lib/email-check-labels";
+import { applyStaticChecks } from "@/lib/email-check-pg";
 import { createHash } from "node:crypto";
 import type pg from "pg";
 import { reserveForRun } from "@/billing/db";
@@ -158,12 +160,12 @@ export async function createJob(
       [caller.workspaceId, templateId, `API ${input.kind} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, JSON.stringify({ deep: source.options.depth.deep }), source.options.writer],
     );
     campaignId = camp[0].id;
-    const { rows: leads } = await c.query<{ id: string }>(
+    const { rows: leads } = await c.query<{ id: string; email: string }>(
       `insert into public.leads (workspace_id, campaign_id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom)
        select $1, $2, x.email, x.first_name, x.last_name, x.company, x.title, x.linkedin_headline, x.website, x.domain, x.custom
          from jsonb_to_recordset($3::jsonb) as x(email text, first_name text, last_name text, company text, title text, linkedin_headline text, website text, domain text, custom jsonb, ord int)
         order by x.ord
-       returning id`,
+       returning id, email`,
       [
         caller.workspaceId,
         campaignId,
@@ -184,6 +186,8 @@ export async function createJob(
       ],
     );
     leadIds = leads.map((l) => l.id);
+    // Free email checks: invalid addresses (format, throwaway domain) are skipped now, free; DNS in the worker.
+    await applyStaticChecks(c, leads);
     const { rows: job } = await c.query<{ id: string }>(
       `insert into public.api_jobs (workspace_id, api_key_id, campaign_id, kind, lead_count, idempotency_key, request_hash)
        values ($1, $2, $3, $4, $5, $6, $7) returning id`,
@@ -201,7 +205,7 @@ export async function createJob(
   }
 
   // Credits: leads with a website hold credits until they finish; leads without one fall back for free.
-  const { rows: withSite } = await pool.query<{ id: string }>("select id from public.leads where campaign_id = $1 and domain is not null", [campaignId]);
+  const { rows: withSite } = await pool.query<{ id: string }>("select id from public.leads where campaign_id = $1 and domain is not null and status <> 'skipped'", [campaignId]);
   const reserved = await reserveForRun(pool, { workspaceId: caller.workspaceId, leadIds: withSite.map((r) => r.id), perLead: creditsPerLead(source.options.depth) });
   if (!reserved.ok) {
     await pool.query("delete from public.campaigns where id = $1", [campaignId]); // removes the job and leads too
@@ -224,6 +228,8 @@ export type LeadResult = {
   sources: { fact: string; url: string }[];
   confidence: string | null;
   credits_used: number;
+  /** Free email check: pending until the domain is checked; invalid leads are skipped and use no credits. */
+  email_check: { status: EmailStatus; reason: EmailReason | null; suggestion: string | null };
 };
 
 export type JobView = {
@@ -260,8 +266,11 @@ export async function jobView(pool: pg.Pool, workspaceId: string, jobId: string)
     facts_used: string[] | null;
     research: { facts?: { id: string; text?: string; src?: string }[] } | null;
     credits: number;
+    email_status: EmailStatus;
+    email_reason: EmailReason | null;
+    email_suggestion: string | null;
   }>(
-    `select l.id, l.email, l.status, l.status_detail, l.confidence, g.subject, g.full_email, g.slot_outputs, g.facts_used, g.research,
+    `select l.id, l.email, l.status, l.status_detail, l.confidence, l.email_status, l.email_reason, l.email_suggestion, g.subject, g.full_email, g.slot_outputs, g.facts_used, g.research,
             coalesce((select sum(amount) from public.credit_ledger cl where cl.lead_id = l.id and cl.type = 'capture'), 0)::int credits
        from public.leads l
        left join lateral (select subject, full_email, slot_outputs, facts_used, research from public.generations g
@@ -287,6 +296,7 @@ export async function jobView(pool: pg.Pool, workspaceId: string, jobId: string)
       sources: written ? (r.facts_used ?? []).map((id) => facts.get(id)).filter((f): f is { id: string; text?: string; src?: string } => !!f?.src).map((f) => ({ fact: f.text ?? "", url: f.src! })) : [],
       confidence: r.confidence,
       credits_used: r.credits,
+      email_check: { status: r.email_status, reason: r.email_reason, suggestion: r.email_suggestion },
     };
   });
   return {

@@ -10,6 +10,8 @@ import { MAX_FOLLOW_UPS, validateStep } from "@/lib/sender/sequence";
 import { creditsPerLead, type Depth } from "@/lib/credits";
 import { n } from "@/lib/format";
 import { reserveForRun, stopRun } from "@/billing/db";
+import { combine, staticCheck, summarise, type EmailReason } from "@/lib/email-check";
+import { applyStaticChecks, excludeRisky, includeExcluded } from "@/lib/email-check-pg";
 import { endCampaign } from "@/billing/retention";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
@@ -36,6 +38,9 @@ export async function runPreview(campaignId: string): Promise<{ error: string } 
     .from("leads")
     .select("id, domain")
     .eq("campaign_id", campaignId)
+    // Never preview an invalid address or a lead the user excluded (the preview would bring it back).
+    .neq("email_status", "invalid")
+    .neq("status", "skipped")
     .order("created_at")
     .limit(200);
   if (error) return { error: error.message };
@@ -68,14 +73,58 @@ const ImportInput = z.object({
   name: z.string().trim().min(1, "Give the campaign a name.").max(120),
   rows: z.array(z.record(z.string(), z.string())).min(1, "The file has no rows.").max(MAX_ROWS),
   map: z.record(z.string(), z.enum(TARGETS)),
+  /** Risky reasons the user chose to leave out on the upload screen (they can be included again later). */
+  excludeReasons: z.array(z.enum(["typo", "role", "personal"])).max(3).optional(),
 });
 
 export type ImportResult = { error: string } | undefined;
 
+/** "Exclude all risky" / "Exclude this reason" on the campaign's email check (leads not started yet, free). */
+export async function excludeRiskyLeads(campaignId: string, reason: EmailReason | null): Promise<{ error: string } | { count: number }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  if (reason && !["typo", "a_only", "role", "personal", "dns_unknown"].includes(reason)) return { error: "Invalid reason." };
+  if (!queueConfigured()) return { error: "Needs the database connection (DATABASE_URL)." };
+  const { workspace } = await requireWorkspace();
+  const count = await excludeRisky(serverPool(), workspace.id, campaignId, reason, { includePending: true });
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { count };
+}
+
+/** "Include again": excluded risky leads come back (invalid ones never do). */
+export async function includeExcludedLeads(campaignId: string): Promise<{ error: string } | { count: number }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  if (!queueConfigured()) return { error: "Needs the database connection (DATABASE_URL)." };
+  const { workspace } = await requireWorkspace();
+  const count = await includeExcluded(serverPool(), workspace.id, campaignId);
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { count };
+}
+
+/** The upload screen's email check: what can be told before import (format, throwaway, role, personal, typo). */
+export type EmailPreview = {
+  /** Addresses that will be left out automatically (free). */
+  invalid: string[];
+  /** Risky reasons per address (only addresses that have one). */
+  risky: [email: string, reasons: EmailReason[]][];
+  byReason: Partial<Record<EmailReason, number>>;
+};
+
+export async function previewEmailChecks(emails: string[]): Promise<EmailPreview> {
+  await requireWorkspace();
+  const list = z.array(z.string().max(320)).max(MAX_ROWS).safeParse(emails);
+  if (!list.success) return { invalid: [], risky: [], byReason: {} };
+  const verdicts = list.data.map((e) => ({ email: e, v: combine(staticCheck(e), null) }));
+  return {
+    invalid: verdicts.filter((x) => x.v.status === "invalid").map((x) => x.email),
+    risky: verdicts.filter((x) => x.v.status !== "invalid" && x.v.reasons.length).map((x) => [x.email, x.v.reasons] as [string, EmailReason[]]),
+    byReason: summarise(verdicts.map((x) => x.v)).byReason,
+  };
+}
+
 export async function importLeads(input: z.input<typeof ImportInput>): Promise<ImportResult> {
   const parsed = ImportInput.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid upload." };
-  const { name, rows, map } = parsed.data;
+  const { name, rows, map, excludeReasons = [] } = parsed.data;
 
   const mapErr = mappingErrors(map);
   if (mapErr.length) return { error: mapErr[0] };
@@ -100,11 +149,16 @@ export async function importLeads(input: z.input<typeof ImportInput>): Promise<I
       campaign_id: campaign.id,
       workspace_id: workspace.id,
     }));
-    const { error } = await supabase.from("leads").insert(chunk);
+    const { data: inserted, error } = await supabase.from("leads").insert(chunk).select("id, email");
     if (error) {
       await supabase.from("campaigns").delete().eq("id", campaign.id);
       return { error: `Import failed: ${error.message}` };
     }
+    // Free email checks (Part A): format and throwaway domains now; the domain's DNS in the worker.
+    if (queueConfigured()) await applyStaticChecks(serverPool(), inserted ?? []);
+  }
+  if (excludeReasons.length && queueConfigured()) {
+    for (const r of excludeReasons) await excludeRisky(serverPool(), workspace.id, campaign.id, r, { includePending: true });
   }
 
   revalidatePath("/campaigns");
