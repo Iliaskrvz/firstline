@@ -244,6 +244,12 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
             <div className="text-xs font-medium text-brand-700">Estimated cost</div>
             <div className="mt-0.5 text-xl font-semibold text-brand-900">≤ {n(runCredits(researchable, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</div>
             <div className="mt-1 text-xs text-brand-800/80">The first 5 leads are a free preview.</div>
+            {/* C7 (review 2026-11-26): the estimate is the worst case; free skips bring it down. */}
+            <div className="mt-1 text-xs text-brand-800/80">
+              {c.target_customer
+                ? "Leads with a bad address, or that don't fit your target customer, cost nothing."
+                : "Leads with a bad address cost nothing."}
+            </div>
           </div>
           <PreviewButton
             campaignId={c.id}

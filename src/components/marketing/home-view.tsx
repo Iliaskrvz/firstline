@@ -259,6 +259,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
               </a>
             </div>
             <p className="mt-3 text-sm text-slate-600">{t.hero.note}</p>
+            <p className="mt-1 text-sm font-medium text-slate-800">{t.hero.free}</p>
             <p className="mt-8 border-t border-slate-200 pt-3 font-mono text-[12px] text-slate-600">
               <span className="text-brand-700">[1]</span> {t.hero.footnote}
             </p>

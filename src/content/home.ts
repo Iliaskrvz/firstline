@@ -24,6 +24,8 @@ export const HOME = {
     cta: "Personalise 25 leads free",
     secondary: "See pricing",
     note: "25 free emails after you confirm your address. No card.",
+    /** C1 (review 2026-11-26): the free checks, stated as money the visitor doesn't lose. */
+    free: "Bad addresses and leads that don't fit your customer cost nothing.",
     footnote: "Every personal line cites the page it came from.",
   },
 
@@ -82,7 +84,7 @@ export const HOME = {
     errorNetwork: "Couldn't reach FirstLine. Check your connection and try again.",
   },
 
-  integrations: { label: "Send or export to", names: ["Gmail", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
+  integrations: { label: "Send or export to", names: ["Gmail", "Outlook", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
 
   preview: {
     title: "This is the free preview",
@@ -96,15 +98,15 @@ export const HOME = {
       { time: "About 1 minute", title: "Upload your leads", text: "A CSV with names, companies and websites. We clean the domains and remove duplicates." },
       { time: "About 2 minutes", title: "Paste your own email", text: "Mark the spots to personalise, like [[opener]]. Everything else stays word for word." },
       { time: "5 leads free, in minutes", title: "We read each website", text: "FirstLine finds real facts on the company's own site and writes only your marked spots. Check the free preview before anything runs." },
-      { time: "Up to 30 a day per inbox", title: "Send or export", text: "Send from your own Gmail with safe limits and follow-ups, or push the results to your sending tool." },
+      { time: "Up to 30 a day per inbox", title: "Send or export", text: "Send from your own Gmail with safe limits and follow-ups, download ready-to-send drafts for Outlook, or push the results to your sending tool." },
     ],
   },
 
   trust: {
     eyebrow: "Built to be trusted",
     title: "No made-up facts. Every line shows where it came from.",
-    body: "Code checks and an AI reviewer look at every line before you see it. Generic, salesy or unsupported lines get rewritten. If a website has nothing useful, the lead gets a neutral line and costs nothing.",
-    points: ["Every claim links to its page", "Your offer and tone are never rewritten", "No facts found, no charge"],
+    body: "Code checks and an AI reviewer look at every line before you see it. Generic, salesy or unsupported lines get rewritten. If a website has nothing useful, the lead gets a neutral line and costs nothing. Every address is checked for free first, and if you describe your ideal customer, leads that clearly don't fit are skipped before anything is written.",
+    points: ["Every claim links to its page", "Your offer and tone are never rewritten", "No facts found, no charge", "Bad addresses and non-fits are free"],
   },
 
   api: {
@@ -117,11 +119,11 @@ export const HOME = {
   pricing: {
     eyebrow: "Pricing",
     title: "Pay per email. Nothing else.",
-    sub: "Credits never expire. Only finished emails use a credit. Sending from Gmail and plain follow-ups are free.",
-    anchor: "300 emails ≈ €10 in credits.",
+    sub: "Credits never expire. Only finished emails use a credit: bad addresses and leads that don't fit are free. Sending from Gmail and plain follow-ups are free.",
+    anchor: "€19 covers your first 500 emails.",
     compare: {
       elsewhere: `Same 300 emails with a personalisation tool elsewhere: ${range.currency}${range.min}–${range.max} a month.`,
-      us: "With FirstLine: about €10 in credits, once. No subscription.",
+      us: "With FirstLine: €19 once covers 500 emails, about €0.04 each. No subscription.",
       sourcesLabel: `Sources, checked ${checkedOnLabel()}`,
       sourcesNote:
         "Cheapest plan on each public pricing page that covers 300 AI-personalised emails a month, monthly billing as shown (some pages show a lower yearly price). Prices in the currency the page shows.",
@@ -129,7 +131,7 @@ export const HOME = {
     perEmail: "per email",
     packLine: (credits: string, price: string) => `${price} for ${credits} emails`,
     save: (pct: number) => `Save ${pct}%`,
-    anchorNote: "The smallest pack is 500 credits for €19.",
+    anchorNote: "About €0.04 each, and your first 25 are free.",
     /** Shown only when REFUND_OFFER=1 (see src/content/refund.ts). */
     refund: "Unused credits refunded within 30 days of purchase.",
     buy: (credits: string) => `Buy ${credits} credits`,
@@ -155,6 +157,10 @@ export const HOME = {
         q: "How does sending from Gmail work?",
         a: "You copy a Google Sheet with a small script into your own Google account. It sends from your inbox at a safe pace and stops a sequence when someone replies. We never get your password.",
       },
+      {
+        q: "Does it work with Outlook?",
+        a: "Yes. Download your emails as ready-to-send Outlook drafts, one file per email, and send them from Outlook yourself. It works in Outlook for Windows and Mac.",
+      },
       { q: "Does FirstLine scrape LinkedIn?", a: "No. Research uses only the company's public website. Names and job titles come from your own list." },
       { q: "Which languages?", a: "English and Dutch, picked automatically from the language of your email." },
       {
@@ -168,6 +174,10 @@ export const HOME = {
       {
         q: "What if a website has nothing useful?",
         a: "Then the lead gets a neutral line instead of a made-up one, and it costs 0 credits. You only pay for emails that were actually personalised.",
+      },
+      {
+        q: "What if a lead isn't a good fit, or the address is wrong?",
+        a: "Every address gets a free check first: typos, throwaway domains and domains that can't receive email are flagged or left out, without contacting anyone's mailbox. If you describe your ideal customer, FirstLine also checks each company against it before writing. Leads that clearly don't fit are skipped and cost nothing, with the reason shown, and you can still write any of them yourself.",
       },
       {
         q: "Is it GDPR-compliant?",

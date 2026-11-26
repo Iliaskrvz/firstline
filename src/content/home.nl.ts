@@ -23,6 +23,7 @@ export const HOME_NL: HomeCopy = {
     cta: "Personaliseer 25 leads gratis",
     secondary: "Bekijk prijzen",
     note: "25 gratis e-mails zodra je je adres bevestigt. Geen creditcard nodig.",
+    free: "Foute adressen en leads die niet bij je klant passen, kosten niets.",
     footnote: "Bij elke persoonlijke zin staat de pagina waar die vandaan komt.",
   },
 
@@ -79,7 +80,7 @@ export const HOME_NL: HomeCopy = {
     errorNetwork: "FirstLine is niet bereikbaar. Controleer je verbinding en probeer het opnieuw.",
   },
 
-  integrations: { label: "Versturen of exporteren naar", names: ["Gmail", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
+  integrations: { label: "Versturen of exporteren naar", names: ["Gmail", "Outlook", "Instantly", "Smartlead", "Lemlist", "n8n", "Make", "CSV"] },
 
   preview: {
     title: "Dit is de gratis preview",
@@ -93,15 +94,15 @@ export const HOME_NL: HomeCopy = {
       { time: "Ongeveer 1 minuut", title: "Upload je leads", text: "Een CSV met namen, bedrijven en websites. Wij schonen de domeinen op en halen dubbelingen eruit." },
       { time: "Ongeveer 2 minuten", title: "Plak je eigen e-mail", text: "Markeer de plekken die persoonlijk moeten, zoals [[opener]]. De rest blijft woord voor woord staan." },
       { time: "5 leads gratis, binnen minuten", title: "Wij lezen elke website", text: "FirstLine zoekt echte feiten op de eigen site van het bedrijf en schrijft alleen jouw gemarkeerde plekken. Je bekijkt eerst de gratis preview." },
-      { time: "Tot 30 per dag per inbox", title: "Versturen of exporteren", text: "Verstuur vanuit je eigen Gmail met veilige limieten en follow-ups, of zet de resultaten door naar je verzendtool." },
+      { time: "Tot 30 per dag per inbox", title: "Versturen of exporteren", text: "Verstuur vanuit je eigen Gmail met veilige limieten en follow-ups, download kant-en-klare concepten voor Outlook, of zet de resultaten door naar je verzendtool." },
     ],
   },
 
   trust: {
     eyebrow: "Gebouwd op vertrouwen",
     title: "Geen verzonnen feiten. Bij elke zin staat waar hij vandaan komt.",
-    body: "Code en een AI-controleur kijken elke zin na voordat jij hem ziet. Algemene, verkoperige of ononderbouwde zinnen worden herschreven. Staat er niets bruikbaars op een website, dan krijgt de lead een neutrale zin en kost hij niets.",
-    points: ["Elke bewering linkt naar de pagina", "Je aanbod en toon worden nooit herschreven", "Geen feiten gevonden, geen kosten"],
+    body: "Code en een AI-controleur kijken elke zin na voordat jij hem ziet. Algemene, verkoperige of ononderbouwde zinnen worden herschreven. Staat er niets bruikbaars op een website, dan krijgt de lead een neutrale zin en kost hij niets. Elk adres wordt eerst gratis gecontroleerd, en als je je ideale klant beschrijft, worden leads die duidelijk niet passen overgeslagen voordat er iets geschreven wordt.",
+    points: ["Elke bewering linkt naar de pagina", "Je aanbod en toon worden nooit herschreven", "Geen feiten gevonden, geen kosten", "Foute adressen en leads die niet passen zijn gratis"],
   },
 
   api: {
@@ -114,11 +115,11 @@ export const HOME_NL: HomeCopy = {
   pricing: {
     eyebrow: "Prijzen",
     title: "Betaal per e-mail. Verder niets.",
-    sub: "Credits verlopen nooit. Alleen afgeronde e-mails kosten een credit. Versturen via Gmail en gewone follow-ups zijn gratis.",
-    anchor: "300 e-mails ≈ €10 aan credits.",
+    sub: "Credits verlopen nooit. Alleen afgeronde e-mails kosten een credit: foute adressen en leads die niet passen zijn gratis. Versturen via Gmail en gewone follow-ups zijn gratis.",
+    anchor: "Met €19 doe je je eerste 500 e-mails.",
     compare: {
       elsewhere: `Dezelfde 300 e-mails met een personalisatietool elders: ${range.currency}${range.min}–${range.max} per maand.`,
-      us: "Met FirstLine: ongeveer €10 aan credits, eenmalig. Geen abonnement.",
+      us: "Met FirstLine: eenmalig €19 voor 500 e-mails, ongeveer €0,04 per stuk. Geen abonnement.",
       sourcesLabel: `Bronnen, gecontroleerd op ${checkedOnLabel(undefined, "nl")}`,
       sourcesNote:
         "Het goedkoopste abonnement op elke openbare prijspagina dat 300 AI-gepersonaliseerde e-mails per maand dekt, bij maandelijkse betaling zoals getoond (sommige pagina's tonen een lagere jaarprijs). Prijzen in de valuta van de pagina.",
@@ -126,7 +127,7 @@ export const HOME_NL: HomeCopy = {
     perEmail: "per e-mail",
     packLine: (credits: string, price: string) => `${price} voor ${credits} e-mails`,
     save: (pct: number) => `${pct}% voordeliger`,
-    anchorNote: "Het kleinste pakket is 500 credits voor €19.",
+    anchorNote: "Ongeveer €0,04 per e-mail, en je eerste 25 zijn gratis.",
     refund: "Ongebruikte credits terug binnen 30 dagen na aankoop.",
     buy: (credits: string) => `Koop ${credits} credits`,
     mostPopular: "Aanbevolen",
@@ -149,6 +150,10 @@ export const HOME_NL: HomeCopy = {
         q: "Hoe werkt versturen via Gmail?",
         a: "Je kopieert een Google Sheet met een klein script naar je eigen Google-account. Dat verstuurt vanuit je inbox in een veilig tempo en stopt een reeks zodra iemand antwoordt. Wij krijgen nooit je wachtwoord.",
       },
+      {
+        q: "Werkt het met Outlook?",
+        a: "Ja. Download je e-mails als kant-en-klare Outlook-concepten, één bestand per e-mail, en verstuur ze zelf vanuit Outlook. Het werkt in Outlook voor Windows en Mac.",
+      },
       { q: "Scrapet FirstLine LinkedIn?", a: "Nee. Het onderzoek gebruikt alleen de openbare website van het bedrijf. Namen en functies komen uit je eigen lijst." },
       { q: "Welke talen?", a: "Nederlands en Engels, automatisch gekozen op basis van de taal van je e-mail." },
       {
@@ -162,6 +167,10 @@ export const HOME_NL: HomeCopy = {
       {
         q: "En als een website niets bruikbaars heeft?",
         a: "Dan krijgt de lead een neutrale zin in plaats van een verzonnen zin, en kost hij 0 credits. Je betaalt alleen voor e-mails die echt gepersonaliseerd zijn.",
+      },
+      {
+        q: "En als een lead niet past, of het adres niet klopt?",
+        a: "Elk adres krijgt eerst een gratis controle: tikfouten, wegwerpdomeinen en domeinen die geen e-mail kunnen ontvangen worden gemarkeerd of weggelaten, zonder iemands mailbox te benaderen. Als je je ideale klant beschrijft, controleert FirstLine ook elk bedrijf daartegen voordat er iets geschreven wordt. Leads die duidelijk niet passen worden overgeslagen en kosten niets, met de reden erbij, en je kunt ze altijd toch laten schrijven.",
       },
       {
         q: "Is het AVG-proof?",

@@ -1,6 +1,6 @@
 # Product Marketing Context
 
-*Last updated: 2026-11-17 (V1.1: site review; drafted from SPEC.md, the codebase and the owner's positioning decisions)*
+*Last updated: 2026-11-26 (free checks and fit check added); earlier: 2026-11-17 (V1.1: site review; drafted from SPEC.md, the codebase and the owner's positioning decisions)*
 
 ## Product Overview
 **One-liner:** Your copy, researched per lead, with sources. From €0.03 per email, no subscription, sent free from your Gmail.
@@ -61,6 +61,8 @@
 - Your own copy stays word for word. The AI only writes the spots you mark.
 - Every claim cites a fact and the page it came from. No made-up facts.
 - No facts found means no charge (a neutral line, 0 credits).
+- Bad addresses and leads that don't fit cost nothing: every address gets a free check (no mailbox is contacted), and an optional "Target customer" per campaign skips clear non-fits before writing, with the reason shown.
+- Outlook users can download ready-to-send drafts (.eml); Microsoft 365 sending follows once the app registration is done.
 - Pay per finished email, no subscription, credits never expire.
 - Sending from your own Gmail is free, with built-in safety limits.
 - An API, n8n node and Make app for automation builders.

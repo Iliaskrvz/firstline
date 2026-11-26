@@ -36,7 +36,7 @@ export const SMALL_BUSINESS: Record<"en" | "nl", PersonaCopy> = {
   en: {
     eyebrow: "For small businesses",
     title: "Cold emails from your own Gmail, researched per lead.",
-    titleMuted: "300 emails cost about €10.",
+    titleMuted: "€19 covers your first 500 emails.",
     intro:
       "You write your own cold email. FirstLine reads each lead's website, adds one line that shows you looked, and sends from your own inbox at a careful pace. No new tools to learn, no subscription.",
     cta: "Personalise 25 leads free",
@@ -83,8 +83,8 @@ export const SMALL_BUSINESS: Record<"en" | "nl", PersonaCopy> = {
       {
         kind: "facts",
         eyebrow: "What it costs",
-        title: "300 emails ≈ €10",
-        text: "You buy credits, 1 per finished email. They never expire, so a quiet month costs nothing.",
+        title: "€19 for 500 emails",
+        text: "You buy credits, 1 per finished email. They never expire, so a quiet month costs nothing. Bad addresses and leads that don't fit are free.",
         facts: [
           { value: "€19", label: "500 emails (Starter)" },
           { value: "€69", label: "2,000 emails (Growth)" },
@@ -104,7 +104,7 @@ export const SMALL_BUSINESS: Record<"en" | "nl", PersonaCopy> = {
   nl: {
     eyebrow: "Voor kleine bedrijven",
     title: "Cold e-mails vanuit je eigen Gmail, per lead uitgezocht.",
-    titleMuted: "300 e-mails kosten ongeveer €10.",
+    titleMuted: "Met €19 doe je je eerste 500 e-mails.",
     intro:
       "Je schrijft je eigen cold e-mail. FirstLine leest de website van elke lead, voegt één zin toe waaruit blijkt dat je hebt gekeken, en verstuurt in een rustig tempo vanuit je eigen inbox. Geen nieuwe tools, geen abonnement.",
     cta: "Personaliseer 25 leads gratis",
@@ -151,8 +151,8 @@ export const SMALL_BUSINESS: Record<"en" | "nl", PersonaCopy> = {
       {
         kind: "facts",
         eyebrow: "Wat het kost",
-        title: "300 e-mails ≈ €10",
-        text: "Je koopt credits, 1 per afgeronde e-mail. Ze verlopen nooit, dus een rustige maand kost niets.",
+        title: "€19 voor 500 e-mails",
+        text: "Je koopt credits, 1 per afgeronde e-mail. Ze verlopen nooit, dus een rustige maand kost niets. Foute adressen en leads die niet passen zijn gratis.",
         facts: [
           { value: "€19", label: "500 e-mails (Starter)" },
           { value: "€69", label: "2.000 e-mails (Growth)" },

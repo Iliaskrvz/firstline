@@ -16,7 +16,11 @@ export const AGENCIES = {
       title: "One workspace per client",
       points: [
         { title: "Kept apart", text: "Leads, templates, campaigns, credits and API keys are separate per client. Switch between them from the menu." },
-        { title: "Their inbox, their reputation", text: "Each client's emails go out from their own Gmail or Google Workspace inbox, or from your sending tool." },
+        { title: "Their inbox, their reputation", text: "Each client's emails go out from their own Gmail or Google Workspace inbox, as ready-to-send Outlook drafts, or from your sending tool." },
+        {
+          title: "Each client's ideal customer, checked before writing",
+          text: "Describe who fits for each client. FirstLine checks every company against it before writing; leads that clearly don't fit are skipped at no cost, with the reason shown.",
+        },
         { title: "Team access", text: "Invite colleagues to the workspaces they work on, so nobody shares a password." },
       ],
     },

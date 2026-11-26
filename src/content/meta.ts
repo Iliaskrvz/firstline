@@ -45,7 +45,7 @@ export const PAGE_META = {
   },
   smallBusiness: {
     title: "FirstLine for small businesses",
-    description: "Send researched cold emails from your own Gmail, with no setup and safe limits. 300 emails cost about €10, no subscription.",
+    description: "Send researched cold emails from your own Gmail, with no setup and safe limits. €19 covers 500 emails, no subscription.",
     ogTitle: "Cold emails your prospects can tell you researched, from your own Gmail",
   },
   agencies: {
@@ -64,7 +64,7 @@ export const PAGE_META = {
   },
   smallBusinessNl: {
     title: "FirstLine voor kleine bedrijven",
-    description: "Verstuur onderzochte cold e-mails vanuit je eigen Gmail, zonder installatie en met veilige limieten. 300 e-mails kosten ongeveer €10, geen abonnement.",
+    description: "Verstuur onderzochte cold e-mails vanuit je eigen Gmail, zonder installatie en met veilige limieten. Met €19 doe je 500 e-mails, geen abonnement.",
     ogTitle: "Cold e-mails waarvan je prospect ziet dat je hebt opgelet",
   },
 } satisfies Record<string, PageMeta>;
