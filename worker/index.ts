@@ -35,6 +35,8 @@ import { encryptionKey } from "@/lib/secret-box";
 import { apiHousekeeping, completeFinishedJobs, completeJobsFor } from "@/api/core-pg";
 import { deliverDue } from "@/api/webhooks-pg";
 import { checkInboxHealth, resendMailer } from "@/sender/alerts";
+import { microsoftAuth, microsoftGraph, microsoftMode } from "@/sender/microsoft-config";
+import { alertDisconnected, outlookTick } from "@/sender/outlook";
 
 const VERSION = process.env.npm_package_version ?? "dev";
 const WORKER_ID = `${hostname()}-${process.pid}`;
@@ -144,6 +146,34 @@ async function main() {
   };
   await inboxCheck();
   const inboxTimer = setInterval(inboxCheck, 5 * 60_000);
+
+  // Outlook / Microsoft 365 lane (Phase O2): the worker sends for connected Outlook inboxes through the
+  // same scheduler as the Gmail sheet, and checks them for replies and bounces every ~10 minutes.
+  let outlookBusy = false;
+  const outlookCheck = async () => {
+    if (outlookBusy) return;
+    if (microsoftMode() === "off") return;
+    let key: Buffer;
+    try {
+      key = encryptionKey();
+    } catch {
+      return; // no encryption key: no Outlook inboxes can exist
+    }
+    outlookBusy = true;
+    try {
+      await asSingleton(pool, "outlook-sender", async () => {
+        const r = await outlookTick({ pool, key, auth: microsoftAuth(), graph: microsoftGraph, log });
+        if (r.sent || r.disconnected) log(`outlook: ${r.sent} sent, ${r.disconnected} disconnected (${r.inboxes} inboxes)`);
+        const alerted = await alertDisconnected(pool, mailer, process.env.PUBLIC_APP_URL?.trim() || null);
+        if (alerted.length) log(`outlook: disconnect alert for ${alerted.join(", ")}`);
+      });
+    } catch (e) {
+      log("outlook tick failed:", (e as Error).message);
+    } finally {
+      outlookBusy = false;
+    }
+  };
+  const outlookTimer = setInterval(outlookCheck, 60_000);
 
 
   // Economy mode (§9): bundle waiting writes into batches and collect finished ones.
@@ -391,6 +421,7 @@ async function main() {
     log(`${signal}: finishing running jobs…`);
     clearInterval(beat);
     clearInterval(inboxTimer);
+    clearInterval(outlookTimer);
     clearInterval(economyTimer);
     clearInterval(labTimer);
     clearInterval(retentionTimer);

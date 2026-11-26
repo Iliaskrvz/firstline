@@ -41,7 +41,17 @@ export function AddInbox({ appUrl, script }: { appUrl: string | null; script: st
       </div>
     );
   }
-  if (!open) return <Button onClick={() => setOpen(true)}>Add Gmail inbox</Button>;
+  if (!open)
+    return (
+      <div className="space-y-3 text-sm">
+        <h2 className="text-base font-semibold text-slate-900">Connect Gmail</h2>
+        <p className="text-slate-600">
+          Copy a Google Sheet with a small script into your own Google account. It sends from your Gmail or Google Workspace inbox at a safe pace. FirstLine never gets
+          your password.
+        </p>
+        <Button onClick={() => setOpen(true)}>Connect Gmail</Button>
+      </div>
+    );
 
   return (
     <form

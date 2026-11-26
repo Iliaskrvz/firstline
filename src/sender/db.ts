@@ -32,7 +32,7 @@ export const MIN_SCRIPT_VERSION = "1.0.0";
 /** Scripts before this can't reply in a thread: they only get first emails. */
 const FOLLOW_UP_SCRIPT_VERSION = "1.1.0";
 const WATCH_PER_RUN = 20; // Gmail read quota: 288 runs/day × 20 threads stays well under it
-const WATCH_DAYS = 30;
+export const WATCH_DAYS = 30;
 
 export class SenderAuthError extends Error {}
 
@@ -47,6 +47,7 @@ type InboxRow = {
   id: string;
   workspace_id: string;
   email: string;
+  type: string;
   daily_cap: number;
   warmup_day: number;
   window: SendWindow;
@@ -74,25 +75,40 @@ async function tx<T>(pool: pg.Pool, fn: (c: pg.PoolClient) => Promise<T>): Promi
   }
 }
 
-async function lockInbox(c: pg.PoolClient, key: string): Promise<InboxRow> {
+/** Which inbox: the Sender Sheet proves it with its key; the worker (Outlook lane) names it by id. */
+export type InboxLocator = string | { inboxId: string };
+
+async function lockInbox(c: pg.PoolClient, who: InboxLocator): Promise<InboxRow> {
+  const byKey = typeof who === "string";
   const { rows } = await c.query<InboxRow>(
-    `select i.id, i.workspace_id, i.email, i.daily_cap, i.warmup_day, i."window", i.health, i.next_send_at,
+    `select i.id, i.workspace_id, i.email, i.type, i.daily_cap, i.warmup_day, i."window", i.health, i.next_send_at,
             to_char(i.warmup_updated_on, 'YYYY-MM-DD') warmup_updated_on, to_char(i.step_back_on, 'YYYY-MM-DD') step_back_on,
             to_char(i.errors_on, 'YYYY-MM-DD') errors_on, i.errors_today, w.sender_disabled
        from public.inboxes i join public.workspaces w on w.id = i.workspace_id
-      where i.sender_key_hash = $1
+      where ${byKey ? "i.sender_key_hash = $1" : "i.id = $1 and i.type = 'outlook_oauth'"}
       for update of i`,
-    [hashSenderKey(key)],
+    [byKey ? hashSenderKey(who) : who.inboxId],
   );
-  if (!rows[0]) throw new SenderAuthError("Unknown sender key. Copy the key from FirstLine → Inboxes again.");
+  if (!rows[0]) throw new SenderAuthError(byKey ? "Unknown sender key. Copy the key from FirstLine → Inboxes again." : "Unknown Outlook inbox.");
   return rows[0];
 }
+
+/** The outcome channel of an inbox's sends (reply-rate stats keep the lanes apart). */
+const channelOf = (inbox: InboxRow) => (inbox.type === "outlook_oauth" ? "outlook" : "gmail");
 
 /** Start of a local date in the inbox's timezone, as an instant. */
 const LOCAL_DAY_START = `($2::date::timestamp at time zone $3)`;
 
 export type NextResponse = {
-  email: { send_id: string; to: string; subject: string; body: string; thread_id: string | null } | null;
+  email: {
+    send_id: string;
+    to: string;
+    subject: string;
+    body: string;
+    thread_id: string | null;
+    /** Outlook lane: the Graph message id of this lead's step 1, to reply to (null for step 1). */
+    reply_to_message_id?: string | null;
+  } | null;
   wait: { reason: WaitReason; label: string } | null;
   watch: { send_id: string; thread_id: string }[];
   rules: { unsubscribe: string; reply_cut: string; bounce_from: string };
@@ -103,7 +119,7 @@ export type NextResponse = {
 /** GET /api/sender/next: heartbeat, warm-up bookkeeping, and at most one email (§8, §11). */
 export async function senderNext(
   pool: pg.Pool,
-  key: string,
+  key: InboxLocator,
   opts: { scriptVersion: string | null; now?: Date; /** heartbeat + status only: hand nothing out (Connect, paused sheet) */ peek?: boolean },
 ): Promise<NextResponse> {
   const now = opts.now ?? new Date();
@@ -184,8 +200,9 @@ export async function senderNext(
       );
       // Due follow-ups go first (they're time-sensitive), then new first emails in import order.
       const { rows } = await c.query(
-        `select s.id, s.to_email, s.subject, s.body,
-                coalesce(s.gmail_thread_id, (select f.gmail_thread_id from public.sends f where f.lead_id = s.lead_id and f.step_no = 1)) gmail_thread_id
+        `select s.id, s.to_email, s.subject, s.body, s.step_no,
+                coalesce(s.gmail_thread_id, (select f.gmail_thread_id from public.sends f where f.lead_id = s.lead_id and f.step_no = 1)) gmail_thread_id,
+                (select f.provider_message_id from public.sends f where f.lead_id = s.lead_id and f.step_no = 1) first_message_id
            from public.sends s join public.campaigns c on c.id = s.campaign_id
           where s.inbox_id = $1 and s.status = 'queued' and c.send_state = 'sending'
             and (s.step_no = 1 or (s.scheduled_for <= $2::timestamptz and $4::boolean))
@@ -197,7 +214,14 @@ export async function senderNext(
       );
       if (rows[0]) {
         await c.query("update public.sends set handed_out_at = $2 where id = $1", [rows[0].id, now]);
-        email = { send_id: rows[0].id, to: rows[0].to_email, subject: rows[0].subject, body: rows[0].body, thread_id: rows[0].gmail_thread_id };
+        email = {
+          send_id: rows[0].id,
+          to: rows[0].to_email,
+          subject: rows[0].subject,
+          body: rows[0].body,
+          thread_id: rows[0].gmail_thread_id,
+          reply_to_message_id: rows[0].step_no > 1 ? rows[0].first_message_id : null,
+        };
       } else reason = "nothing_queued";
     }
 
@@ -241,14 +265,14 @@ export async function senderNext(
 }
 
 export type ReportBody = {
-  send?: { send_id: string; status: "sent" | "failed"; thread_id?: string | null; error?: string | null };
+  send?: { send_id: string; status: "sent" | "failed"; thread_id?: string | null; error?: string | null; /** Outlook lane: Graph message id */ message_id?: string | null };
   events?: { send_id: string; type: "replied" | "bounced"; unsubscribe?: boolean }[];
 };
 
 export type ReportResult = { sent: number; failed: number; replied: number; bounced: number; paused_same_domain: number };
 
 /** POST /api/sender/report: what happened to a handed-out email, plus replies and bounces found in watched threads. */
-export async function senderReport(pool: pg.Pool, key: string, body: ReportBody, opts: { now?: Date; random?: () => number } = {}): Promise<ReportResult> {
+export async function senderReport(pool: pg.Pool, key: InboxLocator, body: ReportBody, opts: { now?: Date; random?: () => number } = {}): Promise<ReportResult> {
   const now = opts.now ?? new Date();
   return tx(pool, async (c) => {
     const inbox = await lockInbox(c, key);
@@ -257,14 +281,14 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
 
     if (body.send?.status === "sent") {
       const r = await c.query(
-        `update public.sends set status = 'sent', sent_at = $3, gmail_thread_id = $4, handed_out_at = null
+        `update public.sends set status = 'sent', sent_at = $3, gmail_thread_id = $4, provider_message_id = $5, handed_out_at = null
           where id = $1 and inbox_id = $2 and status = 'queued'
           returning lead_id, step_no`,
-        [body.send.send_id, inbox.id, now, body.send.thread_id ?? null],
+        [body.send.send_id, inbox.id, now, body.send.thread_id ?? null, body.send.message_id ?? null],
       );
       if (r.rowCount) {
         out.sent = 1;
-        await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', 'sent', $3)", [[r.rows[0].lead_id], r.rows[0].step_no, now]);
+        await c.query("select public.record_outcomes($1::uuid[], $2, $4, 'sent', $3)", [[r.rows[0].lead_id], r.rows[0].step_no, now, channelOf(inbox)]);
         await c.query("update public.inboxes set next_send_at = $2 where id = $1", [inbox.id, new Date(now.getTime() + nextGapMs(opts.random))]);
         // The next step becomes due its delay in working days from now (inbox timezone).
         const { rows: next } = await c.query(
@@ -300,9 +324,9 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
       if (!hit) continue; // unknown or already handled: reports are idempotent
       if (status === "bounced") out.bounced++;
       else out.replied++;
-      await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', $3, $4)", [[hit.lead_id], hit.step_no, status, now]);
+      await c.query("select public.record_outcomes($1::uuid[], $2, $5, $3, $4)", [[hit.lead_id], hit.step_no, status, now, channelOf(inbox)]);
       if (status === "replied" && ev.unsubscribe) {
-        await c.query("select public.record_outcomes($1::uuid[], $2, 'gmail', 'unsubscribed', $3)", [[hit.lead_id], hit.step_no, now]);
+        await c.query("select public.record_outcomes($1::uuid[], $2, $4, 'unsubscribed', $3)", [[hit.lead_id], hit.step_no, now, channelOf(inbox)]);
       }
 
       // Stop rules: never email this person again; later steps for this lead stop.
@@ -336,6 +360,15 @@ export async function senderReport(pool: pg.Pool, key: string, body: ReportBody,
   });
 }
 
+/**
+ * Outlook lane: give a handed-out email back without counting it as an error (Microsoft throttled us,
+ * or the inbox just got disconnected), and don't try this inbox again before `until`.
+ */
+export async function senderRelease(pool: pg.Pool, inboxId: string, sendId: string, until: Date | null): Promise<void> {
+  await pool.query("update public.sends set handed_out_at = null where id = $1 and inbox_id = $2 and status = 'queued'", [sendId, inboxId]);
+  if (until) await pool.query("update public.inboxes set next_send_at = greatest(coalesce(next_send_at, $2), $2) where id = $1", [inboxId, until]);
+}
+
 // ---- Called from the app (after the caller checked the user's workspace) -----------------
 
 /**
@@ -352,10 +385,13 @@ export async function createInbox(
      values ($1, lower($2), $3, $4, $5, $6)
      on conflict (workspace_id, email) do update
        set daily_cap = excluded.daily_cap, "window" = excluded."window", sender_key_hash = excluded.sender_key_hash,
-           key_prefix = excluded.key_prefix, health = case when public.inboxes.health = 'paused' then 'warming' else public.inboxes.health end
+           key_prefix = excluded.key_prefix, type = 'gmail_script',
+           health = case when public.inboxes.health in ('paused', 'disconnected') then 'warming' else public.inboxes.health end
      returning id, (xmax <> 0) updated`,
     [input.workspaceId, input.email.trim(), input.dailyCap, JSON.stringify(input.window), hashSenderKey(key), keyPrefix(key)],
   );
+  // The same address moving from Outlook to the Gmail sheet: its Microsoft tokens go.
+  await pool.query("delete from public.inbox_credentials where inbox_id = $1", [rows[0].id]);
   return { id: rows[0].id, key, updated: rows[0].updated };
 }
 

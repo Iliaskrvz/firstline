@@ -93,9 +93,30 @@ Option A halves the setup but doesn't remove the sheet. A middle way: replies de
 2. Personal outlook.com accounts too, or Microsoft 365 business accounts only (recommended: business only, as consumer limits are unclear).
 3. `Mail.ReadBasic` vs `Mail.Read` for reply detection (smallest that works).
 
-### Phase plan
-1. **V2.4 Partner and tenant setup:** business verification, tenant, domain, app registration, publisher verification.
-2. **V2.5 Graph sender:** sender type `outlook_graph`; tokens encrypted; send with `sendMail` and follow-ups as replies in the same conversation; reply and bounce detection by polling the mailbox (or Graph change notifications) for messages in the conversation. Same scheduler, caps, warm-up and stop rules as Gmail. Health and heartbeat as for the Sender Sheet.
+### Status (2026-11-26)
+- **Built (Phase O2):** the Graph sender, as an **unverified** multi-tenant app. Inbox type `outlook_oauth`; tokens
+  encrypted in `inbox_credentials`; `sendMail` + `/reply` (Mail.Send) and an Inbox delta check (Mail.ReadBasic, no
+  bodies) in the worker, through the Gmail lane's scheduler. Two consent paths: the user approves, or they get an
+  admin-consent link for their IT person. See OUTLOOK_SETUP.md.
+- **Decided:** work/school accounts only (`organizations` authority); `Mail.ReadBasic`, not `Mail.Read`; bounces
+  recognised from the sender and subject of the non-delivery report.
+
+### Later: publisher verification (so non-admin users can connect too) — design note, not built
+Rechecked on learn.microsoft.com (publisher-verification-overview) on 2026-11-26:
+- A **Partner One ID** of a Microsoft AI Cloud Partner Program account that **completed verification**, and it must be
+  the **partner global account (PGA)**; location IDs don't work.
+- The app registered with a Microsoft Entra **work or school account** (not a personal Microsoft account), in a tenant
+  **associated with that PGA**.
+- A **publisher domain** on the app. The email domain used for the partner verification must match it or be a
+  DNS-verified custom domain in the tenant; `*.onmicrosoft.com` isn't allowed.
+- The person doing it: **Application Administrator or Cloud Application Administrator** in Entra **and** Partner Admin
+  or Account Admin in Partner Center, signed in with **MFA**, accepting the terms of use.
+- Free; a blue "verified" badge then shows on the consent screen. Not available in national clouds.
+- Even verified, some tenants only allow admin consent: the admin-consent path stays.
+
+Steps when we do it: business verification in Partner Center (with the KvK registration), Microsoft 365 tenant on the
+brand domain, move or re-register the Entra app there (the redirect URIs stay the same), set the publisher domain, add
+the Partner One ID under Branding & properties, check the consent screen in a test tenant.
 
 ---
 

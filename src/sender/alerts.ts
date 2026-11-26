@@ -63,7 +63,8 @@ export async function checkInboxHealth(
        from public.inboxes i
        join public.workspaces w on w.id = i.workspace_id
        left join auth.users u on u.id = w.owner_id
-      where i.last_heartbeat_at is not null and i.offline_alerted_at is null and i.health <> 'paused'`,
+      where i.last_heartbeat_at is not null and i.offline_alerted_at is null and i.health <> 'paused'
+        and i.type <> 'outlook_oauth'`, // Outlook inboxes run in the worker; a lost connection has its own alert
   );
   const alerted: string[] = [];
   const failed: string[] = [];

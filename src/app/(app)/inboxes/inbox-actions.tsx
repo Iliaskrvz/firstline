@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui";
-import { newInboxKey, pauseInbox } from "./actions";
+import { disconnectOutlook, newInboxKey, pauseInbox } from "./actions";
 import { SetupSteps } from "./setup-steps";
 
-export function InboxActions({ inboxId, paused, appUrl, script }: { inboxId: string; paused: boolean; appUrl: string | null; script: string }) {
+export function InboxActions({ inboxId, kind = "gmail", paused, appUrl, script }: { inboxId: string; kind?: "gmail" | "outlook"; paused: boolean; appUrl: string | null; script: string }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<{ key: string; email: string } | null>(null);
@@ -25,7 +25,22 @@ export function InboxActions({ inboxId, paused, appUrl, script }: { inboxId: str
         >
           {paused ? "Resume sending" : "Pause sending"}
         </Button>
-        <Button
+        {kind === "outlook" && (
+          <Button
+            variant="ghost"
+            disabled={pending}
+            onClick={() => {
+              if (!confirm("Disconnect this Outlook inbox? FirstLine deletes its access right away. Queued emails wait until you connect it again.")) return;
+              start(async () => {
+                const res = await disconnectOutlook(inboxId);
+                setError(res?.error ?? null);
+              });
+            }}
+          >
+            Disconnect
+          </Button>
+        )}
+        {kind === "gmail" && <Button
           variant="ghost"
           disabled={pending}
           onClick={() => {
@@ -38,7 +53,7 @@ export function InboxActions({ inboxId, paused, appUrl, script }: { inboxId: str
           }}
         >
           New key / setup steps
-        </Button>
+        </Button>}
       </div>
       {error && <p className="text-sm text-rose-700">{error}</p>}
       {fresh && <SetupSteps email={fresh.email} senderKey={fresh.key} appUrl={appUrl} script={script} />}

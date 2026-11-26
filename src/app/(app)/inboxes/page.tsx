@@ -7,7 +7,9 @@ import { queueConfigured } from "@/server/queue";
 import { inboxWarnings } from "@/lib/sender/safety";
 import { loadInboxes, publicAppUrl, senderScript } from "@/server/sender-view";
 import { AutoRefresh } from "../campaigns/[id]/preview/auto-refresh";
+import { microsoftMode } from "@/sender/microsoft-config";
 import { AddInbox } from "./add-inbox";
+import { ConnectOutlook } from "./connect-outlook";
 import { InboxActions } from "./inbox-actions";
 import { SafetyTips } from "./safety-tips";
 
@@ -15,6 +17,7 @@ export const metadata: Metadata = { title: "Inboxes" };
 
 const HEALTH: Record<InboxHealth, { label: string; tone: "gray" | "indigo" | "green" | "amber" | "red" }> = {
   not_connected: { label: "Not connected yet", tone: "gray" },
+  disconnected: { label: "Disconnected", tone: "red" },
   paused: { label: "Paused", tone: "amber" },
   offline: { label: "Offline", tone: "red" },
   warming: { label: "Warming up", tone: "indigo" },
@@ -23,12 +26,23 @@ const HEALTH: Record<InboxHealth, { label: string; tone: "gray" | "indigo" | "gr
 
 const DAY = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export default function InboxesPage() {
+const NOTICE: Record<string, { text: string; tone: "ok" | "warn" }> = {
+  connected: { text: "Outlook inbox connected. It starts slowly (warm-up) and sends inside its window.", tone: "ok" },
+  expired: { text: "The Microsoft sign-in took too long or was started in another browser. Please try again.", tone: "warn" },
+  error: { text: "Microsoft didn't connect the inbox. Please try again; if it keeps failing, email us the code below.", tone: "warn" },
+  off: { text: "Outlook isn't set up on this server yet.", tone: "warn" },
+  nokey: { text: "Outlook needs INTEGRATIONS_ENCRYPTION_KEY on the server to store the connection safely.", tone: "warn" },
+};
+
+export default function InboxesPage(props: PageProps<"/inboxes">) {
   return (
     <>
-      <PageHeader title="Inboxes" description="Send from your own Gmail through a small script in your Google account. FirstLine never sees your password or your emails." />
+      <PageHeader
+        title="Inboxes"
+        description="Send from your own Gmail (a small script in your Google account) or Outlook (Microsoft 365). FirstLine never sees your password or the text of your emails."
+      />
       <Suspense fallback={<Skeleton className="h-48" />}>
-        <InboxList />
+        <InboxList searchParams={props.searchParams} />
       </Suspense>
     </>
   );
@@ -42,7 +56,10 @@ function ago(s: number | null) {
   return `${Math.round(s / 86_400)} days ago`;
 }
 
-async function InboxList() {
+async function InboxList({ searchParams }: { searchParams: PageProps<"/inboxes">["searchParams"] }) {
+  const sp = await searchParams;
+  const noticeKey = sp.connected === "outlook" ? "connected" : typeof sp.outlook === "string" ? sp.outlook : null;
+  const notice = noticeKey ? NOTICE[noticeKey] : null;
   const { workspace, user } = await requireWorkspace();
   const appUrl = publicAppUrl();
   const script = senderScript();
@@ -53,6 +70,12 @@ async function InboxList() {
   return (
     <div className="space-y-6">
       <AutoRefresh active={inboxes.some((i) => i.health === "not_connected")} intervalMs={10_000} />
+      {notice && (
+        <p className={`rounded-lg px-4 py-3 text-sm ${notice.tone === "ok" ? "bg-emerald-50 text-emerald-900" : "bg-amber-50 text-amber-900"}`}>
+          {notice.text}
+          {typeof sp.code === "string" && <span className="ml-2 font-mono text-xs opacity-70">({sp.code})</span>}
+        </p>
+      )}
       <SafetyTips open={inboxes.length === 0} />
       {inboxes.map((i) => (
         <Card key={i.id} className="space-y-4">
@@ -60,11 +83,18 @@ async function InboxList() {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-semibold text-slate-900">{i.email}</h2>
+                <Badge tone="gray">{i.kind === "outlook" ? "Outlook" : "Gmail"}</Badge>
                 <Badge tone={HEALTH[i.health].tone}>{HEALTH[i.health].label}</Badge>
               </div>
               <p className="mt-1 text-xs text-slate-500">
                 {i.window.days.map((d) => DAY[d]).join(" ")} · {i.window.start}–{i.window.end} ({i.window.tz}) · last seen {ago(i.lastSeenSecondsAgo)}
-                {i.scriptVersion && ` · script ${i.scriptVersion}`} · key {i.keyPrefix}…
+                {i.kind === "gmail" ? (
+                  <>
+                    {i.scriptVersion && ` · script ${i.scriptVersion}`} · key {i.keyPrefix}…
+                  </>
+                ) : (
+                  " · Microsoft 365, sent by FirstLine"
+                )}
               </p>
             </div>
             <div className="text-right">
@@ -85,12 +115,23 @@ async function InboxList() {
             </p>
           ))}
           {i.lastError && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{i.lastError}</p>}
-          <InboxActions inboxId={i.id} paused={i.health === "paused"} appUrl={appUrl} script={script} />
+          {i.health === "disconnected" ? (
+            <a href="/connect/outlook/start" className="inline-flex rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              Connect again
+            </a>
+          ) : (
+            <InboxActions inboxId={i.id} kind={i.kind} paused={i.health === "paused"} appUrl={appUrl} script={script} />
+          )}
         </Card>
       ))}
-      <Card>
-        <AddInbox appUrl={appUrl} script={script} />
-      </Card>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <AddInbox appUrl={appUrl} script={script} />
+        </Card>
+        <Card>
+          <ConnectOutlook available={microsoftMode() !== "off"} />
+        </Card>
+      </div>
     </div>
   );
 }

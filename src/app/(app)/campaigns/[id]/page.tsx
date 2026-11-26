@@ -77,7 +77,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
     supabase.from("leads").select("id, status, status_detail, domain").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
-    supabase.from("inboxes").select("id, email").eq("workspace_id", workspace.id).order("created_at"),
+    supabase.from("inboxes").select("id, email, type, health").eq("workspace_id", workspace.id).order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
     supabase.from("workspace_balance").select("available, lite_available").eq("workspace_id", workspace.id).maybeSingle(),
   ]);
@@ -119,7 +119,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   }
   const readyToQueue = statuses.filter((l) => !sendByLead.has(l.id) && (l.status === "done" || (l.status === "fallback" && c2.send_fallbacks))).length;
   const steps = (stepRows ?? []) as { step_no: number; delay_days: number; kind: "plain" | "personalised"; template_body: string }[];
-  const inboxes = (inboxRows ?? []) as { id: string; email: string }[];
+  const inboxes = (inboxRows ?? []) as { id: string; email: string; type: string; health: string }[];
   const shownStatus = c.status === "running" && !inFlight ? "done" : c.status;
   const templateOk = !!parsed && parsed.slots.length > 0 && !parsed.issues.some((i) => i.level === "error");
 

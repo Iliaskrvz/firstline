@@ -5,7 +5,9 @@ import { useState, useTransition } from "react";
 import { Button, Field, inputClass } from "@/components/ui";
 import { setCampaignSending, startCampaignSending } from "../actions";
 
-type Inbox = { id: string; email: string };
+type Inbox = { id: string; email: string; type?: string; health?: string };
+
+const usable = (i: Inbox) => i.health !== "disconnected";
 
 export function SendPanel({
   campaignId,
@@ -27,7 +29,7 @@ export function SendPanel({
   defaultOptOut: string;
   counts: Record<string, number>;
 }) {
-  const [picked, setPicked] = useState<string[]>(inboxes.slice(0, 1).map((i) => i.id));
+  const [picked, setPicked] = useState<string[]>(inboxes.filter(usable).slice(0, 1).map((i) => i.id));
   const sendingFrom = inboxes.filter((i) => sendingInboxIds.includes(i.id)).map((i) => i.email);
   const [optOut, setOptOut] = useState(defaultOptOut);
   const [pending, start] = useTransition();
@@ -80,11 +82,11 @@ export function SendPanel({
 
   return (
     <div className="space-y-3">
-      <div className="text-sm font-medium text-slate-700">Send via Gmail</div>
+      <div className="text-sm font-medium text-slate-700">From my own inbox</div>
       {inboxes.length === 0 ? (
         <p className="text-sm text-slate-600">
           <Link href="/inboxes" className="font-medium text-brand-700 hover:underline">
-            Connect a Gmail inbox
+            Connect an inbox (Gmail or Outlook)
           </Link>{" "}
           first.
         </p>
@@ -93,14 +95,16 @@ export function SendPanel({
           <Field label="From" hint={picked.length > 1 ? "Leads are spread over these inboxes; each lead's follow-ups come from the same inbox." : undefined}>
             <div className="space-y-1.5">
               {inboxes.map((i) => (
-                <label key={i.id} className="flex items-center gap-2 text-sm">
+                <label key={i.id} className={`flex items-center gap-2 text-sm ${usable(i) ? "" : "text-slate-400"}`}>
                   <input
                     type="checkbox"
                     className="accent-brand-600"
+                    disabled={!usable(i)}
                     checked={picked.includes(i.id)}
                     onChange={(e) => setPicked(e.target.checked ? [...picked, i.id] : picked.filter((x) => x !== i.id))}
                   />
                   {i.email}
+                  <span className="text-xs text-slate-500">{i.type === "outlook_oauth" ? "Outlook" : "Gmail"}{usable(i) ? "" : " · disconnected"}</span>
                 </label>
               ))}
             </div>

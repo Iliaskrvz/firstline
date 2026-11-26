@@ -9,6 +9,8 @@ import { serverPool } from "./db";
 export type InboxView = {
   id: string;
   email: string;
+  /** "gmail" (Sender Sheet) or "outlook" (Microsoft 365, sent by the worker). */
+  kind: "gmail" | "outlook";
   dailyCap: number;
   cap: number;
   warmupDay: number;
@@ -25,7 +27,7 @@ export type InboxView = {
 
 export async function loadInboxes(workspaceId: string): Promise<InboxView[]> {
   const { rows } = await serverPool().query(
-    `select i.id, i.email, i.daily_cap, i.warmup_day, i."window", i.health, i.last_heartbeat_at, i.key_prefix, i.script_version, i.last_error,
+    `select i.id, i.email, i.type, i.daily_cap, i.warmup_day, i."window", i.health, i.last_heartbeat_at, i.key_prefix, i.script_version, i.last_error,
             extract(epoch from now() - i.last_heartbeat_at)::int seconds_ago,
             (select count(*) from public.sends s where s.inbox_id = i.id
               and s.sent_at >= (date_trunc('day', now() at time zone (i."window"->>'tz')) at time zone (i."window"->>'tz')))::int sent_today,
@@ -38,12 +40,13 @@ export async function loadInboxes(workspaceId: string): Promise<InboxView[]> {
   return rows.map((r) => ({
     id: r.id,
     email: r.email,
+    kind: r.type === "outlook_oauth" ? "outlook" : "gmail",
     dailyCap: r.daily_cap,
     cap: effectiveCap(r.daily_cap, r.warmup_day),
     warmupDay: r.warmup_day,
     window: r.window,
     health: inboxHealth(
-      { window: r.window, dailyCap: r.daily_cap, warmupDay: r.warmup_day, paused: r.health === "paused", lastHeartbeatAt: r.last_heartbeat_at },
+      { window: r.window, dailyCap: r.daily_cap, warmupDay: r.warmup_day, paused: r.health === "paused", lastHeartbeatAt: r.last_heartbeat_at, disconnected: r.health === "disconnected" },
       now,
     ),
     sentToday: r.sent_today,

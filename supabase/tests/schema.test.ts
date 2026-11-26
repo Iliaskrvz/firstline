@@ -132,6 +132,25 @@ describe("row level security", () => {
       asUser(USER_A, () => db.query("select sender_key_hash from public.inboxes")),
     ).rejects.toThrow(/permission denied/);
   });
+
+  it("Outlook tokens are readable by nobody but the server, not even the inbox's own workspace", async () => {
+    const inbox = (
+      await db.query<{ id: string }>("insert into public.inboxes (workspace_id, email, type) values ($1, 'a@a-tenant.com', 'outlook_oauth') returning id", [wsA])
+    ).rows[0].id;
+    await db.query(
+      "insert into public.inbox_credentials (inbox_id, workspace_id, provider, tenant_id, account_id, scopes, refresh_token_enc) values ($1, $2, 'microsoft', 't', 'o', 'Mail.Send', 'v1:secret')",
+      [inbox, wsA],
+    );
+    for (const user of [USER_A, USER_B]) {
+      await expect(asUser(user, () => db.query("select refresh_token_enc from public.inbox_credentials"))).rejects.toThrow(/permission denied/);
+      await expect(asUser(user, () => db.query("update public.inbox_credentials set scopes = 'x'"))).rejects.toThrow(/permission denied/);
+      await expect(asUser(user, () => db.query("insert into public.inbox_credentials (inbox_id, workspace_id, provider, tenant_id, account_id, scopes) values ($1, $2, 'microsoft', 't', 'o', 's')", [inbox, wsA]))).rejects.toThrow(/permission denied/);
+    }
+    // The inbox itself follows the normal rules: its own workspace sees it, another doesn't.
+    expect((await asUser(USER_A, () => db.query("select type from public.inboxes where id = $1", [inbox]))).rows).toEqual([{ type: "outlook_oauth" }]);
+    expect((await asUser(USER_B, () => db.query("select type from public.inboxes where id = $1", [inbox]))).rows).toEqual([]);
+    await expect(db.query("insert into public.inboxes (workspace_id, email, type) values ($1, 'x@x.com', 'yahoo')", [wsA])).rejects.toThrow(/check/);
+  });
 });
 
 describe("credit ledger", () => {

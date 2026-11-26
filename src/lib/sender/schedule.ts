@@ -151,13 +151,14 @@ export function mayHandOut(
   return { ok: true, cap };
 }
 
-export type InboxHealth = "not_connected" | "paused" | "offline" | "warming" | "healthy";
+export type InboxHealth = "not_connected" | "disconnected" | "paused" | "offline" | "warming" | "healthy";
 
 /** What the Inboxes screen shows. Offline only counts inside the window (a script sleeping at night is fine). */
 export function inboxHealth(
-  inbox: { window: SendWindow; dailyCap: number; warmupDay: number; paused: boolean; lastHeartbeatAt: Date | null },
+  inbox: { window: SendWindow; dailyCap: number; warmupDay: number; paused: boolean; lastHeartbeatAt: Date | null; disconnected?: boolean },
   now: Date,
 ): InboxHealth {
+  if (inbox.disconnected) return "disconnected";
   if (inbox.paused) return "paused";
   if (!inbox.lastHeartbeatAt) return "not_connected";
   if (inWindow(inbox.window, now) && now.getTime() - inbox.lastHeartbeatAt.getTime() > OFFLINE_AFTER_MS) return "offline";

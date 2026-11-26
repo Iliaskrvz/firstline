@@ -7,6 +7,7 @@ import { validateWindow } from "@/lib/sender/schedule";
 import { serverPool } from "@/server/db";
 import { queueConfigured } from "@/server/queue";
 import { createInbox, rotateInboxKey, setInboxPaused } from "@/sender/db";
+import { disconnectOutlookInbox } from "@/sender/outlook";
 
 const NOT_CONFIGURED = "Sending needs the database connection (DATABASE_URL in .env.local).";
 
@@ -45,6 +46,15 @@ export async function newInboxKey(inboxId: string): Promise<{ error: string } | 
   const { rows } = await serverPool().query("select email from public.inboxes where id = $1", [inboxId]);
   revalidatePath("/inboxes");
   return { key, email: rows[0].email };
+}
+
+/** Remove FirstLine's access to an Outlook inbox: its Microsoft tokens are deleted right away. */
+export async function disconnectOutlook(inboxId: string): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(inboxId).success) return { error: "Invalid inbox." };
+  if (!queueConfigured()) return { error: NOT_CONFIGURED };
+  const { workspace } = await requireWorkspace();
+  if (!(await disconnectOutlookInbox(serverPool(), workspace.id, inboxId))) return { error: "Inbox not found." };
+  revalidatePath("/inboxes");
 }
 
 export async function pauseInbox(inboxId: string, paused: boolean): Promise<{ error: string } | undefined> {
