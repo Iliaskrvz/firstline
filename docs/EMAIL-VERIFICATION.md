@@ -1,6 +1,10 @@
 # Paid email verification: design (not built)
 
 Written 2026-11-26, after Part A (free email checks) and Part B (lead qualification). Design only: nothing here is built.
+
+**Owner's decision (2026-11-26): plan approved.** Provider: Bouncer. Customer price: 1 credit per 2 verified addresses
+(rounded up per run; unknown results and cache hits free). First pack: 10,000 checks. Building waits for the lawyer items and
+the Bouncer account (see "Before building").
 Provider facts were read on 2026-11-26 from the providers' own pages where those pages could be read (sources at the end).
 Anything marked *(unconfirmed)* comes from third-party reviews or couldn't be read, and needs a second look before building.
 
@@ -62,7 +66,7 @@ minimum, unclear credit expiry, rate limits we couldn't read, and US processing 
 - **Proposal: 1 credit per 2 verified addresses**, rounded up per run. That is €0.015–€0.019 a check, ≈ ×2.7–×3.5 on the
   10,000 pack and more on the 100,000 pack. "Unknown" results are free for the customer, because we don't pay for them either.
 - Re-checking an address within 30 days comes from our cache. That costs us nothing, so it's free for the customer.
-- *Owner's decision:* the rate (1 per 2, or 1 per 3 once we're on the 100,000 pack). Pack prices stay as they are.
+- *Decided 2026-11-26:* 1 credit per 2. Revisit (1 per 3) once we buy the 100,000 pack. Pack prices stay as they are.
 
 ## Design
 
@@ -174,7 +178,7 @@ passed free check and no verification yet, and works through them:
 1. **Lawyer:**
    - add Bouncer (or the chosen provider) as a sub-processor in the privacy policy and our DPA;
    - check that verifying a lead's mailbox through a third party fits the legitimate-interest basis we use for cold email.
-2. **Owner:** the credit rate (1 per 2 proposed) and which pack to buy first (10,000 proposed).
+2. ~~**Owner:** the credit rate and the first pack.~~ Decided 2026-11-26: 1 credit per 2 checks, the 10,000 pack.
 3. **Bouncer account:** the owner creates it, buys the pack and saves the key with `read -rs` into `.env.local`. Then signs the DPA.
 4. **Re-read before building** (APIs change): Bouncer's real-time reference and status list, its DPA, and whether real-time
    unknowns are also free (the pricing page says so; the API reference is silent).
