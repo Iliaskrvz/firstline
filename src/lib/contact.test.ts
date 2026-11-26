@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { contactNotification, parseContact } from "./contact";
 import { proofMode, visibleProof } from "./proof";
+import { OWN_OUTREACH } from "@/content/proof";
 
 describe("agencies contact form", () => {
   const ok = { name: " Ana  de Vries ", email: "Ana@Agency.example", company: "Agency", volume: "Under 2,000", message: "Line 1\r\nLine 2" };
@@ -49,5 +50,12 @@ describe("SHOW_PROOF", () => {
     expect(proofMode({ SHOW_PROOF: "preview", NODE_ENV: "development" })).toBe("preview");
     expect(proofMode({ SHOW_PROOF: "preview", NODE_ENV: "production" })).toBe("off");
     expect(visibleProof(items, "preview")).toHaveLength(2);
+  });
+
+  it("own-outreach results: hidden while off, and while they're still placeholder numbers", () => {
+    expect(OWN_OUTREACH.placeholder).toBe(true); // flip to false only with real numbers
+    expect(visibleProof([OWN_OUTREACH], "off")).toEqual([]);
+    expect(visibleProof([OWN_OUTREACH], "on")).toEqual([]);
+    expect(visibleProof([{ ...OWN_OUTREACH, placeholder: false }], "on")).toHaveLength(1);
   });
 });

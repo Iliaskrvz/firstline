@@ -248,6 +248,17 @@ export const HOME = {
     placeholder: "Placeholder: never shown in production",
   },
 
+  /** Results from our own outreach (src/content/proof.ts OWN_OUTREACH), hidden until SHOW_PROOF=1 and filled in. */
+  ownResults: {
+    eyebrow: "Results from our own outreach",
+    title: "We use FirstLine on our own cold email first.",
+    emailsSent: "emails sent with FirstLine",
+    before: "Reply rate before",
+    after: "Reply rate with FirstLine",
+    period: (p: string) => `Period: ${p}. Our own campaigns, not a customer's.`,
+    placeholder: "Placeholder: never shown in production",
+  },
+
   /** Social proof: hidden unless SHOW_PROOF is on and the entries are real (src/content/proof.ts). */
   proof: {
     counter: "{personalised} emails personalised · {neutral} leads skipped for free",

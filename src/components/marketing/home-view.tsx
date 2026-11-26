@@ -10,7 +10,8 @@ import { Check, Cite, Eyebrow, H2, MarketingShell, WindowDots } from "@/componen
 import { buttonClass } from "@/components/ui";
 import { COMPETITORS, checkedOnLabel } from "@/content/competitors";
 import type { HomeCopy } from "@/content/home";
-import { CASE_STUDIES, DEMO_VIDEO } from "@/content/proof";
+import { CASE_STUDIES, DEMO_VIDEO, OWN_OUTREACH } from "@/content/proof";
+import { OwnResultsCard } from "./own-results";
 import { refundOffer } from "@/content/refund";
 import { fmtEuro, fmtInt, type Locale } from "@/content/site";
 import { enabledPacks } from "@/lib/credits";
@@ -234,6 +235,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
   const anchor = COMPETITORS.filter((c) => c.inAnchor && c.for300);
   const demo = demoMode();
   const cases = visibleProof(CASE_STUDIES);
+  const own = visibleProof([OWN_OUTREACH]);
   const signup = "/signup";
   // Section labels count up ([1], [2], …), skipping sections that are switched off.
   let section = 0;
@@ -409,6 +411,15 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
               <Eyebrow n="†">{t.caseStudy.eyebrow}</Eyebrow>
               {cases.map((c, i) => (
                 <CaseStudyCard key={i} c={c} t={t.caseStudy} locale={locale} />
+              ))}
+            </div>
+          )}
+          {/* Our own outreach results: same switch, placeholders never in production */}
+          {own.length > 0 && (
+            <div className="mt-14 grid gap-6">
+              <Eyebrow n="†">{t.ownResults.eyebrow}</Eyebrow>
+              {own.map((r, i) => (
+                <OwnResultsCard key={i} r={r} t={t.ownResults} locale={locale} />
               ))}
             </div>
           )}

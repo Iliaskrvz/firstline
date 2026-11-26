@@ -10,14 +10,14 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-slate-200/70 bg-white/80 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
-          <Link href="/campaigns">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:gap-6 sm:px-6">
+          <Link href="/campaigns" className="shrink-0">
             <Logo />
           </Link>
           <Suspense fallback={<NavLinksFallback />}>
             <NavLinks />
           </Suspense>
-          <div className="ml-auto">
+          <div className="ml-auto shrink-0">
             <Suspense fallback={null}>
               <UserMenu />
             </Suspense>

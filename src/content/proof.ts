@@ -36,6 +36,31 @@ export const CASE_STUDIES: CaseStudy[] = [
 ];
 
 /**
+ * Results from the owner's own outreach with FirstLine (owner's request 2026-11-26). Hidden until
+ * SHOW_PROOF=1 AND placeholder is false. Fill in real numbers only: emails actually sent in the period,
+ * and reply rates measured the same way before and after (e.g. replies / delivered emails).
+ */
+export type OwnOutreachResult = {
+  placeholder: boolean;
+  /** Emails sent with FirstLine in the period. */
+  emailsSent: number;
+  /** Reply rate before FirstLine, as a percentage (e.g. 2.4), on comparable campaigns. */
+  replyRateBefore: number;
+  /** Reply rate with FirstLine, as a percentage, over the same kind of campaigns. */
+  replyRateAfter: number;
+  /** The period the numbers cover, as you want it shown, e.g. "December 2026 – January 2027". */
+  period: string;
+};
+
+export const OWN_OUTREACH: OwnOutreachResult = {
+  placeholder: true,
+  emailsSent: 0,
+  replyRateBefore: 0,
+  replyRateAfter: 0,
+  period: "PLACEHOLDER · e.g. December 2026 – January 2027",
+};
+
+/**
  * The 60 to 90 second demo video on the homepage. Hidden while src is null.
  * Put the file in public/video/ (MP4, H.264, under ~15 MB) and set src to "/video/<file>.mp4".
  * Script: docs/marketing/demo-video-script.md.

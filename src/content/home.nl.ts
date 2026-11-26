@@ -238,6 +238,16 @@ export const HOME_NL: HomeCopy = {
     placeholder: "Placeholder: nooit zichtbaar in productie",
   },
 
+  ownResults: {
+    eyebrow: "Resultaten van onze eigen outreach",
+    title: "We gebruiken FirstLine eerst voor onze eigen cold e-mail.",
+    emailsSent: "e-mails verstuurd met FirstLine",
+    before: "Reactiepercentage eerst",
+    after: "Reactiepercentage met FirstLine",
+    period: (p: string) => `Periode: ${p}. Onze eigen campagnes, niet die van een klant.`,
+    placeholder: "Placeholder: nooit zichtbaar in productie",
+  },
+
   proof: {
     counter: "{personalised} e-mails gepersonaliseerd · {neutral} leads gratis overgeslagen",
     counterNote: "Live uit de database van FirstLine, elk uur bijgewerkt.",

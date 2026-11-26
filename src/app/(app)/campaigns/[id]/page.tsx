@@ -32,6 +32,8 @@ import { emailCheckSummary } from "@/lib/email-check-pg";
 import { REASON_LABEL, type EmailReason } from "@/lib/email-check-labels";
 import { noFitWarning, VERDICT_LABEL, verdictCounts, type Verdict } from "@/lib/target-customer";
 import { TargetCustomerSetting, WriteAnywayButton } from "./target-customer";
+import { CampaignSteps } from "./campaign-steps";
+import { campaignSteps } from "@/lib/campaign-steps";
 
 export const metadata: Metadata = { title: "Campaign" };
 
@@ -143,6 +145,10 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
   const inboxes = (inboxRows ?? []) as { id: string; email: string; type: string; health: string }[];
   const shownStatus = c.status === "running" && !inFlight ? "done" : c.status;
   const templateOk = !!parsed && parsed.slots.length > 0 && !parsed.issues.some((i) => i.level === "error");
+  const written = (byStatus.done ?? 0) + (byStatus.fallback ?? 0);
+  // Leads with a website that still need writing: the same count the Run step reserves for.
+  const toWrite = statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length;
+  const stepState = campaignSteps({ templateOk, previewCount, written, remaining, inFlight, started: c.status === "running" || c.status === "done" });
 
   return (
     <>
@@ -227,113 +233,153 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
           )}
         </Card>
 
-        <Card className="space-y-5 lg:self-start">
-          <CampaignSettings campaignId={c.id} templateId={c.template_id} templates={tpls.map((t) => ({ id: t.id, name: t.name }))} />
-          <WriterSetting campaignId={c.id} writer={c.writer} locked={c.status === "running"} />
-          <TargetCustomerSetting campaignId={c.id} target={c.target_customer ?? null} locked={c.status === "running"} />
-          <div>
-            <div className="text-sm font-medium text-slate-700">Research depth</div>
-            <div className="mt-2 space-y-2 text-sm">
-              <label className="flex items-center gap-2">
-                <input type="radio" checked readOnly className="accent-brand-600" /> Standard: company website
-              </label>
-              {deepEnabled() && <DeepSetting campaignId={c.id} deep={!!c.depth?.deep} locked={c.status === "running"} />}
+        <CampaignSteps
+          state={stepState}
+          notes={
+            <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100" data-notes="cost">
+              <div className="text-xs font-medium text-brand-700">{toWrite === researchable || toWrite === 0 ? "Estimated cost" : "Estimated cost of the leads not written yet"}</div>
+              <div className="mt-0.5 text-xl font-semibold text-brand-900">{toWrite === 0 && written > 0 ? "All leads written" : <>≤ {n(runCredits(toWrite, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</>}</div>
+              <div className="mt-1 text-xs text-brand-800/80">The first 5 leads are a free preview.</div>
+              {/* C7 (review 2026-11-26): the estimate is the worst case; free skips bring it down. */}
+              <div className="mt-1 text-xs text-brand-800/80">
+                {c.target_customer
+                  ? "Leads with a bad address, or that don't fit your target customer, cost nothing."
+                  : "Leads with a bad address cost nothing."}
+              </div>
             </div>
-          </div>
-          <div className="rounded-xl bg-brand-50 p-4">
-            <div className="text-xs font-medium text-brand-700">Estimated cost</div>
-            <div className="mt-0.5 text-xl font-semibold text-brand-900">≤ {n(runCredits(researchable, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</div>
-            <div className="mt-1 text-xs text-brand-800/80">The first 5 leads are a free preview.</div>
-            {/* C7 (review 2026-11-26): the estimate is the worst case; free skips bring it down. */}
-            <div className="mt-1 text-xs text-brand-800/80">
-              {c.target_customer
-                ? "Leads with a bad address, or that don't fit your target customer, cost nothing."
-                : "Leads with a bad address cost nothing."}
-            </div>
-          </div>
-          <PreviewButton
-            campaignId={c.id}
-            label={previewCount ? "Run the free preview again" : "Run free preview (5 leads)"}
-            disabledReason={
-              !template
-                ? "Pick a template first."
-                : !parsed || parsed.slots.length === 0 || parsed.issues.some((i) => i.level === "error")
-                  ? "Fix the template first (it needs at least one valid slot)."
-                  : !queueConfigured()
-                    ? "Add DATABASE_URL to .env.local to run previews (see README)."
-                    : null
-            }
-          />
-          {previewCount > 0 && (
-            <Link href={`/campaigns/${c.id}/preview`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
-              View preview ({previewCount} leads) →
-            </Link>
-          )}
-          <div className="border-t border-slate-100 pt-5">
-            <RunPanel
-              campaignId={c.id}
-              total={total}
-              remaining={remaining}
-              sendFallbacks={c2.send_fallbacks}
-              running={inFlight}
-              disabledReason={!templateOk ? "Pick a template with at least one valid slot first." : !queueConfigured() ? "Add DATABASE_URL to .env.local first." : null}
-              creditsNeeded={runCredits(
-                statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length,
-                c.depth,
-                steps.filter((s) => s.kind === "personalised").length,
-              )}
-              available={((balanceRow as { available: number; lite_available: number } | null)?.available ?? 0) + (c.writer === "lite" ? ((balanceRow as { lite_available: number } | null)?.lite_available ?? 0) : 0)}
-              mode={c.mode}
-              waitingForBatch={waitingForBatch}
-            />
-            {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
-              <p className="mt-3 text-center text-xs text-slate-600">
-                {byStatus.done ?? 0} written · {byStatus.fallback ?? 0} fallback · {byStatus.failed ?? 0} failed
-                {c.target_customer && ` · ${fitSkipped} not a fit (free) · ${fit.unsure} unsure`}
-                {inFlight && ` · ${statuses.filter((l) => IN_FLIGHT.has(l.status)).length} in progress`}
-              </p>
-            )}
-          </div>
-          {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
-            <div className="space-y-2">
-              <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
-                Export CSV for a sending tool (fl_ columns) ↓
-              </a>
-              <OutlookExport
-                campaignId={c.id}
-                followUpSteps={steps.map((s) => s.step_no).filter((n) => n > 1)}
-                defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
-              />
-            </div>
-          )}
-          {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
-            <div className="border-t border-slate-100 pt-5">
-              <PushSection
-                campaignId={c.id}
-                workspaceId={workspace.id}
-                slotKeys={parsed?.slots.map((s) => s.key) ?? []}
-                followUpSteps={steps.filter((s) => s.kind === "personalised").map((s) => s.step_no)}
-                written={(byStatus.done ?? 0) + (byStatus.fallback ?? 0)}
-              />
-            </div>
-          )}
-          <div className="border-t border-slate-100 pt-5">
-            <SendPanel
-              campaignId={c.id}
-              inboxes={inboxes}
-              sendState={c2.send_state}
-              sendingInboxIds={c2.inbox_ids ?? []}
-              ready={readyToQueue}
-              skippedFallbacks={c2.send_fallbacks ? 0 : (byStatus.fallback ?? 0)}
-              defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
-              counts={sendCounts}
-            />
-          </div>
-          <EndCampaign campaignId={c.id} endedAt={(c as CampaignRow & { ended_at: string | null }).ended_at} purged={!!(c as CampaignRow & { purged_at: string | null }).purged_at} />
-          <div className="text-xs text-slate-500">
-            Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
-          </div>
-        </Card>
+          }
+          steps={{
+            setup: {
+              title: "Set up",
+              summary: template ? `Template: ${template.name} · ${c.writer === "lite" ? "Lite" : "Pro"} writer${c.target_customer ? " · fit check on" : ""}` : "Pick a template, the writer and who fits",
+              body: (
+                <>
+                  <CampaignSettings campaignId={c.id} templateId={c.template_id} templates={tpls.map((t) => ({ id: t.id, name: t.name }))} />
+                  <WriterSetting campaignId={c.id} writer={c.writer} locked={c.status === "running"} />
+                  <TargetCustomerSetting campaignId={c.id} target={c.target_customer ?? null} locked={c.status === "running"} />
+                  <div>
+                    <div className="text-sm font-medium text-slate-700">Research depth</div>
+                    <div className="mt-2 space-y-2 text-sm">
+                      <label className="flex items-center gap-2">
+                        <input type="radio" checked readOnly className="accent-brand-600" /> Standard: company website
+                      </label>
+                      {deepEnabled() && <DeepSetting campaignId={c.id} deep={!!c.depth?.deep} locked={c.status === "running"} />}
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
+                  </div>
+                </>
+              ),
+            },
+            preview: {
+              title: "Free preview",
+              summary: previewCount ? `${previewCount} leads previewed, free` : "5 leads, free, before anything costs credits",
+              body: (
+                <>
+                  <PreviewButton
+                    campaignId={c.id}
+                    label={previewCount ? "Run the free preview again" : "Run free preview (5 leads)"}
+                    disabledReason={
+                      !template
+                        ? "Pick a template first."
+                        : !parsed || parsed.slots.length === 0 || parsed.issues.some((i) => i.level === "error")
+                          ? "Fix the template first (it needs at least one valid slot)."
+                          : !queueConfigured()
+                            ? "Add DATABASE_URL to .env.local to run previews (see README)."
+                            : null
+                    }
+                  />
+                  {previewCount > 0 && (
+                    <Link href={`/campaigns/${c.id}/preview`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
+                      View preview ({previewCount} leads) →
+                    </Link>
+                  )}
+                </>
+              ),
+            },
+            run: {
+              title: "Run",
+              summary: inFlight
+                ? `Running · ${statuses.filter((l) => IN_FLIGHT.has(l.status)).length} in progress`
+                : written > 0
+                  ? `${byStatus.done ?? 0} written · ${byStatus.fallback ?? 0} fallback${remaining ? ` · ${remaining} to go` : ""}`
+                  : `${n(remaining)} leads ready to run`,
+              body: (
+                <div>
+                  <RunPanel
+                    campaignId={c.id}
+                    total={total}
+                    remaining={remaining}
+                    sendFallbacks={c2.send_fallbacks}
+                    running={inFlight}
+                    disabledReason={!templateOk ? "Pick a template with at least one valid slot first." : !queueConfigured() ? "Add DATABASE_URL to .env.local first." : null}
+                    creditsNeeded={runCredits(
+                      statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length,
+                      c.depth,
+                      steps.filter((s) => s.kind === "personalised").length,
+                    )}
+                    available={((balanceRow as { available: number; lite_available: number } | null)?.available ?? 0) + (c.writer === "lite" ? ((balanceRow as { lite_available: number } | null)?.lite_available ?? 0) : 0)}
+                    mode={c.mode}
+                    waitingForBatch={waitingForBatch}
+                  />
+                  {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
+                    <p className="mt-3 text-center text-xs text-slate-600">
+                      {byStatus.done ?? 0} written · {byStatus.fallback ?? 0} fallback · {byStatus.failed ?? 0} failed
+                      {c.target_customer && ` · ${fitSkipped} not a fit (free) · ${fit.unsure} unsure`}
+                      {inFlight && ` · ${statuses.filter((l) => IN_FLIGHT.has(l.status)).length} in progress`}
+                    </p>
+                  )}
+                </div>
+              ),
+            },
+            send: {
+              title: "Send or export",
+              summary: c2.send_state === "sending" ? "Sending from your inbox" : written > 0 ? `${readyToQueue} ready to send · export or push` : "After the run: Gmail, Outlook, your sending tool or CSV",
+              body: (
+                <>
+                {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
+                  <div className="space-y-2">
+                    <a href={`/campaigns/${c.id}/export`} className="block text-center text-sm font-medium text-brand-700 hover:underline">
+                      Export CSV for a sending tool (fl_ columns) ↓
+                    </a>
+                    <OutlookExport
+                      campaignId={c.id}
+                      followUpSteps={steps.map((s) => s.step_no).filter((n) => n > 1)}
+                      defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
+                    />
+                  </div>
+                )}
+                {(byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0 && (
+                  <div className="border-t border-slate-100 pt-5">
+                    <PushSection
+                      campaignId={c.id}
+                      workspaceId={workspace.id}
+                      slotKeys={parsed?.slots.map((s) => s.key) ?? []}
+                      followUpSteps={steps.filter((s) => s.kind === "personalised").map((s) => s.step_no)}
+                      written={(byStatus.done ?? 0) + (byStatus.fallback ?? 0)}
+                    />
+                  </div>
+                )}
+                <div className="border-t border-slate-100 pt-5">
+                  <SendPanel
+                    campaignId={c.id}
+                    inboxes={inboxes}
+                    sendState={c2.send_state}
+                    sendingInboxIds={c2.inbox_ids ?? []}
+                    ready={readyToQueue}
+                    skippedFallbacks={c2.send_fallbacks ? 0 : (byStatus.fallback ?? 0)}
+                    defaultOptOut={c2.opt_out_line ?? defaultOptOutLine(template ? detectLanguage(template.body) : "en")}
+                    counts={sendCounts}
+                  />
+                </div>
+                <EndCampaign campaignId={c.id} endedAt={(c as CampaignRow & { ended_at: string | null }).ended_at} purged={!!(c as CampaignRow & { purged_at: string | null }).purged_at} />
+
+                </>
+              ),
+            },
+          }}
+        />
       </div>
 
       <Card className="mt-6">

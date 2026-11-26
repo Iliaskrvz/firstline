@@ -25,13 +25,13 @@ export function NavLinksFallback() {
 
 function Links({ path }: { path: string }) {
   return (
-    <nav className="flex gap-1">
+    <nav className="-mx-1 flex min-w-0 gap-1 overflow-x-auto px-1 [scrollbar-width:none]">
       {LINKS.map((l) => (
         <Link
           key={l.href}
           href={l.href}
           className={cx(
-            "rounded-lg px-3 py-1.5 text-sm font-medium",
+            "shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium",
             path.startsWith(l.href) ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
           )}
         >
