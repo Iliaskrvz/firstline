@@ -64,6 +64,10 @@ say "HTTPS for $DOMAIN (Caddy)"
 cat > /etc/caddy/firstline.caddy <<CADDY
 $DOMAIN {
 	encode gzip
+	# Refuse oversized requests before they reach the app (CSV uploads are at most 12 MB).
+	request_body {
+		max_size 15MB
+	}
 	reverse_proxy 127.0.0.1:$APP_PORT
 }
 CADDY

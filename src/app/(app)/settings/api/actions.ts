@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createApiKey, revokeApiKey } from "@/api/core-pg";
-import { createEndpoint, deleteEndpoint, validEndpointUrl, WEBHOOK_EVENTS, type WebhookEvent } from "@/api/webhooks-pg";
+import { createEndpoint, deleteEndpoint, endpointHostProblem, validEndpointUrl, WEBHOOK_EVENTS, type WebhookEvent } from "@/api/webhooks-pg";
 import { requireWorkspaceAdmin } from "@/lib/auth";
 import { encryptionConfigured, encryptionKey } from "@/lib/secret-box";
 import { serverPool } from "@/server/db";
@@ -44,7 +44,8 @@ export async function revokeKey(id: string): Promise<{ error: string } | { ok: t
 export async function addWebhook(url: string, events: string[]): Promise<{ error: string } | { secret: string }> {
   if (!queueConfigured() || !encryptionConfigured()) return { error: NOT_READY };
   const u = url.trim();
-  const bad = validEndpointUrl(u, process.env.NODE_ENV !== "production");
+  const dev = process.env.NODE_ENV !== "production";
+  const bad = validEndpointUrl(u, dev) ?? (await endpointHostProblem(u, { allowPrivate: dev }));
   if (bad) return { error: bad };
   const ev = events.filter((e): e is WebhookEvent => (WEBHOOK_EVENTS as readonly string[]).includes(e));
   if (!ev.length) return { error: "Pick at least one event." };

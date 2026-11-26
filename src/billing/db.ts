@@ -20,9 +20,16 @@ export type ReserveResult = { ok: true; reserved: number; credits: number } | { 
  */
 export async function reserveForRun(pool: pg.Pool, input: { leadIds: string[]; perLead: number; workspaceId: string }): Promise<ReserveResult> {
   if (input.leadIds.length === 0 || input.perLead <= 0) return { ok: true, reserved: 0, credits: 0 };
-  const { rows: had } = await pool.query("select distinct lead_id from public.credit_ledger where type = 'reserve' and lead_id = any($1::uuid[])", [
-    input.leadIds,
-  ]);
+  // Leads that still hold an open reservation (an earlier, unsettled attempt) reuse it, and a lead whose
+  // last reservation was charged is never reserved again. A lead whose reservation was fully released
+  // (run stopped, skipped by the fit check, failed) is reserved again: writing it is paid for again.
+  const { rows: had } = await pool.query(
+    `select x.lead_id from unnest($1::uuid[]) as x(lead_id)
+      where public.lead_open_reservation(x.lead_id) > 0
+         or exists (select 1 from public.credit_ledger c
+                     where c.lead_id = x.lead_id and c.type = 'capture' and c.round = public.lead_reserve_round(x.lead_id))`,
+    [input.leadIds],
+  );
   const already = new Set(had.map((r) => r.lead_id as string));
   const fresh = input.leadIds.filter((id) => !already.has(id));
   const need = fresh.length * input.perLead;

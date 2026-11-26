@@ -309,12 +309,12 @@ describe("ledger rules (hardening)", () => {
     expect(after.reserved).toBe(before.reserved);
   });
 
-  it("a lead can only ever have one reserve row", async () => {
+  it("a lead can only have one reserve row per round", async () => {
     const lead = await addLead(wsB, campaign, "uniq@x.nl");
     await db.query("select public.reserve_credits($1, 1)", [lead]);
     await expect(
       db.query("insert into public.credit_ledger (workspace_id, type, amount, lead_id) values ($1, 'reserve', -1, $2)", [wsB, lead]),
-    ).rejects.toThrow(/credit_ledger_one_reserve_per_lead/);
+    ).rejects.toThrow(/credit_ledger_one_reserve_per_lead_round/);
   });
 
   it("capture and release refuse leads that were never reserved", async () => {

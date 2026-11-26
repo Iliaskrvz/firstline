@@ -3,6 +3,7 @@
 // with the endpoint's secret (shown once when the endpoint is created).
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type pg from "pg";
+import { isPublicUrlHost } from "@/lib/public-host";
 import { decryptSecret, encryptSecret } from "@/lib/secret-box";
 
 export const WEBHOOK_EVENTS = ["job.completed", "batch.completed"] as const;
@@ -38,6 +39,16 @@ export function validEndpointUrl(url: string, allowHttp = false): string | null 
   if (u.protocol !== "https:" && !(allowHttp && u.protocol === "http:")) return "The URL must start with https://";
   if (!allowHttp && /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|\[::1\])/.test(u.hostname)) return "The URL must be reachable from the internet.";
   return null;
+}
+
+/**
+ * The full check when an endpoint is saved: the URL's host must resolve to public addresses only (no
+ * names that point at localhost, private networks or the cloud metadata address). Skipped in local
+ * development, where test receivers run on localhost.
+ */
+export async function endpointHostProblem(url: string, opts: { allowPrivate?: boolean; resolve?: Parameters<typeof isPublicUrlHost>[1] } = {}): Promise<string | null> {
+  if (opts.allowPrivate) return null;
+  return (await isPublicUrlHost(url, opts.resolve)) ? null : "The URL must point to a public internet address.";
 }
 
 export async function createEndpoint(pool: pg.Pool, key: Buffer, workspaceId: string, url: string, events: WebhookEvent[]): Promise<{ row: EndpointRow; secret: string }> {
@@ -81,8 +92,22 @@ export async function enqueueWebhookEvent(pool: pg.Pool, workspaceId: string, ev
 
 export type Poster = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal }) => Promise<{ status: number }>;
 
-/** Send due deliveries. A 2xx answer within 10 seconds counts as delivered; anything else is retried later. */
-export async function deliverDue(pool: pg.Pool, key: Buffer, post: Poster, now = new Date(), limit = 50): Promise<{ delivered: number; retried: number; failed: number }> {
+/** Is this URL safe to call right now? The worker checks every delivery (DNS can change after saving). */
+export type HostCheck = (url: string) => Promise<boolean>;
+
+/**
+ * Send due deliveries. A 2xx answer within 10 seconds counts as delivered; anything else is retried later.
+ * `allowed` refuses hosts that resolve to internal addresses (production: isPublicUrlHost); the poster
+ * must not follow redirects.
+ */
+export async function deliverDue(
+  pool: pg.Pool,
+  key: Buffer,
+  post: Poster,
+  now = new Date(),
+  limit = 50,
+  allowed: HostCheck = async () => true,
+): Promise<{ delivered: number; retried: number; failed: number }> {
   const out = { delivered: 0, retried: 0, failed: 0 };
   const c = await pool.connect();
   let due: { id: string; url: string; secret_encrypted: string; payload: unknown; attempts: number }[];
@@ -115,6 +140,7 @@ export async function deliverDue(pool: pg.Pool, key: Buffer, post: Poster, now =
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 10_000);
     try {
+      if (!(await allowed(d.url))) throw new Error("blocked_host");
       const res = await post(d.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "User-Agent": "FirstLine-Webhooks/1", "FirstLine-Signature": signPayload(decryptSecret(d.secret_encrypted, key), body, t) },
@@ -124,7 +150,12 @@ export async function deliverDue(pool: pg.Pool, key: Buffer, post: Poster, now =
       status = res.status;
       if (status < 200 || status >= 300) error = `HTTP ${status}`;
     } catch (e) {
-      error = (e as Error).name === "AbortError" ? "No answer within 10 seconds" : "Could not connect";
+      error =
+        (e as Error).message === "blocked_host"
+          ? "Refused: the address points to a private or internal network"
+          : (e as Error).name === "AbortError"
+            ? "No answer within 10 seconds"
+            : "Could not connect";
     } finally {
       clearTimeout(timer);
     }

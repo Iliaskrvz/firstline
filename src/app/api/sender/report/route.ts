@@ -8,6 +8,7 @@ import { queueConfigured } from "@/server/queue";
 import { SenderAuthError, senderReport } from "@/sender/db";
 
 const NO_STORE = { "cache-control": "no-store" };
+const MAX_REPORT_BYTES = 64 * 1024;
 
 const Report = z.object({
   send: z
@@ -28,7 +29,17 @@ export async function POST(request: NextRequest) {
   const key = request.headers.get("x-firstline-key");
   if (!looksLikeSenderKey(key)) return NextResponse.json({ error: "Missing or malformed sender key." }, { status: 401, headers: NO_STORE });
   if (!queueConfigured()) return NextResponse.json({ error: "FirstLine isn't configured for sending yet." }, { status: 503, headers: NO_STORE });
-  const parsed = Report.safeParse(await request.json().catch(() => null));
+  // A report is a few hundred bytes; refuse anything big before reading it.
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_REPORT_BYTES) return NextResponse.json({ error: "Report too large." }, { status: 413, headers: NO_STORE });
+  const raw = await request.text();
+  if (raw.length > MAX_REPORT_BYTES) return NextResponse.json({ error: "Report too large." }, { status: 413, headers: NO_STORE });
+  const parsed = Report.safeParse((() => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  })());
   if (!parsed.success) return NextResponse.json({ error: "Invalid report." }, { status: 400, headers: NO_STORE });
   try {
     return NextResponse.json(await senderReport(serverPool(), key, parsed.data), { headers: NO_STORE });

@@ -13,6 +13,8 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Don't announce the framework (X-Powered-By: Next.js).
+  poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },

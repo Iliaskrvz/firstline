@@ -18,6 +18,7 @@ import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 import { llmFactory, selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
+import { isPublicUrlHost } from "@/lib/public-host";
 import { runQueuedQualifyTest } from "@/engine/qualify-test-pg";
 import { runQueuedBakeoff } from "@/engine/bakeoff-pg";
 import { purgeDemoRuns } from "@/engine/demo-pg";
@@ -56,6 +57,9 @@ async function main() {
   const config = engineConfig();
   const conn = dbConnection(process.env.DATABASE_URL!);
   const pool = new Pool({ ...conn, max: config.concurrency.perWorker + 4 });
+  // A dropped idle connection (e.g. the Supabase pooler closing it) must not crash the worker:
+  // without a listener Node treats the pool's "error" event as fatal and running jobs are cut off.
+  pool.on("error", (e) => log("db pool:", e.message));
   // Provider limits are shared by every worker process (Postgres), so adding workers can't exceed a plan.
   const llmSlots = new PgSlotGate(pool, `llm:${config.llmProvider}`, config.concurrency.llm);
   const llmPerMinute = config.concurrency.llmPerMinute;
@@ -290,7 +294,10 @@ async function main() {
     try {
       await completeFinishedJobs(pool);
       if (pushDeps) {
-        const d = await deliverDue(pool, pushDeps.key, (url, init) => fetch(url, { ...init, redirect: "manual" }));
+        // No redirects, and every delivery's host is resolved and must be public (no internal addresses).
+        const d = await deliverDue(pool, pushDeps.key, (url, init) => fetch(url, { ...init, redirect: "manual" }), new Date(), 50, (url) =>
+          process.env.NODE_ENV === "production" ? isPublicUrlHost(url) : Promise.resolve(true),
+        );
         if (d.delivered || d.failed || d.retried) log(`webhooks: ${d.delivered} delivered, ${d.retried} to retry, ${d.failed} failed`);
       }
     } catch (e) {
@@ -402,6 +409,9 @@ async function main() {
         if (finalAttempt) {
           stats.jobsFailed++;
           await store.setLeadStatus(leadId, "failed", { detail: `Error after retries: ${msg.slice(0, 200)}`, confidence: null }).catch(() => {});
+          // Give the reserved credits back: a failed lead isn't charged, and running the campaign again
+          // reserves it anew. Without this the credits stayed "reserved" until the campaign was stopped.
+          await store.settleCredits(leadId, 0).catch((err) => log(`lead ${leadId}: releasing credits failed:`, (err as Error).message));
           await completeJobsFor(pool, leadId).catch(() => {});
         }
         throw e; // pg-boss retries with backoff
@@ -465,6 +475,10 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
+
+// A stray rejected promise is logged instead of silently killing the worker (each periodic task
+// already handles its own errors; this catches anything that slips through).
+process.on("unhandledRejection", (e) => console.error("unhandled rejection:", e instanceof Error ? e.message : e));
 
 main().catch((e) => {
   console.error("Worker crashed:", e);

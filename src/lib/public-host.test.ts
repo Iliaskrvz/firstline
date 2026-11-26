@@ -1,7 +1,7 @@
 // SSRF protection for the public demo and our robots.txt fetch. No real DNS: resolvers are scripted.
 import { describe, expect, it } from "vitest";
 import { createFirecrawl } from "@/engine/firecrawl";
-import { isPrivateIp, isPublicHost, parsePublicDomain } from "./public-host";
+import { isPrivateIp, isPublicHost, isPublicUrlHost, parsePublicDomain } from "./public-host";
 import { verifyTurnstile } from "./turnstile";
 
 describe("parsePublicDomain", () => {
@@ -46,6 +46,32 @@ describe("isPrivateIp / isPublicHost", () => {
     expect(await isPublicHost("rebind.example.com", async () => ["93.184.216.34", "127.0.0.1"])).toBe(false);
     expect(await isPublicHost("acme.nl", async () => [])).toBe(false);
     expect(await isPublicHost("acme.nl", async () => Promise.reject(new Error("ENOTFOUND")))).toBe(false);
+  });
+});
+
+describe("isPublicUrlHost (outgoing webhooks)", () => {
+  const dns = (table: Record<string, string[]>) => async (h: string) => {
+    if (!(h in table)) throw new Error("ENOTFOUND");
+    return table[h];
+  };
+  const r = dns({ "hooks.example.com": ["93.184.216.34"], "sneaky.example.com": ["169.254.169.254"], "mixed.example.com": ["93.184.216.34", "10.0.0.5"], "v6.example.com": ["::1"] });
+
+  it("allows public hosts on any port, refuses names that resolve inside our network", async () => {
+    expect(await isPublicUrlHost("https://hooks.example.com/x", r)).toBe(true);
+    expect(await isPublicUrlHost("https://hooks.example.com:5678/webhook/abc", r)).toBe(true);
+    expect(await isPublicUrlHost("https://sneaky.example.com/x", r)).toBe(false); // cloud metadata
+    expect(await isPublicUrlHost("https://mixed.example.com/x", r)).toBe(false);
+    expect(await isPublicUrlHost("https://v6.example.com/x", r)).toBe(false);
+    expect(await isPublicUrlHost("https://nowhere.example.com/x", r)).toBe(false);
+  });
+
+  it("checks IP literals directly, v4 and v6, and refuses internal names", async () => {
+    expect(await isPublicUrlHost("https://93.184.216.34/x", r)).toBe(true);
+    expect(isPrivateIp("::ffff:a00:1")).toBe(true); // 10.0.0.1 in hex
+    expect(isPrivateIp("::ffff:5db8:d822")).toBe(false); // 93.184.216.34
+    for (const u of ["https://127.0.0.1/x", "http://169.254.169.254/latest", "https://[::1]/x", "https://[::ffff:10.0.0.1]/x", "https://localhost:3100/", "https://worker.internal/", "https://2130706433/", "not a url"]) {
+      expect(await isPublicUrlHost(u, r), u).toBe(false);
+    }
   });
 });
 
