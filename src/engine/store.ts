@@ -1,5 +1,6 @@
 // Storage the engine needs. Implemented by PgStore (worker) and MemoryStore (tests, CLI).
 import type { WriteInput } from "./llm";
+import type { Qualification } from "./qualify";
 import type { CostEntry, Fact, LeadJob, PageType, ResearchStatus, WriterOutput } from "./types";
 
 export type CachedResearch = {
@@ -56,6 +57,11 @@ export interface EngineStore {
   batchResult(leadId: string): Promise<{ output?: WriterOutput; costs: CostEntry[]; error?: string } | null>;
   /** The lead is settled: its batch item is used up. */
   finishBatchItem(leadId: string): Promise<void>;
+  /** Lead qualification cache: per campaign + domain + target-text fingerprint (never shared across campaigns). */
+  getQualification(campaignId: string, domain: string, targetHash: string): Promise<Qualification | null>;
+  cacheQualification(campaignId: string, domain: string, targetHash: string, q: Qualification): Promise<void>;
+  /** The verdict shown on the lead (and copied to its outcome row). */
+  setLeadQualification(leadId: string, q: Qualification): Promise<void>;
 }
 
 export class MemoryStore implements EngineStore {
@@ -69,6 +75,18 @@ export class MemoryStore implements EngineStore {
   costs: (CostEntry & { lead_id: string })[] = [];
   suppressed = new Set<string>();
   personResearch = new Map<string, { status: string; detail: string; facts: Fact[] }>();
+  qualificationCache = new Map<string, Qualification>();
+  qualifications = new Map<string, Qualification>();
+  async getQualification(campaignId: string, domain: string, hash: string) {
+    const q = this.qualificationCache.get(`${campaignId}|${domain}|${hash}`);
+    return q ? structuredClone(q) : null;
+  }
+  async cacheQualification(campaignId: string, domain: string, hash: string, q: Qualification) {
+    this.qualificationCache.set(`${campaignId}|${domain}|${hash}`, structuredClone(q));
+  }
+  async setLeadQualification(leadId: string, q: Qualification) {
+    this.qualifications.set(leadId, structuredClone(q));
+  }
   async isSuppressed(_ws: string, email: string, domain: string | null) {
     return this.suppressed.has(email.toLowerCase()) || (!!domain && this.suppressed.has(domain));
   }
@@ -95,7 +113,8 @@ export class MemoryStore implements EngineStore {
   }
   async saveGeneration(g: GenerationRecord) {
     this.generations.push(g);
-  }  async settleCredits(leadId: string, used: number) {
+  }
+  async settleCredits(leadId: string, used: number) {
     this.settled.push({ leadId, used });
   }
   async deferWrite(lead: { id: string }, input: WriteInput) {

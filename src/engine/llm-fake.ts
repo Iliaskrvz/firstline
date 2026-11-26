@@ -1,7 +1,7 @@
 // Fake LLM for building and testing without Claude. Output is realistic and
 // grounded in the real page text, but it is NOT AI writing: the UI labels it
 // "Test output, no AI used". Costs $0.
-import type { BatchWriter, CompareOutput, ExtractInput, FactCheckInput, LLM, LLMResult, PersonInput, WriteInput } from "./llm";
+import type { BatchWriter, CompareOutput, ExtractInput, FactCheckInput, LLM, LLMResult, PersonInput, QualifyInput, QualifyOutput, WriteInput } from "./llm";
 import type { FactCheckOutput, PersonFactsOutput } from "./schemas";
 import type { Fact, JudgeScores, Language, WriterOutput } from "./types";
 import { countWords } from "@/lib/template";
@@ -151,5 +151,40 @@ export class FakeLLM implements LLM {
       output: { relevance: 4, specificity: 4, value_clarity: 4, cta_effort: 4, sounds_human: 4, would_reply: 4, claims_supported: true, unsupported_claims: [] },
       costs: [],
     };
+  }
+
+  /**
+   * Test stand-in for qualification, deterministic: the description is split into phrases (commas,
+   * semicolons, new lines, " or "). A fact containing every word (4+ letters) of an "excludes" phrase
+   * gives no_fit citing that fact; one matching a "fits" phrase gives fit; otherwise unsure.
+   */
+  async qualify(input: QualifyInput): Promise<LLMResult<QualifyOutput>> {
+    const phrases = (t: string) =>
+      t
+        .split(/[,;\n]|\s+or\s+|\s+of\s+/i)
+        .map((x) => x.trim())
+        .filter(Boolean);
+    const words = (t: string) => (t.toLowerCase().match(/[\p{L}\d]{4,}/gu) ?? []).map((w) => w.replace(/s$/, ""));
+    const hit = (phrase: string, text: string) => {
+      const need = words(phrase);
+      const have = new Set(words(text));
+      return need.length > 0 && need.every((w) => have.has(w));
+    };
+    const find = (desc: string) => {
+      for (const p of phrases(desc)) {
+        const f = input.facts.find((f) => hit(p, f.text));
+        if (f) return { phrase: p, fact: f };
+      }
+      return null;
+    };
+    const ex = find(input.target.excludes);
+    if (ex) {
+      return { output: { verdict: "no_fit", reason: `Test output: matches an exclusion ("${ex.phrase}").`, fact_ids: [ex.fact.id], criteria_met: [], criteria_not_met: [ex.phrase] }, costs: [] };
+    }
+    const fit = find(input.target.fits);
+    if (fit) {
+      return { output: { verdict: "fit", reason: `Test output: matches "${fit.phrase}".`, fact_ids: [fit.fact.id], criteria_met: [fit.phrase], criteria_not_met: [] }, costs: [] };
+    }
+    return { output: { verdict: "unsure", reason: "Test output: the facts don't say enough.", fact_ids: [], criteria_met: [], criteria_not_met: [] }, costs: [] };
   }
 }

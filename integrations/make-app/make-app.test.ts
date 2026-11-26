@@ -68,5 +68,18 @@ describe("Make app definition", () => {
     expect(b.success, JSON.stringify(b.error?.issues)).toBe(true);
     expect(b.data?.copy).toBeUndefined();
     expect(b.data?.campaign_id).toBe("4b1c3f0e-7d1a-4c55-9f3e-2d8a6b0c9e11");
+    // No target customer filled in: none is sent (the campaign's applies), and qualify stays on.
+    expect(b.data?.target_customer).toBeUndefined();
+    expect(b.data?.options.qualify).toBe(true);
+  });
+
+  it("Personalise sends the target customer and the qualify switch", () => {
+    const comm = read("modules", "personalizeLead", "communication.json");
+    const body = render(comm.body, { email: "a@b.nl", source: "copy", body: "Hi [[opener · x · 25]]", target_fits: "Bakeries", target_excludes: "chains", target_strictness: "strict" });
+    const r = PersonalizeBody.safeParse(normaliseSource(body));
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    expect(r.data?.target_customer).toEqual({ fits: "Bakeries", excludes: "chains", strictness: "strict" });
+    const off = PersonalizeBody.safeParse(normaliseSource(render(comm.body, { email: "a@b.nl", source: "copy", body: "Hi [[opener · x · 25]]", qualify: false })));
+    expect(off.data?.options.qualify).toBe(false);
   });
 });

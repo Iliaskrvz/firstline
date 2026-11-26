@@ -36,6 +36,22 @@ export type WriteInput = {
   personal: string[];
 };
 
+/** Lead qualification (Part B): does this company fit the campaign's target customer? */
+export type { Strictness, TargetCustomer } from "@/lib/target-customer";
+import type { TargetCustomer } from "@/lib/target-customer";
+export type QualifyInput = {
+  target: TargetCustomer;
+  company: string | null;
+  domain: string;
+  title: string | null;
+  facts: Fact[];
+  /** Set on the one retry: why the first answer was not accepted. */
+  feedback?: string;
+  /** Personal values of the lead (privacy.ts): scrubbed before a request leaves. Never sent on purpose. */
+  personal: string[];
+};
+export type QualifyOutput = import("./schemas").QualifyOutput;
+
 export type JudgeInput = { language: Language; slots: Record<string, string>; facts: Fact[]; emailPreview: string; role: string | null; personal: string[] };
 
 /** Deep research (behind a switch): pages about a named contact → match verdict + at most 2 facts. */
@@ -67,6 +83,8 @@ export interface LLM {
   extractFacts(input: ExtractInput): Promise<LLMResult<{ facts: Fact[] }>>;
   write(input: WriteInput): Promise<LLMResult<WriterOutput>>;
   judge(input: JudgeInput): Promise<LLMResult<JudgeScores>>;
+  /** Lead qualification (off unless the campaign has a target customer). */
+  qualify(input: QualifyInput): Promise<LLMResult<QualifyOutput>>;
   /** Deep research (off by default): is this the contact, and what did they publish for their company? */
   personFacts?(input: PersonInput): Promise<LLMResult<import("./schemas").PersonFactsOutput>>;
   /** Quality Lab: which of two versions is the better cold-email personalisation? */
@@ -117,6 +135,9 @@ export class MissingKeyLLM implements LLM {
     this.fail();
   }
   async judge(): Promise<never> {
+    this.fail();
+  }
+  async qualify(): Promise<never> {
     this.fail();
   }
 }

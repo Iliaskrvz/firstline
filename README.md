@@ -111,6 +111,26 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
 - **More workers:** `WORKER_INSTANCES=2` in .env.local, then deploy. Firecrawl's plan concurrency and the AI provider's requests per minute and at once are shared in Postgres (`src/engine/limiter-pg.ts`), and periodic tasks (alerts, batches, polling, retention) run on one worker at a time.
 - **Packs:** `src/config/packs.ts`. Lite credits pay for Lite-writer campaigns only. Load test: `npx tsx scripts/load-test.ts 5000`.
 
+### Lead qualification (fit check)
+
+Off unless a campaign has a **Target customer** (campaign page: who fits, who doesn't, and how strict). After research
+and fact extraction, before Deep research and writing, the `qualify` step decides fit / no_fit / unsure
+(`src/engine/qualify.ts`, `prompts/qualify.ts`):
+
+- Input: the website facts with their ids, the company, domain and job title, and the customer's text. Never names, emails or
+  LinkedIn URLs. The customer's text and the page text are wrapped as data, not instructions.
+- Output: strict JSON (verdict, reason, fact ids, criteria met / not met). Cited ids must exist and no_fit must cite at least one
+  fact; otherwise one retry with the reason, then "unsure". No facts: "unsure" without an AI call.
+- Strictness for unsure: strict = skip, normal = write and flag, loose = write. no_fit and skipped leads use 0 credits (the
+  reservation is released). "Write anyway" on a skipped lead costs the normal credits (free inside the preview).
+- Cache: per campaign + domain + a fingerprint of the target text (`qualification_cache`), never shared across campaigns.
+- The verdict is stored on the lead, copied to its outcome row, and returned by the API (`qualification`); the API takes an
+  optional `target_customer` and `options.qualify`. The check's own cost is logged as step `qualify`; /admin adds a
+  "Not a fit (free skips)" line with all costs of skipped leads. A campaign where more than half of at least 10 checked leads are
+  no_fit shows a warning to the customer and on /admin.
+- Lab: a qualification test from hand-labelled leads (`fixtures/qualify-testset-template.csv`), with accuracy, the false no_fit
+  rate and the cost per lead. Hard budget $5; it starts only after an admin approves the spend on /admin/lab.
+
 ## Models and costs
 
 - **One file:** `src/config/models.ts` holds, per provider, the model per step, the price tables (DeepSeek peak/off-peak, Anthropic; checked against both pricing pages on 2026-11-13), DeepSeek's peak hours and holidays, and the bake-off candidates. No model names anywhere else.
@@ -123,6 +143,7 @@ Push written leads into Instantly (Smartlead and Lemlist follow) with the person
   | writer_pro | deepseek-v4-pro |
   | writer_lite | deepseek-flash |
   | writer_economy | deepseek-v4-pro, held until DeepSeek's off-peak hours (half price) |
+  | qualify | deepseek-flash (lead qualification; Claude: Haiku 5.5) |
   | judge | deepseek-flash |
   | judge_sample | deepseek-v4-pro (planned 5% double-check, not wired yet) |
   | testset_judge | deepseek-v4-pro (Quality Lab comparisons and the bake-off) |

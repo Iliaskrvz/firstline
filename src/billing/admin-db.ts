@@ -2,6 +2,7 @@
 // Takes a pg Pool, so it is tested on a real Postgres; the page passes the server pool.
 import type pg from "pg";
 import { costDrift, margin, revenuePerCreditEur, usdToEur, type DriftAlert, type Margin } from "@/lib/admin";
+import { noFitWarning } from "@/lib/target-customer";
 
 export type DayRow = { day: string; creditsUsed: number; emails: number; costUsd: number; m: Margin };
 export type CampaignRow = { id: string; name: string; workspace: string; creditsUsed: number; emails: number; fallbacks: number; costUsd: number; m: Margin };
@@ -27,7 +28,7 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
        select to_char(d.day, 'YYYY-MM-DD') as day,
               coalesce((select sum(amount) from public.credit_ledger x where x.type = 'capture' and x.created_at::date = d.day), 0)::int credits_used,
               coalesce((select count(*) from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at::date = d.day), 0)::int emails,
-              coalesce((select sum(cost_usd) from public.usage_costs u where u.created_at::date = d.day and u.bakeoff_run_id is null and u.demo_run_id is null), 0)::float cost_usd
+              coalesce((select sum(cost_usd) from public.usage_costs u where u.created_at::date = d.day and u.bakeoff_run_id is null and u.qualify_test_run_id is null and u.demo_run_id is null), 0)::float cost_usd
          from d order by d.day desc`,
     ),
     pool.query(
@@ -52,7 +53,7 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
       `select (created_at > now() - interval '7 days') recent,
               coalesce(sum(cost_usd), 0)::float cost_usd,
               0 emails
-         from public.usage_costs where created_at > now() - interval '37 days' and bakeoff_run_id is null and demo_run_id is null group by 1
+         from public.usage_costs where created_at > now() - interval '37 days' and bakeoff_run_id is null and qualify_test_run_id is null and demo_run_id is null group by 1
        union all
        select (g.created_at > now() - interval '7 days'), 0, count(*)::int
          from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at > now() - interval '37 days' group by 1`,
@@ -124,7 +125,7 @@ export type CostBreakdownRow = { step: string; model: string; source: "customers
  */
 export async function loadCostBreakdown(pool: pg.Pool, days = 30): Promise<CostBreakdownRow[]> {
   const { rows } = await pool.query<{ step: string; model: string | null; lab: boolean; demo: boolean; calls: number; input_tokens: number; output_tokens: number; cost_usd: number }>(
-    `select step, model, (bakeoff_run_id is not null) lab, (demo_run_id is not null) demo, count(*)::int calls,
+    `select step, model, (bakeoff_run_id is not null or qualify_test_run_id is not null) lab, (demo_run_id is not null) demo, count(*)::int calls,
             coalesce(sum(input_tokens), 0)::float input_tokens, coalesce(sum(output_tokens), 0)::float output_tokens, coalesce(sum(cost_usd), 0)::float cost_usd
        from public.usage_costs where created_at > now() - make_interval(days => $1)
       group by 1, 2, 3, 4 order by cost_usd desc`,
@@ -141,4 +142,37 @@ export async function loadCostBreakdown(pool: pg.Pool, days = 30): Promise<CostB
     costUsd: r.cost_usd,
     share: total ? r.cost_usd / total : 0,
   }));
+}
+
+/**
+ * Lead qualification (Part B): leads the fit check skipped for free (no_fit, or unsure on strict) and
+ * everything they cost us (research, extraction and the qualify call), over the last `days`.
+ */
+export async function loadFreeSkips(pool: pg.Pool, days = 30): Promise<{ leads: number; costUsd: number }> {
+  const { rows } = await pool.query<{ leads: number; cost_usd: number }>(
+    `select count(distinct l.id)::int leads, coalesce(sum(u.cost_usd), 0)::float cost_usd
+       from public.leads l
+       left join public.usage_costs u on u.lead_id = l.id
+      where l.status = 'skipped' and not l.qualify_override and l.qualify_verdict in ('no_fit', 'unsure')
+        and l.created_at > now() - make_interval(days => $1)`,
+    [days],
+  );
+  return { leads: rows[0]?.leads ?? 0, costUsd: rows[0]?.cost_usd ?? 0 };
+}
+
+/** Campaigns where more than half of at least 10 qualified leads are no_fit (the customer sees the same warning). */
+export async function loadNoFitCampaigns(pool: pg.Pool): Promise<{ id: string; name: string; workspace: string; fit: number; noFit: number; unsure: number }[]> {
+  const { rows } = await pool.query<{ id: string; name: string; workspace: string; fit: number; no_fit: number; unsure: number }>(
+    `select c.id, c.name, w.name workspace,
+            count(*) filter (where l.qualify_verdict = 'fit')::int fit,
+            count(*) filter (where l.qualify_verdict = 'no_fit')::int no_fit,
+            count(*) filter (where l.qualify_verdict = 'unsure')::int unsure
+       from public.campaigns c
+       join public.workspaces w on w.id = c.workspace_id
+       join public.leads l on l.campaign_id = c.id and l.qualify_verdict is not null
+      group by c.id, c.name, w.name`,
+  );
+  return rows
+    .filter((r) => noFitWarning({ fit: r.fit, no_fit: r.no_fit, unsure: r.unsure }))
+    .map((r) => ({ id: r.id, name: r.name, workspace: r.workspace, fit: r.fit, noFit: r.no_fit, unsure: r.unsure }));
 }

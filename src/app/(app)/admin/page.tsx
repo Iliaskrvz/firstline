@@ -5,7 +5,7 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { PRICE_MULTIPLE, TARGET_COST_EUR } from "@/lib/admin";
 import { requireAdmin } from "@/lib/auth";
 import { n } from "@/lib/format";
-import { loadAdmin, loadCostBreakdown, loadRefunds } from "@/billing/admin-db";
+import { loadAdmin, loadCostBreakdown, loadFreeSkips, loadNoFitCampaigns, loadRefunds } from "@/billing/admin-db";
 import { demoStats } from "@/engine/demo-pg";
 import { recentContacts } from "@/lib/contact";
 import { loadFunnel } from "@/lib/funnel";
@@ -51,7 +51,7 @@ async function Admin() {
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
   const config = engineConfig();
-  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts, funnel] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts, funnel, freeSkips, noFitCampaigns] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     llmBudget(pool, process.env, new Date(), config.llmProvider),
@@ -61,6 +61,8 @@ async function Admin() {
     demoStats(pool),
     recentContacts(pool, 10),
     loadFunnel(pool, 30),
+    loadFreeSkips(pool, 30),
+    loadNoFitCampaigns(pool),
   ]);
   const demoToday = demo[0];
   const demoWeekUsd = demo.reduce((s, d) => s + d.costUsd, 0);
@@ -244,7 +246,25 @@ async function Admin() {
             </table>
           </div>
         )}
+        <p className="border-t border-slate-100 px-6 py-3 text-sm text-slate-700">
+          Not a fit (free skips): {n(freeSkips.leads)} leads, ${freeSkips.costUsd.toFixed(freeSkips.costUsd < 1 ? 4 : 2)}
+          <span className="text-xs text-slate-500"> · all costs of leads the fit check skipped (research, extraction and the check itself), already in the rows above</span>
+        </p>
       </Card>
+
+      {noFitCampaigns.length > 0 && (
+        <Card className="space-y-2">
+          <h2 className="text-base font-semibold text-slate-900">Campaigns where most leads don&apos;t fit</h2>
+          <p className="text-xs text-slate-500">More than half of at least 10 checked leads are not a fit. The customer sees the same warning. Their lead list or target text may need help.</p>
+          <ul className="space-y-1 text-sm">
+            {noFitCampaigns.map((c) => (
+              <li key={c.id}>
+                <span className="font-medium text-slate-900">{c.name}</span> <span className="text-slate-500">({c.workspace})</span>: {c.noFit} not a fit, {c.fit} fit, {c.unsure} unsure
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card className="overflow-hidden p-0">
         <h2 className="px-6 py-4 text-base font-semibold text-slate-900">Per campaign</h2>

@@ -1,5 +1,6 @@
 // Request bodies for /api/v1 (zod). Kept in one place: the OpenAPI file mirrors these.
 import { z } from "zod";
+import { TargetCustomerSchema } from "@/lib/target-customer";
 
 /** Max leads per batch call (decision 2026-11-11). */
 export const MAX_BATCH = 100;
@@ -45,13 +46,17 @@ export const Options = z
         local: z.literal(false, "Local research isn't offered.").optional(),
       })
       .default({ deep: false }),
+    /** Lead qualification: false turns the fit check off (also for a campaign that has a target customer). */
+    qualify: z.preprocess((v) => (v === "" || v == null ? undefined : v === "false" ? false : v === "true" ? true : v), z.boolean().default(true)),
   })
-  .default({ writer: "pro", depth: { deep: false } });
+  .default({ writer: "pro", depth: { deep: false }, qualify: true });
 
 const source = {
   copy: CopyInput.optional(),
   campaign_id: z.uuid().optional(),
   options: Options,
+  /** Lead qualification: who fits / who doesn't / strictness. Overrides the campaign's; empty text = off. */
+  target_customer: TargetCustomerSchema.nullish(),
   // No-code tools may send numbers as text ("45") or leave the field empty.
   wait: z.preprocess((v) => (v === "" || v == null ? undefined : typeof v === "string" ? Number(v) : v), z.number().int().min(0).max(MAX_WAIT_S).default(0)),
 };
@@ -73,6 +78,10 @@ export function normaliseSource(raw: unknown): unknown {
   const emptyCopy = copy == null || (typeof copy === "object" && !String(copy.body ?? "").trim());
   if (emptyCopy && b.campaign_id) delete b.copy;
   if (copy === null) delete b.copy;
+  // An empty target_customer object from a no-code tool means "not given".
+  const tc = b.target_customer as Record<string, unknown> | null | undefined;
+  if (tc && typeof tc === "object" && !String(tc.fits ?? "").trim() && !String(tc.excludes ?? "").trim()) delete b.target_customer;
+  if (tc && typeof tc === "object" && tc.strictness === "") delete (b.target_customer as Record<string, unknown> | undefined)?.strictness;
   return b;
 }
 

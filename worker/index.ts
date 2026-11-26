@@ -18,6 +18,7 @@ import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 import { llmFactory, selectLLM } from "@/engine/llm";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
+import { runQueuedQualifyTest } from "@/engine/qualify-test-pg";
 import { runQueuedBakeoff } from "@/engine/bakeoff-pg";
 import { purgeDemoRuns } from "@/engine/demo-pg";
 import { purgeContacts } from "@/lib/contact";
@@ -234,6 +235,10 @@ async function main() {
         // Model bake-offs: queued only by an admin who approved the budget on /admin/lab.
         while ((await runQueuedBakeoff(pool, { reader, config, llmFor }, log)) != null) {
           /* next queued bake-off */
+        }
+        // Qualification tests: same rule, queued only with the admin's approval of the spend.
+        while ((await runQueuedQualifyTest(pool, { reader, config, llm: llmFor({}) }, log)) != null) {
+          /* next queued test */
         }
       });
     } catch (e) {

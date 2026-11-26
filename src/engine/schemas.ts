@@ -65,3 +65,13 @@ export const FactCheckSchema = z.object({
   checks: z.array(z.object({ id: z.string(), verdict: z.enum(["supported", "unsupported", "wrong"]), note: z.string() })),
 });
 export type FactCheckOutput = z.infer<typeof FactCheckSchema>;
+
+/** Lead qualification (Part B): fit / no_fit / unsure, with the facts and criteria behind it. */
+export const QualifySchema = z.object({
+  verdict: z.enum(["fit", "no_fit", "unsure"]),
+  reason: z.string(),
+  fact_ids: z.array(z.string()),
+  criteria_met: z.array(z.string()),
+  criteria_not_met: z.array(z.string()),
+});
+export type QualifyOutput = z.infer<typeof QualifySchema>;

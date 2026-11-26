@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-firstline-email",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "n8n node for FirstLine: personalise cold emails with researched, cited first lines from each company's website.",
 	"license": "MIT",
 	"homepage": "https://github.com/OWNER/n8n-nodes-firstline-email#readme",

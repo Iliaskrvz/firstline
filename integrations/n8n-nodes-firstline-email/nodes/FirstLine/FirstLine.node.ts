@@ -76,6 +76,14 @@ const leadFields: INodeProperties[] = [
 		default: {},
 		displayOptions: { show: forLead },
 		options: [
+			{
+				displayName: 'Check Fit First',
+				name: 'qualify',
+				type: 'boolean',
+				default: true,
+				description: "Whether to check each company against the target customer (below, or the campaign's) before writing. Not a fit = skipped, 0 credits.",
+				routing: { send: { type: 'body', property: 'options.qualify' } },
+			},
 			{ displayName: 'Company', name: 'company', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.company' } } },
 			{ displayName: 'First Name', name: 'first_name', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.first_name' } } },
 			{
@@ -90,12 +98,43 @@ const leadFields: INodeProperties[] = [
 			{ displayName: 'Last Name', name: 'last_name', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.last_name' } } },
 			{ displayName: 'LinkedIn Headline', name: 'linkedin_headline', type: 'string', default: '', routing: { send: { type: 'body', property: 'lead.linkedin_headline' } } },
 			{
+				displayName: "Target Customer: Who Doesn't Fit",
+				name: 'targetExcludes',
+				type: 'string',
+				typeOptions: { rows: 2 },
+				default: '',
+				placeholder: 'e.g. franchises, wholesalers',
+				routing: { send: { type: 'body', property: 'target_customer.excludes' } },
+			},
+			{
+				displayName: 'Target Customer: Who Fits',
+				name: 'targetFits',
+				type: 'string',
+				typeOptions: { rows: 2 },
+				default: '',
+				placeholder: 'e.g. Independent bakeries with their own shop in the Netherlands',
+				description: "Overrides the campaign's target customer",
+				routing: { send: { type: 'body', property: 'target_customer.fits' } },
+			},
+			{
 				displayName: 'Website',
 				name: 'website',
 				type: 'string',
 				default: '',
 				description: 'Company website. Without it, the domain of the email address is used.',
 				routing: { send: { type: 'body', property: 'lead.website' } },
+			},
+			{
+				displayName: 'When the Fit Is Unsure',
+				name: 'targetStrictness',
+				type: 'options',
+				options: [
+					{ name: 'Normal: Write and Mark It Unsure', value: 'normal' },
+					{ name: 'Strict: Skip It (0 Credits)', value: 'strict' },
+					{ name: 'Loose: Write It', value: 'loose' },
+				],
+				default: 'normal',
+				routing: { send: { type: 'body', property: 'target_customer.strictness' } },
 			},
 			{
 				displayName: 'Writer',

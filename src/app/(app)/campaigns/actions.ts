@@ -13,6 +13,8 @@ import { reserveForRun, stopRun } from "@/billing/db";
 import { combine, staticCheck, summarise, type EmailReason } from "@/lib/email-check";
 import { applyStaticChecks, excludeRisky, includeExcluded } from "@/lib/email-check-pg";
 import { endCampaign } from "@/billing/retention";
+import { writeAnyway } from "@/lib/qualify-pg";
+import { normaliseTarget, TargetCustomerSchema } from "@/lib/target-customer";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
 import { logCampaignAction } from "@/server/activity";
@@ -196,6 +198,41 @@ export async function updateCampaignWriter(campaignId: string, writer: "pro" | "
   if (error) return { error: error.message };
   if (!data?.length) return { error: "Can't change the writer while the campaign is running." };
   revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
+}
+
+/** The campaign's "Target customer" (lead qualification). Empty text = off. Not while a run is going. */
+export async function updateTargetCustomer(campaignId: string, input: unknown): Promise<{ error: string } | { ok: true }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const parsed = input === null ? { success: true as const, data: null } : TargetCustomerSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid target customer." };
+  const target = normaliseTarget(parsed.data);
+  const w = await requireWorkspace();
+  const { data, error } = await w.supabase.from("campaigns").update({ target_customer: target }).eq("id", campaignId).eq("workspace_id", w.workspace.id).neq("status", "running").select("id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "Can't change the target customer while the campaign is running." };
+  await logCampaignAction(w, "campaign.target_customer", campaignId, { on: !!target, strictness: target?.strictness ?? null });
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
+}
+
+/** "Write anyway" on a lead the fit check skipped: normal credits apply. */
+export async function writeLeadAnyway(campaignId: string, leadId: string): Promise<{ error: string } | { ok: true }> {
+  if (!z.uuid().safeParse(campaignId).success || !z.uuid().safeParse(leadId).success) return { error: "Invalid lead." };
+  if (!queueConfigured()) return { error: "Needs the database connection (DATABASE_URL)." };
+  const w = await requireWorkspace();
+  const r = await writeAnyway(serverPool(), { workspaceId: w.workspace.id, leadId, deepOn: deepEnabled() });
+  if ("error" in r) return r;
+  if (r.enqueue) {
+    try {
+      await enqueueLeads([{ leadId, workspaceId: w.workspace.id, preview: r.enqueue === "preview", force: true }], `anyway-${leadId}-${Date.now()}`);
+    } catch (e) {
+      return { error: `Couldn't reach the job queue: ${(e as Error).message}. The lead is queued; run the campaign again to retry.` };
+    }
+  }
+  await logCampaignAction(w, "lead.write_anyway", campaignId, { lead_id: leadId, credits_reserved: r.credits });
+  revalidatePath(`/campaigns/${campaignId}`);
+  revalidatePath(`/campaigns/${campaignId}/preview`);
   return { ok: true };
 }
 

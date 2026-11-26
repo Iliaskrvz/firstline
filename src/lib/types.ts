@@ -43,6 +43,8 @@ export type CampaignRow = {
   column_map: ColumnMap;
   counts: CampaignCounts;
   created_at: string;
+  /** Lead qualification (Part B); null = off. */
+  target_customer?: import("./target-customer").TargetCustomer | null;
 };
 
 export type LeadRow = {
@@ -63,4 +65,8 @@ export type LeadRow = {
   email_status?: "pending" | "valid" | "risky" | "invalid";
   email_reason?: string | null;
   email_suggestion?: string | null;
+  /** Lead qualification (Part B). */
+  qualify_verdict?: "fit" | "no_fit" | "unsure" | null;
+  qualify_reason?: string | null;
+  qualify_override?: boolean;
 };

@@ -45,6 +45,21 @@
       { "label": "Lite", "value": "lite" }
     ]
   },
+  { "name": "qualify", "type": "boolean", "label": "Check fit first", "default": true, "advanced": true, "help": "Uses the target customer below, or the campaign's. No: write to every lead." },
+  { "name": "target_fits", "type": "text", "label": "Target customer: who fits", "advanced": true, "validate": { "max": 600 }, "help": "e.g. Independent bakeries with their own shop in the Netherlands. Not a fit = skipped, 0 credits. Empty: the campaign's, or no check." },
+  { "name": "target_excludes", "type": "text", "label": "Target customer: who doesn't fit", "advanced": true, "validate": { "max": 600 }, "help": "e.g. franchises, wholesalers." },
+  {
+    "name": "target_strictness",
+    "type": "select",
+    "label": "When the fit is unsure",
+    "default": "normal",
+    "advanced": true,
+    "options": [
+      { "label": "Normal: write and mark it unsure", "value": "normal" },
+      { "label": "Strict: skip it (0 credits)", "value": "strict" },
+      { "label": "Loose: write it", "value": "loose" }
+    ]
+  },
   { "name": "wait", "type": "uinteger", "label": "Wait for the result (seconds)", "default": 45, "validate": { "max": 60 }, "help": "If it takes longer, use Get a job with the returned Job ID." },
   { "name": "idempotency_key", "type": "text", "label": "Idempotency key", "advanced": true, "help": "Something unique per lead, e.g. the row number. A retried run then returns the same result and is never charged twice." }
 ]

@@ -35,6 +35,7 @@ function picky(): LLM {
     extractorId: "fake",
     extractFacts: (i) => fake.extractFacts(i),
     judge: () => fake.judge(),
+    qualify: (i) => fake.qualify(i),
     write: async (input) => {
       const r = await fake.write(input);
       if (input.skillVersion === "2.0") r.output.slots.opener = `${r.output.slots.opener} PICK ME`;

@@ -8,6 +8,8 @@ import { parseTemplate, type Token } from "@/lib/template";
 import type { LeadRow } from "@/lib/types";
 import { AutoRefresh } from "./auto-refresh";
 import { PreviewButton } from "../preview-button";
+import { WriteAnywayButton } from "../target-customer";
+import { VERDICT_LABEL } from "@/lib/target-customer";
 
 export const metadata: Metadata = { title: "Preview" };
 
@@ -28,7 +30,12 @@ type Generation = {
   created_at: string;
   step_no: number;
 };
-type PreviewLead = LeadRow & { preview_rank: number; status_detail: string | null; confidence: string | null };
+type PreviewLead = LeadRow & {
+  preview_rank: number;
+  status_detail: string | null;
+  confidence: string | null;
+  qualify_criteria: { met?: string[]; not_met?: string[]; cited?: { id: string; text: string; src: string }[] } | null;
+};
 
 const PENDING = new Set(["queued", "researching", "writing"]);
 const STATUS: Record<string, { label: string; tone: "gray" | "indigo" | "green" | "amber" | "red" }> = {
@@ -65,13 +72,13 @@ async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview"
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const { supabase, workspace } = await requireWorkspace();
 
-  const { data: campaign } = await supabase.from("campaigns").select("id, name, templates(subject, body)").eq("id", id).eq("workspace_id", workspace.id).maybeSingle();
+  const { data: campaign } = await supabase.from("campaigns").select("id, name, status, target_customer, templates(subject, body)").eq("id", id).eq("workspace_id", workspace.id).maybeSingle();
   if (!campaign) notFound();
   const tpl = campaign.templates as unknown as { subject: string; body: string } | null;
 
   const { data: leadRows } = await supabase
     .from("leads")
-    .select("id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, confidence, preview_rank")
+    .select("id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, confidence, preview_rank, qualify_verdict, qualify_reason, qualify_criteria, qualify_override")
     .eq("campaign_id", id)
     .not("preview_rank", "is", null)
     .order("preview_rank");
@@ -134,7 +141,7 @@ async function Preview({ params }: { params: PageProps<"/campaigns/[id]/preview"
       ) : (
         <div className="space-y-6">
           {leads.map((l) => (
-            <LeadCard key={l.id} lead={l} gen={latest.get(l.id) ?? null} followUps={(followUps.get(l.id) ?? []).sort((a, b) => a.step_no - b.step_no)} costs={costs.filter((c) => c.lead_id === l.id)} body={parsed?.body ?? null} subject={parsed?.subject ?? null} />
+            <LeadCard key={l.id} campaignId={id} started={campaign.status === "running" || campaign.status === "done"} lead={l} gen={latest.get(l.id) ?? null} followUps={(followUps.get(l.id) ?? []).sort((a, b) => a.step_no - b.step_no)} costs={costs.filter((c) => c.lead_id === l.id)} body={parsed?.body ?? null} subject={parsed?.subject ?? null} />
           ))}
         </div>
       )}
@@ -163,7 +170,50 @@ function SlotEmail({ tokens, lead, slots, factsUsed }: { tokens: Token[]; lead: 
   );
 }
 
+/** Lead qualification (Part B): the verdict, why, and the facts it rests on. */
+function FitBox({ lead, campaignId, started }: { lead: PreviewLead; campaignId: string; started: boolean }) {
+  if (!lead.qualify_verdict) return null;
+  const v = lead.qualify_verdict;
+  const crit = lead.qualify_criteria ?? {};
+  const skipped = lead.status === "skipped" && !lead.qualify_override && v !== "fit";
+  return (
+    <div className={cx("border-b border-slate-100 px-6 py-3 text-sm", v === "fit" ? "bg-emerald-50/60" : v === "no_fit" ? "bg-slate-50" : "bg-amber-50/60")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone={v === "fit" ? "green" : v === "no_fit" ? "gray" : "amber"}>{VERDICT_LABEL[v]}</Badge>
+        <span className="text-slate-800">{lead.qualify_reason}</span>
+        {lead.qualify_override && <span className="text-xs text-slate-500">· written anyway</span>}
+        {skipped && <span className="text-xs text-slate-500">· no email, no credits</span>}
+      </div>
+      {((crit.met ?? []).length > 0 || (crit.not_met ?? []).length > 0) && (
+        <div className="mt-1 text-xs text-slate-600">
+          {(crit.met ?? []).length > 0 && <span>Meets: {crit.met!.join(", ")}. </span>}
+          {(crit.not_met ?? []).length > 0 && <span>Doesn&apos;t meet: {crit.not_met!.join(", ")}.</span>}
+        </div>
+      )}
+      {(crit.cited ?? []).length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+          {crit.cited!.map((f) => (
+            <li key={f.id}>
+              <span className="font-semibold text-brand-600">{f.id}</span> {f.text}{" "}
+              <a href={f.src} target="_blank" rel="noreferrer" className="text-slate-400 hover:text-brand-700">
+                source
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {skipped && (
+        <div className="mt-1">
+          <WriteAnywayButton campaignId={campaignId} leadId={lead.id} costsCredits={started} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeadCard({
+  campaignId,
+  started,
   lead,
   gen,
   followUps,
@@ -171,6 +221,8 @@ function LeadCard({
   body,
   subject,
 }: {
+  campaignId: string;
+  started: boolean;
   lead: PreviewLead;
   gen: Generation | null;
   followUps: Generation[];
@@ -206,12 +258,14 @@ function LeadCard({
         </div>
       </div>
 
-      {lead.status_detail && (
+      {lead.status_detail && !(lead.qualify_verdict && lead.status === "skipped") && (
         <div className={cx("px-6 py-2 text-sm", lead.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800")}>{lead.status_detail}</div>
       )}
 
+      <FitBox lead={lead} campaignId={campaignId} started={started} />
+
       {!gen ? (
-        <div className="px-6 py-8 text-sm text-slate-500">{PENDING.has(lead.status) ? "Working on it…" : "No result yet."}</div>
+        <div className="px-6 py-8 text-sm text-slate-500">{PENDING.has(lead.status) ? "Working on it…" : lead.status === "skipped" ? "No email written." : "No result yet."}</div>
       ) : (
         <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-5">

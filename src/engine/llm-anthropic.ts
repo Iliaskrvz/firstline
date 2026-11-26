@@ -26,12 +26,16 @@ import {
   type LLM,
   type LLMResult,
   type PersonInput,
+  type QualifyInput,
+  type QualifyOutput,
   type WriteInput,
 } from "./llm";
 import { EXTRACT_PROMPT, EXTRACT_VERSION } from "./prompts/extract";
 import { COMPARE_PROMPT, FACT_CHECK_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
 import { PERSON_PROMPT } from "./prompts/person";
-import { CompareSchema, FactCheckSchema, type FactCheckOutput, PersonFactsSchema, type PersonFactsOutput, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema } from "./schemas";
+import { QUALIFY_PROMPT, qualifyRequest } from "./prompts/qualify";
+import { scrub } from "./privacy";
+import { CompareSchema, FactCheckSchema, type FactCheckOutput, PersonFactsSchema, type PersonFactsOutput, FactsSchema, JudgeSchema, QualifySchema, sanitiseFacts, writerSchema } from "./schemas";
 import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
 import type { Fact, JudgeScores, WriterOutput } from "./types";
@@ -292,6 +296,19 @@ export class AnthropicLLM implements LLM {
     if (res.stop === "refusal") throw new LLMRefusalError();
     if (!res.output) throw new Error("Judge returned no valid JSON");
     return { output: res.output as JudgeScores, costs: [anthropicCostEntry("judge", sm.model, res.usage)] };
+  }
+
+  /** Lead qualification: the fast model decides fit / no_fit / unsure from the facts. No names are sent. */
+  async qualify(input: QualifyInput): Promise<LLMResult<QualifyOutput>> {
+    const sm = this.config.models.qualify;
+    const res = await this.parse(sm, QualifySchema, {
+      max_tokens: 1500,
+      system: cachedSystem(QUALIFY_PROMPT),
+      messages: [{ role: "user", content: scrub(qualifyRequest(input), input.personal) }],
+    });
+    if (res.stop === "refusal") throw new LLMRefusalError();
+    if (!res.output) throw new Error("Qualify returned no valid JSON");
+    return { output: res.output as QualifyOutput, costs: [anthropicCostEntry("qualify", sm.model, res.usage)] };
   }
 
   /** Bake-off: the test-set judge checks extracted facts against the pages they cite. */

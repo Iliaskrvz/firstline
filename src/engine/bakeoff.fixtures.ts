@@ -65,6 +65,10 @@ export function scripted(models: StepModels): LLM {
       r.output.slots.sign = SIGN[step.model];
       return { output: r.output, costs: [cost("write", step.model, 2000, 600)] };
     },
+    qualify: async (input) => {
+      const r = await fake.qualify(input);
+      return { output: r.output, costs: [cost("qualify", models.qualify.model, 900, 120)] };
+    },
     judge: async (input) => {
       const s = RANK[input.slots.sign] + 3;
       return {

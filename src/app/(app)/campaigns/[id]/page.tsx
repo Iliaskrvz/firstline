@@ -30,10 +30,13 @@ import { EmailCheckCard } from "./email-check-card";
 import { serverPool } from "@/server/db";
 import { emailCheckSummary } from "@/lib/email-check-pg";
 import { REASON_LABEL, type EmailReason } from "@/lib/email-check-labels";
+import { noFitWarning, VERDICT_LABEL, verdictCounts, type Verdict } from "@/lib/target-customer";
+import { TargetCustomerSetting, WriteAnywayButton } from "./target-customer";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, email_status, email_reason, email_suggestion";
+const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, email_status, email_reason, email_suggestion, qualify_verdict, qualify_reason, qualify_override, preview_rank";
+const FIT_FILTERS = ["fit", "no_fit", "unsure"] as const;
 const IN_FLIGHT = new Set(["queued", "researching", "writing"]);
 const SEND_TONE = { queued: "gray", paused: "amber", sent: "indigo", replied: "green", bounced: "red", stopped: "gray" } as const;
 type SendRow = { id: string; lead_id: string; step_no: number; status: keyof typeof SEND_TONE; status_detail: string | null };
@@ -43,7 +46,7 @@ export default function CampaignPage(props: PageProps<"/campaigns/[id]">) {
   return (
     <>
       <Suspense fallback={<Skeleton className="h-96" />}>
-        <CampaignDetail params={props.params} />
+        <CampaignDetail params={props.params} searchParams={props.searchParams} />
       </Suspense>
       <Suspense fallback={null}>
         <FirstCampaignEvent searchParams={props.searchParams} />
@@ -57,8 +60,10 @@ async function FirstCampaignEvent({ searchParams }: { searchParams: PageProps<"/
   return (await searchParams).first === "1" ? <TrackOnce event="First campaign" param="first" /> : null;
 }
 
-async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">["params"] }) {
+async function CampaignDetail({ params, searchParams }: { params: PageProps<"/campaigns/[id]">["params"]; searchParams: PageProps<"/campaigns/[id]">["searchParams"] }) {
   const { id } = await params;
+  const fitParam = (await searchParams).fit;
+  const fitFilter = FIT_FILTERS.find((f) => f === fitParam) ?? null;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const { supabase, workspace } = await requireWorkspace();
 
@@ -75,11 +80,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
     { data: balanceRow },
   ] = await Promise.all([
     supabase.from("campaigns").select("*").eq("id", id).eq("workspace_id", workspace.id).maybeSingle(),
-    supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).order("created_at").limit(PAGE),
+    (fitFilter
+      ? supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id).eq("qualify_verdict", fitFilter)
+      : supabase.from("leads").select(LEAD_COLS, { count: "exact" }).eq("campaign_id", id)
+    )
+      .order("created_at")
+      .limit(PAGE),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").eq("workspace_id", workspace.id).eq("source", "app").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
-    supabase.from("leads").select("id, status, status_detail, domain").eq("campaign_id", id).limit(10_000),
+    supabase.from("leads").select("id, status, status_detail, domain, qualify_verdict, qualify_override").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
     supabase.from("inboxes").select("id, email, type, health").eq("workspace_id", workspace.id).order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
@@ -94,13 +104,19 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
   const vars = availableVariables(c.column_map);
   const parsed = template ? parseTemplate(template, { availableVariables: vars }) : null;
   const sample = rows.find((l) => l.domain) ?? rows[0];
-  const total = count ?? 0;
+  const total = fitFilter ? (allStatuses ?? []).length : (count ?? 0);
+  const shown = count ?? 0;
   const emailCheck = queueConfigured() ? await emailCheckSummary(serverPool(), workspace.id, id) : null;
   const researchable = withSite ?? 0;
 
   // Run + send state.
   const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; inbox_ids: string[] | null; opt_out_line: string | null };
-  const statuses = (allStatuses ?? []) as { id: string; status: string; status_detail: string | null; domain: string | null }[];
+  const statuses = (allStatuses ?? []) as { id: string; status: string; status_detail: string | null; domain: string | null; qualify_verdict: Verdict | null; qualify_override: boolean }[];
+  // Lead qualification (Part B): counts, the free skips and the >50% warning (after 10 qualified).
+  const fit = verdictCounts(statuses);
+  const fitSkipped = statuses.filter((l) => l.status === "skipped" && !l.qualify_override && (l.qualify_verdict === "no_fit" || l.qualify_verdict === "unsure")).length;
+  const fitWarning = noFitWarning(fit);
+  const started = c.status === "running" || c.status === "done";
   const waitingForBatch = statuses.filter((l) => l.status === "writing" && l.status_detail === WAITING_FOR_BATCH).length;
   const byStatus = statuses.reduce<Record<string, number>>((m, l) => ((m[l.status] = (m[l.status] ?? 0) + 1), m), {});
   const inFlight = c.status === "running" && statuses.some((l) => IN_FLIGHT.has(l.status));
@@ -150,6 +166,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
         <Stat label="No website (free fallback)" value={n(total - researchable)} tone={total - researchable ? "amber" : undefined} />
         <Stat label="Removed on import" value={n((c.counts.duplicates ?? 0) + (c.counts.invalid_email ?? 0) + (c.counts.missing_email ?? 0))} />
       </div>
+
+      {fitWarning && (
+        <div role="status" className="mt-6 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+          <strong>More than half of the checked leads don&apos;t fit your target customer</strong> ({fit.no_fit} of {fit.fit + fit.no_fit + fit.unsure}). They cost you
+          nothing, but your lead list may not match who you want to reach, or the description may be too narrow.{" "}
+          <Link href={`/campaigns/${c.id}?fit=no_fit`} className="font-medium underline">
+            See why
+          </Link>
+        </div>
+      )}
 
       {emailCheck && total > 0 && (
         <Card className="mt-6">
@@ -204,6 +230,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
         <Card className="space-y-5 lg:self-start">
           <CampaignSettings campaignId={c.id} templateId={c.template_id} templates={tpls.map((t) => ({ id: t.id, name: t.name }))} />
           <WriterSetting campaignId={c.id} writer={c.writer} locked={c.status === "running"} />
+          <TargetCustomerSetting campaignId={c.id} target={c.target_customer ?? null} locked={c.status === "running"} />
           <div>
             <div className="text-sm font-medium text-slate-700">Research depth</div>
             <div className="mt-2 space-y-2 text-sm">
@@ -256,6 +283,7 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
             {(c.status === "running" || (byStatus.done ?? 0) + (byStatus.fallback ?? 0) > 0) && (
               <p className="mt-3 text-center text-xs text-slate-600">
                 {byStatus.done ?? 0} written · {byStatus.fallback ?? 0} fallback · {byStatus.failed ?? 0} failed
+                {c.target_customer && ` · ${fitSkipped} not a fit (free) · ${fit.unsure} unsure`}
                 {inFlight && ` · ${statuses.filter((l) => IN_FLIGHT.has(l.status)).length} in progress`}
               </p>
             )}
@@ -331,8 +359,20 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
       <Card className="mt-6 overflow-hidden p-0">
         <div className="flex items-center justify-between px-6 py-4">
           <h2 className="text-base font-semibold text-slate-900">Leads</h2>
-          <span className="text-xs text-slate-500">{total > PAGE ? `First ${PAGE} of ${n(total)}` : `${n(total)} leads`}</span>
+          <span className="text-xs text-slate-500">{shown > PAGE ? `First ${PAGE} of ${n(shown)}` : `${n(shown)} leads`}</span>
         </div>
+        {fit.fit + fit.no_fit + fit.unsure > 0 && (
+          <nav aria-label="Filter by fit" className="flex flex-wrap gap-2 px-6 pb-3 text-xs">
+            <Link href={`/campaigns/${c.id}`} className={fitFilter ? "text-slate-600 hover:underline" : "font-semibold text-slate-900"}>
+              All
+            </Link>
+            {FIT_FILTERS.map((f) => (
+              <Link key={f} href={`/campaigns/${c.id}?fit=${f}`} className={fitFilter === f ? "font-semibold text-slate-900" : "text-slate-600 hover:underline"}>
+                {VERDICT_LABEL[f]} ({fit[f]})
+              </Link>
+            ))}
+          </nav>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -363,6 +403,16 @@ async function CampaignDetail({ params }: { params: PageProps<"/campaigns/[id]">
                       {l.status === "queued" && c.status !== "running" ? "not started" : l.status}
                     </Badge>
                     {l.status_detail && <div className="mt-0.5 text-xs text-slate-500">{l.status_detail}</div>}
+                    {l.qualify_verdict && !l.status_detail?.startsWith("Not a fit") && !l.status_detail?.startsWith("Unsure fit") && (
+                      <div className={l.qualify_verdict === "unsure" ? "mt-0.5 text-xs text-amber-800" : "mt-0.5 text-xs text-slate-500"}>
+                        {l.qualify_override ? "Written anyway · " : ""}
+                        {VERDICT_LABEL[l.qualify_verdict]}
+                        {l.qualify_reason ? `: ${l.qualify_reason}` : ""}
+                      </div>
+                    )}
+                    {l.status === "skipped" && !l.qualify_override && (l.qualify_verdict === "no_fit" || l.qualify_verdict === "unsure") && (
+                      <WriteAnywayButton campaignId={c.id} leadId={l.id} costsCredits={started || (l as LeadRow & { preview_rank?: number | null }).preview_rank == null} />
+                    )}
                   </td>
                   <td className="px-6 py-2.5">
                     {(() => {

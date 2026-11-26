@@ -15,6 +15,9 @@ import { BAKEOFF } from "@/config/models";
 import { engineConfig } from "@/engine/config";
 import { listBakeoffs } from "@/engine/bakeoff-pg";
 import { bakeoffPlan } from "@/engine/bakeoff";
+import { QUALIFY_TEST } from "@/engine/qualify-test";
+import { listQualifyTests } from "@/engine/qualify-test-pg";
+import { QualifyTestForm } from "./qualify-test-form";
 
 export const metadata: Metadata = { title: "Quality Lab" };
 
@@ -61,18 +64,20 @@ const VERDICT: Record<EvalSummary["verdict"], "green" | "red" | "gray"> = { ship
 async function Lab() {
   await requireAdmin();
   const pool = serverPool();
-  const [{ rows: sets }, { rows: runs }, { rows: outcomeCounts }, bakeoffs] = await Promise.all([
+  const [{ rows: sets }, { rows: runs }, { rows: outcomeCounts }, bakeoffs, qualifyTests] = await Promise.all([
     pool.query("select id, name, jsonb_array_length(leads)::int n from public.test_sets order by created_at"),
     pool.query("select * from public.eval_runs order by created_at desc limit 20"),
     pool.query<OutcomeCount>("select skill_version, channel, personalised, status, count(*)::int n from public.outcomes group by 1, 2, 3, 4"),
     listBakeoffs(pool),
+    listQualifyTests(pool),
   ]);
+  const qualifyBusy = qualifyTests.some((t) => t.status === "queued" || t.status === "running");
   const config = engineConfig();
   const plan = bakeoffPlan([], config);
   const bakeoffBusy = bakeoffs.some((b) => b.status === "queued" || b.status === "running");
   const rates = replyRates(outcomeCounts);
   const versions = Object.keys(SKILLS);
-  const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running") || bakeoffBusy;
+  const busy = (runs as Run[]).some((r) => r.status === "queued" || r.status === "running") || bakeoffBusy || qualifyBusy;
   return (
     <div className="space-y-6">
       <AutoRefresh active={busy} intervalMs={10_000} />
@@ -136,6 +141,87 @@ async function Lab() {
             ))}
           </ul>
         )}
+      </Card>
+
+      <Card className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Qualification test</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Leads you labelled by hand (should they fit: yes or no) are researched and checked with the production fit-check model ({config.models.qualify.model}). Columns:
+            domain, company, title, target_customer, should_fit. Put who doesn&apos;t fit after &quot;Not:&quot; in target_customer. Template:{" "}
+            <code>fixtures/qualify-testset-template.csv</code>. About 50 leads, at most {QUALIFY_TEST.maxLeads}. Nothing changes in production.
+          </p>
+        </div>
+        <QualifyTestForm budgetUsd={QUALIFY_TEST.budgetUsd} provider={config.llmProvider} busy={qualifyBusy} firecrawlPerLead={1 + config.research.maxPages} />
+        {qualifyTests.map((t) => (
+          <div key={t.id} className="rounded-xl ring-1 ring-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+              <span>
+                Test #{t.id} · {t.leads} leads · {formatDate(t.created_at)} · approved by {t.approved_by}
+                {t.provider === "fake" ? " · test output, no AI used" : ""}
+              </span>
+              <span className="flex items-center gap-2">
+                <Badge tone={t.status === "done" ? "green" : t.status === "failed" || t.status === "over_budget" ? "red" : "indigo"}>{t.status.replace("_", " ")}</Badge>
+                <span className="tabular-nums text-slate-600">
+                  ${Number(t.cost_usd).toFixed(2)} of ${Number(t.budget_usd).toFixed(0)}
+                  {t.status === "running" ? ` · ${t.progress.done ?? 0}/${t.progress.total ?? "?"}` : ""}
+                </span>
+              </span>
+            </div>
+            {t.error && <p className="px-4 pb-3 text-xs text-rose-700">{t.error}</p>}
+            {t.report && (
+              <>
+                <dl className="grid grid-cols-2 gap-3 border-t border-slate-100 px-4 py-3 text-sm sm:grid-cols-5">
+                  {[
+                    ["Accuracy", t.report.accuracy],
+                    ["False no_fit (good leads skipped)", t.report.falseNoFitRate],
+                    ["Missed no_fit (written for nothing)", t.report.missedNoFitRate],
+                    ["Unsure", t.report.unsureRate],
+                  ].map(([label, v]) => (
+                    <div key={label as string}>
+                      <dt className="text-xs text-slate-500">{label}</dt>
+                      <dd className="font-semibold tabular-nums text-slate-900">{v == null ? "–" : `${Math.round((v as number) * 100)}%`}</dd>
+                    </div>
+                  ))}
+                  <div>
+                    <dt className="text-xs text-slate-500">Cost per lead (the check alone)</dt>
+                    <dd className="font-semibold tabular-nums text-slate-900">
+                      {t.report.costPerLeadUsd == null ? "–" : `$${t.report.costPerLeadUsd.toFixed(4)}`}{" "}
+                      <span className="text-xs font-normal text-slate-500">({t.report.qualifyCostPerLeadUsd == null ? "–" : `$${t.report.qualifyCostPerLeadUsd.toFixed(5)}`})</span>
+                    </dd>
+                  </div>
+                </dl>
+                <details className="border-t border-slate-100 px-4 py-3">
+                  <summary className="cursor-pointer text-sm font-medium text-brand-700">
+                    Per lead ({t.report.judged} judged of {t.report.leads})
+                  </summary>
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-slate-500">
+                        <tr>
+                          <th className="py-1 pr-3">Domain</th>
+                          <th className="py-1 pr-3">Should fit</th>
+                          <th className="py-1 pr-3">Verdict</th>
+                          <th className="py-1 pr-3">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {t.report.rows.map((r) => (
+                          <tr key={r.domain} className={r.correct === false ? "bg-rose-50" : undefined}>
+                            <td className="py-1 pr-3">{r.domain}</td>
+                            <td className="py-1 pr-3">{r.shouldFit ? "yes" : "no"}</td>
+                            <td className="py-1 pr-3">{r.verdict ?? "–"}</td>
+                            <td className="py-1 pr-3 text-slate-600">{r.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              </>
+            )}
+          </div>
+        ))}
       </Card>
 
       <Card className="space-y-3">

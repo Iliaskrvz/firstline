@@ -14,6 +14,7 @@ import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMInvalidOutputError, LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
 import { personalValues } from "./privacy";
+import { decide, NO_FACTS_REASON, qualifyLead, skipDetail, targetActive, targetHash, unsure, type Qualification } from "./qualify";
 import type { Gate } from "./limiter";
 import { findPersonFacts } from "./deep";
 import { LIVE_SKILL_VERSION as SKILL_VERSION } from "./skills";
@@ -164,7 +165,26 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     return written;
   };
 
+  // --- Lead qualification (Part B): only when the campaign describes its target customer and the
+  // customer didn't press "write anyway" for this lead. ----------------------------------------
+  const campaignTarget = job.campaign.target;
+  const target = !lead.qualify_override && targetActive(campaignTarget) ? campaignTarget : null;
+  let qualification: Qualification | null = null;
+  /** Not a fit (or unsure on strict): no email, 0 credits, the reservation goes back. */
+  const skipForFit = async (q: Qualification) => {
+    await settle(0);
+    const detail = skipDetail(q);
+    await store.setLeadStatus(lead.id, "skipped", { detail, confidence: null });
+    return { outcome: "skipped" as const, detail, costUsd: totalCost(spent) };
+  };
+
   const fallback = async (reason: FallbackReason, research: unknown, extra: Record<string, unknown> = {}) => {
+    // Nothing to judge from (no website, no facts, …): "unsure" without an AI call; strict skips.
+    if (target && !qualification) {
+      qualification = unsure(NO_FACTS_REASON);
+      await store.setLeadQualification(lead.id, qualification);
+      if (!decide("unsure", target.strictness).write) return skipForFit(qualification);
+    }
     const slots = fallbackSlots(tpl.slots, language);
     const email = renderEmail(slots);
     await store.saveGeneration({
@@ -222,6 +242,26 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     });
   }
   if (facts.length === 0) return fallback("no_facts", research);
+
+  if (target) {
+    const hash = targetHash(target);
+    let q = await store.getQualification(job.campaign.id, lead.domain, hash);
+    if (!q) {
+      try {
+        const r = await qualifyLead(llm, { target, company: lead.company, domain: lead.domain, title: lead.title, facts, personal });
+        await log(r.costs);
+        q = r.result;
+      } catch (e) {
+        if (e instanceof LLMUnavailableError) return fail(e.reason, { ...research, ai: e.reason });
+        throw e;
+      }
+      if (q.cacheable) await store.cacheQualification(job.campaign.id, lead.domain, hash, q);
+    }
+    qualification = q;
+    await store.setLeadQualification(lead.id, q);
+    research = { ...research, qualification: { verdict: q.verdict, reason: q.reason, facts: q.facts } };
+    if (!decide(q.verdict, target.strictness).write) return skipForFit(q);
+  }
 
   // --- Deep research (behind a switch: off until the lawyer and Anthropic confirm) -------------
   // At most 2 facts about the contact's own work for their current company. Never for a contact on

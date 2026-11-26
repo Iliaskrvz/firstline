@@ -70,7 +70,7 @@ async function personalizeLike(deps: ApiDeps, req: ApiRequest, kind: "single" | 
     const job = await createJob(deps.pool, who, {
       kind,
       leads,
-      source: { copy: data.copy, campaign_id: data.campaign_id, options: data.options },
+      source: { copy: data.copy, campaign_id: data.campaign_id, options: data.options, target_customer: data.target_customer },
       idempotencyKey: idem,
       requestHash: requestHash(raw),
     });

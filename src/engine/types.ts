@@ -61,8 +61,18 @@ export type LeadJob = {
     /** Deep research done earlier for this lead (reused on a re-run, e.g. after an Economy batch). */
     deep_status?: "matched" | "no_match" | "not_searched" | null;
     person_facts?: Fact[] | null;
+    /** "Write anyway": the customer overrode a no_fit / unsure verdict, so qualification is skipped. */
+    qualify_override?: boolean;
   };
-  campaign: { id: string; writer: "pro" | "lite"; depth: { deep: boolean }; status?: string; mode?: "now" | "economy" };
+  campaign: {
+    id: string;
+    writer: "pro" | "lite";
+    depth: { deep: boolean };
+    status?: string;
+    mode?: "now" | "economy";
+    /** Lead qualification (Part B); null or empty = off. */
+    target?: import("./llm").TargetCustomer | null;
+  };
   template: { id: string; subject: string; body: string; slots: Slot[]; style_rules: StyleRules; examples: unknown[] } | null;
   /** Personalised follow-up steps (2, 3, …), written right after step 1 from the same facts. */
   followUps?: { step_no: number; body: string }[];
@@ -70,7 +80,7 @@ export type LeadJob = {
 
 /** One provider call, as logged to usage_costs. */
 export type CostEntry = {
-  step: "scrape" | "extract" | "write" | "validate" | "judge" | "search" | "compare" | "fact_check";
+  step: "scrape" | "extract" | "qualify" | "write" | "validate" | "judge" | "search" | "compare" | "fact_check";
   model: string;
   input_tokens?: number;
   output_tokens?: number;

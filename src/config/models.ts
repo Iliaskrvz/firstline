@@ -29,7 +29,7 @@ export type StepModel = {
   batch?: boolean;
 };
 
-export const STEPS = ["extraction", "writer_pro", "writer_lite", "writer_economy", "judge", "judge_sample", "testset_judge"] as const;
+export const STEPS = ["extraction", "qualify", "writer_pro", "writer_lite", "writer_economy", "judge", "judge_sample", "testset_judge"] as const;
 export type Step = (typeof STEPS)[number];
 export type StepModels = Record<Step, StepModel>;
 
@@ -38,6 +38,8 @@ export const STEP_MODELS_BY_PROVIDER: Record<Provider, StepModels> = {
   // Owner's brief, 2026-11-13.
   deepseek: {
     extraction: { model: "deepseek-flash", effort: "none" },
+    /** Lead qualification (Part B, 2026-11-28): the fast model, thinking off. */
+    qualify: { model: "deepseek-flash", effort: "none" },
     writer_pro: { model: "deepseek-v4-pro", effort: "none" },
     writer_lite: { model: "deepseek-flash", effort: "none" },
     writer_economy: { model: "deepseek-v4-pro", effort: "none", batch: true },
@@ -49,6 +51,7 @@ export const STEP_MODELS_BY_PROVIDER: Record<Provider, StepModels> = {
   // The Claude setup as of 2026-11-13, kept for switching back.
   anthropic: {
     extraction: { model: "claude-haiku-5-5", effort: "low" },
+    qualify: { model: "claude-haiku-5-5", effort: "low" },
     writer_pro: { model: "claude-sonnet-5-5", effort: "medium" },
     writer_lite: { model: "claude-haiku-5-5", effort: "medium" },
     writer_economy: { model: "claude-sonnet-5-5", effort: "medium", batch: true },

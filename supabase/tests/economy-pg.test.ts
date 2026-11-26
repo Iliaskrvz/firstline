@@ -50,7 +50,7 @@ function testLLM(opts: { failIds?: () => string[] } = {}) {
         ),
       ),
   };
-  const llm: LLM = { provider: "fake", extractorId: fake.extractorId, extractFacts: (i) => fake.extractFacts(i), write: (i) => fake.write(i), judge: () => fake.judge(), batch };
+  const llm: LLM = { provider: "fake", extractorId: fake.extractorId, extractFacts: (i) => fake.extractFacts(i), write: (i) => fake.write(i), judge: () => fake.judge(), qualify: (i) => fake.qualify(i), batch };
   return { llm, state };
 }
 

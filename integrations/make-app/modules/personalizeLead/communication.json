@@ -15,7 +15,12 @@
     },
     "copy": { "subject": "{{parameters.subject}}", "body": "{{parameters.body}}" },
     "campaign_id": "{{parameters.campaign_id}}",
-    "options": { "writer": "{{ifempty(parameters.writer, 'pro')}}" },
+    "options": { "writer": "{{ifempty(parameters.writer, 'pro')}}", "qualify": "{{ifempty(parameters.qualify, 'true')}}" },
+    "target_customer": {
+      "fits": "{{parameters.target_fits}}",
+      "excludes": "{{parameters.target_excludes}}",
+      "strictness": "{{ifempty(parameters.target_strictness, 'normal')}}"
+    },
     "wait": "{{ifempty(parameters.wait, 45)}}"
   },
   "response": {

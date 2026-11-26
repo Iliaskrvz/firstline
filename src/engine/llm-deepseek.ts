@@ -28,11 +28,14 @@ import {
   type JudgeInput,
   type LLM,
   type LLMResult,
+  type QualifyInput,
+  type QualifyOutput,
   type WriteInput,
 } from "./llm";
 import { EXTRACT_PROMPT, EXTRACT_VERSION } from "./prompts/extract";
 import { COMPARE_PROMPT, FACT_CHECK_PROMPT, JUDGE_PROMPT } from "./prompts/judge";
-import { CompareSchema, FactCheckSchema, FactsSchema, JudgeSchema, sanitiseFacts, writerSchema, type FactCheckOutput } from "./schemas";
+import { QUALIFY_JSON, QUALIFY_PROMPT, qualifyRequest } from "./prompts/qualify";
+import { CompareSchema, FactCheckSchema, FactsSchema, JudgeSchema, QualifySchema, sanitiseFacts, writerSchema, type FactCheckOutput } from "./schemas";
 import { scrub } from "./privacy";
 import { skillPrompt } from "./skills";
 import { wrapPagesAsData } from "./clean";
@@ -248,6 +251,11 @@ export class DeepSeekLLM implements LLM {
       .map(([k, v]) => `${k}: ${v}`)
       .join("\n")}\n\nFull email for context:\n${input.emailPreview}`;
     return this.json("judge", this.config.models.judge, JudgeSchema, `${JUDGE_PROMPT}\n\n${JSON_JUDGE}`, user, input.personal ?? [], 2000);
+  }
+
+  /** Lead qualification: the fast model decides fit / no_fit / unsure from the facts. No names are sent. */
+  async qualify(input: QualifyInput): Promise<LLMResult<QualifyOutput>> {
+    return this.json("qualify", this.config.models.qualify, QualifySchema, `${QUALIFY_PROMPT}\n\n${QUALIFY_JSON}`, qualifyRequest(input), input.personal, 1500);
   }
 
   /** Quality Lab and bake-off comparisons: the test-set judge. Only slot lines are compared (no names in them). */

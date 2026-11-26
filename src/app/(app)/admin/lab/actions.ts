@@ -8,6 +8,8 @@ import { engineConfig } from "@/engine/config";
 import { MAX_TEST_LEADS } from "@/engine/lab";
 import { queueEvalRun, saveTestSet, upsertSkills } from "@/engine/lab-pg";
 import { queueBakeoff, saveBlindPick } from "@/engine/bakeoff-pg";
+import { parseQualifyCsv, QUALIFY_TEST } from "@/engine/qualify-test";
+import { queueQualifyTest } from "@/engine/qualify-test-pg";
 import { LIVE_SKILL_VERSION, SKILLS } from "@/engine/skills";
 import { requireAdmin } from "@/lib/auth";
 import { hasErrors, parseTemplate } from "@/lib/template";
@@ -78,4 +80,22 @@ export async function pickBlind(input: { id: number; n: number; pick: "a" | "b" 
   if (!Number.isInteger(input.id) || !Number.isInteger(input.n) || !["a", "b", "same"].includes(input.pick)) return;
   await saveBlindPick(serverPool(), input.id, input.n, input.pick);
   revalidatePath(`/admin/lab/bakeoff/${input.id}`);
+}
+
+/**
+ * Queue a qualification test from a labelled CSV (fixtures/qualify-testset-template.csv). Spends real
+ * money with a real provider (hard budget QUALIFY_TEST.budgetUsd), so it needs the admin's approval.
+ */
+export async function startQualifyTest(input: { csv: string; approved: boolean }): Promise<{ error: string } | { ok: true; leads: number }> {
+  const { user } = await requireAdmin();
+  if (!input.approved) return { error: "Tick the box to approve the spend first." };
+  if (typeof input.csv !== "string" || input.csv.length > 200_000) return { error: "The file is too large." };
+  const parsed = parseQualifyCsv(input.csv);
+  if ("error" in parsed) return parsed;
+  const pool = serverPool();
+  const { rows } = await pool.query("select count(*)::int n from public.qualify_test_runs where status in ('queued', 'running')");
+  if (rows[0].n > 0) return { error: "A qualification test is already queued or running." };
+  await queueQualifyTest(pool, { leads: parsed.leads.slice(0, QUALIFY_TEST.maxLeads), provider: engineConfig().llmProvider, approvedBy: user.email ?? "admin" });
+  revalidatePath("/admin/lab");
+  return { ok: true, leads: parsed.leads.length };
 }

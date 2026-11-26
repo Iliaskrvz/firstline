@@ -17,6 +17,10 @@
     ] } },
     { "name": "confidence", "type": "text", "label": "Confidence" },
     { "name": "credits_used", "type": "uinteger", "label": "Credits used" },
-    { "name": "detail", "type": "text", "label": "Detail" }
+    { "name": "detail", "type": "text", "label": "Detail" },
+    { "name": "qualification", "type": "collection", "label": "Fit check", "spec": [
+      { "name": "verdict", "type": "text", "label": "Verdict (fit, no_fit, unsure)" },
+      { "name": "reason", "type": "text", "label": "Reason" }
+    ] }
   ] }
 ]

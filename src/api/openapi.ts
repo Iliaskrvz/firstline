@@ -1,4 +1,5 @@
 // OpenAPI 3.1 description of /api/v1. Mirrors src/api/schemas.ts (a test checks the two agree).
+import { TARGET_MAX_CHARS } from "@/lib/target-customer";
 import { MAX_BATCH, MAX_WAIT_S, RATE_LIMIT_PER_MIN } from "./schemas";
 
 const lead = {
@@ -45,6 +46,26 @@ const source = {
         description: "Deep research is not available.",
         properties: { deep: { type: "boolean", default: false, enum: [false] } },
       },
+      qualify: {
+        type: "boolean",
+        default: true,
+        description: "Lead qualification on/off. On (default) uses target_customer, or the campaign's target customer with campaign_id. false = write to every lead.",
+      },
+    },
+  },
+  target_customer: {
+    type: ["object", "null"],
+    description:
+      "Lead qualification: before writing, a fast AI model checks each company's website facts against this. no_fit = skipped, 0 credits. Overrides the campaign's. Empty fits and excludes = off.",
+    properties: {
+      fits: { type: "string", maxLength: TARGET_MAX_CHARS, description: "Who fits, e.g. \"Independent bakeries with their own shop in the Netherlands\"." },
+      excludes: { type: "string", maxLength: TARGET_MAX_CHARS, description: "Who doesn't fit, e.g. \"franchises, wholesalers\"." },
+      strictness: {
+        type: "string",
+        enum: ["strict", "normal", "loose"],
+        default: "normal",
+        description: "What happens with unsure leads: strict = skipped (0 credits), normal = written and marked unsure, loose = written.",
+      },
     },
   },
   wait: { type: "integer", minimum: 0, maximum: MAX_WAIT_S, default: 0, description: "Seconds to wait for the result in this same call (n8n/Make). 0 = return at once." },
@@ -70,6 +91,14 @@ const result = {
         status: { type: "string", enum: ["pending", "valid", "risky", "invalid"] },
         reason: { type: ["string", "null"], enum: ["syntax", "disposable", "null_mx", "no_dns", "typo", "a_only", "role", "personal", "dns_unknown", null] },
         suggestion: { type: ["string", "null"], description: "Possible correct address when the domain looks like a typo. Never applied automatically." },
+      },
+    },
+    qualification: {
+      type: ["object", "null"],
+      description: "Lead qualification, when the job has a target customer. null = not checked (off, or the lead never got that far).",
+      properties: {
+        verdict: { type: "string", enum: ["fit", "no_fit", "unsure"] },
+        reason: { type: ["string", "null"], description: "One sentence on what the check saw on their website." },
       },
     },
   },

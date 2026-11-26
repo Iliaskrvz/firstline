@@ -1,6 +1,7 @@
 // Public API data layer (Phase 9): keys, rate limits, jobs, results. Framework-agnostic (pg Pool);
 // the /api/v1 route handlers stay thin. Each call becomes a hidden "api" campaign, so research,
 // writing, checks, credits (reserve → capture / release) and the 30-day deletion are the app's own.
+import { normaliseTarget, type TargetCustomer, type Verdict } from "@/lib/target-customer";
 import type { EmailReason, EmailStatus } from "@/lib/email-check-labels";
 import { applyStaticChecks } from "@/lib/email-check-pg";
 import { createHash } from "node:crypto";
@@ -81,7 +82,7 @@ export function requestHash(body: unknown): string {
   return createHash("sha256").update(JSON.stringify(body)).digest("hex");
 }
 
-type Source = Pick<PersonalizeBody, "copy" | "campaign_id" | "options">;
+type Source = Pick<PersonalizeBody, "copy" | "campaign_id" | "options" | "target_customer">;
 
 /** website → domain; without one, the company domain of the email address (never gmail.com & co). */
 export function leadDomain(l: LeadInput): string | null {
@@ -131,9 +132,10 @@ export async function createJob(
   try {
     await c.query("begin");
     let templateId: string;
+    let campaignTarget: TargetCustomer | null = null;
     if (source.campaign_id) {
-      const { rows } = await c.query<{ template_id: string | null; subject: string; body: string }>(
-        `select c.template_id, t.subject, t.body from public.campaigns c join public.templates t on t.id = c.template_id
+      const { rows } = await c.query<{ template_id: string | null; subject: string; body: string; target_customer: TargetCustomer | null }>(
+        `select c.template_id, t.subject, t.body, c.target_customer from public.campaigns c join public.templates t on t.id = c.template_id
           where c.id = $1 and c.workspace_id = $2 and c.source = 'app'`,
         [source.campaign_id, caller.workspaceId],
       );
@@ -141,6 +143,7 @@ export async function createJob(
       const tpl = parseTemplate(rows[0]);
       if (hasErrors(tpl) || !tpl.slots.length) throw invalid("That campaign's template has errors or no [[slots]]. Fix it in the app first.");
       templateId = rows[0].template_id;
+      campaignTarget = rows[0].target_customer;
     } else {
       const copy = source.copy!;
       const tpl = parseTemplate({ subject: copy.subject, body: copy.body });
@@ -154,10 +157,19 @@ export async function createJob(
       templateId = rows[0].id;
     }
 
+    // Lead qualification: the request's target customer, else the campaign's; options.qualify=false turns it off.
+    const target = source.options.qualify === false ? null : source.target_customer !== undefined ? normaliseTarget(source.target_customer) : campaignTarget;
     const { rows: camp } = await c.query<{ id: string }>(
-      `insert into public.campaigns (workspace_id, template_id, name, status, mode, depth, writer, source)
-       values ($1, $2, $3, 'running', 'now', $4, $5, 'api') returning id`,
-      [caller.workspaceId, templateId, `API ${input.kind} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`, JSON.stringify({ deep: source.options.depth.deep }), source.options.writer],
+      `insert into public.campaigns (workspace_id, template_id, name, status, mode, depth, writer, source, target_customer)
+       values ($1, $2, $3, 'running', 'now', $4, $5, 'api', $6) returning id`,
+      [
+        caller.workspaceId,
+        templateId,
+        `API ${input.kind} ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
+        JSON.stringify({ deep: source.options.depth.deep }),
+        source.options.writer,
+        target ? JSON.stringify(target) : null,
+      ],
     );
     campaignId = camp[0].id;
     const { rows: leads } = await c.query<{ id: string; email: string }>(
@@ -230,6 +242,8 @@ export type LeadResult = {
   credits_used: number;
   /** Free email check: pending until the domain is checked; invalid leads are skipped and use no credits. */
   email_check: { status: EmailStatus; reason: EmailReason | null; suggestion: string | null };
+  /** Lead qualification, when the job has a target customer: no_fit leads are skipped and use no credits. */
+  qualification: { verdict: Verdict; reason: string | null } | null;
 };
 
 export type JobView = {
@@ -269,8 +283,10 @@ export async function jobView(pool: pg.Pool, workspaceId: string, jobId: string)
     email_status: EmailStatus;
     email_reason: EmailReason | null;
     email_suggestion: string | null;
+    qualify_verdict: Verdict | null;
+    qualify_reason: string | null;
   }>(
-    `select l.id, l.email, l.status, l.status_detail, l.confidence, l.email_status, l.email_reason, l.email_suggestion, g.subject, g.full_email, g.slot_outputs, g.facts_used, g.research,
+    `select l.id, l.email, l.status, l.status_detail, l.confidence, l.email_status, l.email_reason, l.email_suggestion, l.qualify_verdict, l.qualify_reason, g.subject, g.full_email, g.slot_outputs, g.facts_used, g.research,
             coalesce((select sum(amount) from public.credit_ledger cl where cl.lead_id = l.id and cl.type = 'capture'), 0)::int credits
        from public.leads l
        left join lateral (select subject, full_email, slot_outputs, facts_used, research from public.generations g
@@ -297,6 +313,7 @@ export async function jobView(pool: pg.Pool, workspaceId: string, jobId: string)
       confidence: r.confidence,
       credits_used: r.credits,
       email_check: { status: r.email_status, reason: r.email_reason, suggestion: r.email_suggestion },
+      qualification: r.qualify_verdict ? { verdict: r.qualify_verdict, reason: r.qualify_reason } : null,
     };
   });
   return {

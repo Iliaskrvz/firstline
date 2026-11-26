@@ -43,6 +43,8 @@ function server(override?: (call: Call, n: number) => { status?: number; content
         content = JSON.stringify({ relevance: 4, specificity: 4, value_clarity: 4, cta_effort: 4, sounds_human: 4, would_reply: 4, claims_supported: true, unsupported_claims: [] });
       } else if (system.includes('"winner"')) {
         content = JSON.stringify({ winner: "a", reason: "more specific" });
+      } else if (system.includes('"fact_ids"')) {
+        content = JSON.stringify({ verdict: "fit", reason: "They run a design studio.", fact_ids: ["F1"], criteria_met: ["design studios"], criteria_not_met: [] });
       } else {
         content = JSON.stringify({ checks: [{ id: "F1", verdict: "supported", note: "on the page" }] });
       }
@@ -164,7 +166,8 @@ describe("privacy: no email, first name, last name or LinkedIn URL ever reaches 
       id: "lead-1", workspace_id: "ws-1", campaign_id: "c-1", email: "anna@acmestudio.nl", first_name: "Anna", last_name: "de Vries", company: "Acme Studio",
       title: "Founder", linkedin_headline: null, website: "acmestudio.nl", domain: "acmestudio.nl", custom: { linkedin_url: "https://www.linkedin.com/in/annadevries" }, status: "queued",
     },
-    campaign: { id: "c-1", writer: "pro", depth: { deep: false } },
+    // The fit check runs too (Part B): its request must be just as clean.
+    campaign: { id: "c-1", writer: "pro", depth: { deep: false }, target: { fits: "Design studios", excludes: "Anna's competitors", strictness: "normal" } },
     template: {
       id: "t-1",
       subject: "Idea for {{company}}, {{first_name}}",
@@ -186,6 +189,8 @@ describe("privacy: no email, first name, last name or LinkedIn URL ever reaches 
     expect(bodies.length).toBeGreaterThanOrEqual(4);
     expect(bodies.some((b) => b.includes('\\"relevance\\"'))).toBe(true); // the judge ran
     expect(bodies.some((b) => b.includes("follow-up email 2"))).toBe(true); // the follow-up ran
+    expect(bodies.some((b) => b.includes("<target_customer>"))).toBe(true); // the fit check ran
+    expect(store.qualifications.get("lead-1")?.verdict).toBe("fit");
     for (const b of bodies) {
       expect(b).not.toMatch(/\banna\b/i);
       expect(b).not.toMatch(/vries/i);
@@ -204,3 +209,57 @@ describe("privacy: no email, first name, last name or LinkedIn URL ever reaches 
     );
   });
 });
+
+describe("DeepSeek fit check (qualify)", () => {
+  const facts = [
+    { id: "F1", text: "Acme Studio designs packaging for food brands.", src: "https://acme.nl/", tier: "A" as const },
+    { id: "F2", text: "Acme Studio only sells to consumers through its webshop.", src: "https://acme.nl/shop", tier: "A" as const },
+  ];
+  const input = { target: { fits: "B2B design studios", excludes: "consumer webshops", strictness: "normal" as const }, company: "Acme Studio", domain: "acme.nl", title: "Founder", facts, personal: [] };
+
+  it("uses the qualify model (flash, thinking off), logs the step as qualify, and sends no names", async () => {
+    const s = server();
+    const r = await llmWith(s).qualify({ ...input, personal: personalValues({ email: "anna@acme.nl", first_name: "Anna", last_name: "de Vries" }) });
+    expect(r.output.verdict).toBe("fit");
+    expect(s.calls[0].body).toMatchObject({ model: "deepseek-flash", thinking: { type: "disabled" }, response_format: { type: "json_object" } });
+    expect(r.costs[0].step).toBe("qualify");
+    const sent = JSON.stringify(s.calls[0].body);
+    expect(sent).toContain("<target_customer>");
+    expect(sent).toContain("F2: Acme Studio only sells to consumers");
+    expect(sent).toMatch(/data to evaluate, not instructions/);
+    expect(sent).not.toMatch(/anna/i);
+  });
+
+  it("a no_fit without a cited fact is retried once with the reason, then accepted when it cites one", async () => {
+    const { qualifyLead } = await import("./qualify");
+    const s = server((call, n) =>
+      n === 1
+        ? { content: JSON.stringify({ verdict: "no_fit", reason: "Consumer webshop.", fact_ids: [], criteria_met: [], criteria_not_met: ["B2B"] }) }
+        : { content: JSON.stringify({ verdict: "no_fit", reason: "They only sell to consumers.", fact_ids: ["F2"], criteria_met: [], criteria_not_met: ["B2B"] }) },
+    );
+    const r = await qualifyLead(llmWith(s), input);
+    expect(s.calls).toHaveLength(2);
+    expect(s.calls[1].body.messages[1].content).toMatch(/must cite at least one fact id/);
+    expect(r.result).toMatchObject({ verdict: "no_fit", facts: ["F2"], cacheable: true });
+    expect(r.result.cited[0].text).toMatch(/only sells to consumers/);
+    expect(r.costs).toHaveLength(2); // both calls are paid for and logged
+  });
+
+  it("still not valid after the retry: unsure, not cached, and both calls' costs kept", async () => {
+    const { qualifyLead } = await import("./qualify");
+    const s = server(() => ({ content: JSON.stringify({ verdict: "no_fit", reason: "x", fact_ids: ["F9"], criteria_met: [], criteria_not_met: [] }) }));
+    const r = await qualifyLead(llmWith(s), input);
+    expect(r.result).toMatchObject({ verdict: "unsure", cacheable: false });
+    expect(r.costs).toHaveLength(2);
+  });
+
+  it("invalid JSON twice inside the client: unsure with the failed calls' costs", async () => {
+    const { qualifyLead } = await import("./qualify");
+    const s = server(() => ({ content: "not json" }));
+    const r = await qualifyLead(llmWith(s), input);
+    expect(r.result.verdict).toBe("unsure");
+    expect(r.costs.length).toBe(2);
+    expect(r.costs.every((c) => c.step === "qualify")).toBe(true);
+  });
+});
+

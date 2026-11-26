@@ -4,6 +4,7 @@
 import type { Pool } from "pg";
 import type { CachedResearch, EngineStore, GenerationRecord, LeadStatus } from "./store";
 import type { WriteInput } from "./llm";
+import type { Qualification } from "./qualify";
 import type { CostEntry, LeadJob, WriterOutput , Fact } from "./types";
 
 export class PgStore implements EngineStore {
@@ -12,8 +13,8 @@ export class PgStore implements EngineStore {
   async loadLeadJob(leadId: string): Promise<LeadJob | null> {
     const { rows } = await this.pool.query(
       `select l.id, l.workspace_id, l.campaign_id, l.email, l.first_name, l.last_name, l.company, l.title,
-              l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.deep_status, l.person_facts,
-              c.writer, c.depth, c.status as c_status, c.mode as c_mode,
+              l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.deep_status, l.person_facts, l.qualify_override,
+              c.writer, c.depth, c.status as c_status, c.mode as c_mode, c.target_customer,
               t.id as t_id, t.subject, t.body, t.slots, t.style_rules, t.examples
          from public.leads l
          join public.campaigns c on c.id = l.campaign_id
@@ -33,9 +34,9 @@ export class PgStore implements EngineStore {
         id: r.id, workspace_id: r.workspace_id, campaign_id: r.campaign_id, email: r.email, first_name: r.first_name,
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
         website: r.website, domain: r.domain, custom: r.custom ?? {}, status: r.status,
-        deep_status: r.deep_status ?? null, person_facts: r.person_facts ?? null,
+        deep_status: r.deep_status ?? null, person_facts: r.person_facts ?? null, qualify_override: !!r.qualify_override,
       },
-      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode },
+      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode, target: r.target_customer ?? null },
       template: r.t_id
         ? { id: r.t_id, subject: r.subject, body: r.body, slots: r.slots, style_rules: r.style_rules ?? {}, examples: r.examples ?? [] }
         : null,
@@ -144,5 +145,29 @@ export class PgStore implements EngineStore {
         [leadId, workspaceId, c.step, c.model, c.input_tokens ?? 0, c.output_tokens ?? 0, c.cached_tokens ?? 0, c.provider_units ?? 0, c.cost_usd],
       );
     }
+  }
+
+  async getQualification(campaignId: string, domain: string, targetHash: string): Promise<Qualification | null> {
+    const { rows } = await this.pool.query("select verdict from public.qualification_cache where campaign_id = $1 and domain = $2 and target_hash = $3", [
+      campaignId,
+      domain,
+      targetHash,
+    ]);
+    return (rows[0]?.verdict as Qualification | undefined) ?? null;
+  }
+
+  async cacheQualification(campaignId: string, domain: string, targetHash: string, q: Qualification) {
+    await this.pool.query(
+      `insert into public.qualification_cache (campaign_id, domain, target_hash, verdict) values ($1, $2, $3, $4)
+       on conflict (campaign_id, domain, target_hash) do update set verdict = excluded.verdict, created_at = now()`,
+      [campaignId, domain, targetHash, JSON.stringify(q)],
+    );
+  }
+
+  async setLeadQualification(leadId: string, q: Qualification) {
+    await this.pool.query(
+      "update public.leads set qualify_verdict = $2, qualify_reason = $3, qualify_facts = $4, qualify_criteria = $5 where id = $1",
+      [leadId, q.verdict, q.reason, q.facts, JSON.stringify({ ...q.criteria, cited: q.cited })],
+    );
   }
 }

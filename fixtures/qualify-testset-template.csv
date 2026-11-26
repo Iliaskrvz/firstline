@@ -1,0 +1,4 @@
+domain,company,title,target_customer,should_fit
+example-bakery.nl,Example Bakery,Owner,"Independent bakeries with their own shop in the Netherlands. Not: chains, franchises, wholesalers",yes
+example-bread-wholesale.nl,Example Bread Wholesale,Sales Manager,"Independent bakeries with their own shop in the Netherlands. Not: chains, franchises, wholesalers",no
+example-agency.com,Example Agency,Founder,"Marketing agencies that work for business clients, 5 to 50 people. Not: freelancers working alone, recruitment agencies",yes
