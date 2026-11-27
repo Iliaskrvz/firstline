@@ -17,6 +17,7 @@ import { PgStore } from "@/engine/store-pg";
 import { llmOverride, listLlmOverrides, ownUseSpendThisMonth, setLlmOverride } from "@/lib/own-use-pg";
 import { stripSlots } from "@/lib/split-test";
 import { assignSplit, markReply, setSplitTest, splitTestStats } from "@/lib/split-test-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const OWNER = "00000000-0000-4000-8000-0000000000d1";
@@ -41,7 +42,7 @@ const BODY = "Hi {{first_name}},\n\n[[opener · something specific from their we
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-ownuse-"));
-  const port = 50_000 + Math.floor(Math.random() * 2_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

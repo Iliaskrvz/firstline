@@ -12,6 +12,7 @@ import type { WebReader } from "@/engine/firecrawl";
 import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000bb";
@@ -46,7 +47,7 @@ async function lead(email: string, domain: string | null) {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-bill-"));
-  const port = 48_000 + Math.floor(Math.random() * 4_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

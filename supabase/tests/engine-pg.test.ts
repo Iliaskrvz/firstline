@@ -13,6 +13,7 @@ import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
 import { LEAD_QUEUE, leadJobId, type LeadJobData } from "@/lib/queue";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000dd";
@@ -39,7 +40,7 @@ const reader: WebReader = {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-eng-"));
-  port = 56_000 + Math.floor(Math.random() * 4_000);
+  port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

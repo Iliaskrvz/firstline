@@ -17,6 +17,7 @@ import { createPush, pollIntegrations, pushItems, runPush, type PushDeps, type T
 import { SmartleadTool } from "@/integrations/smartlead";
 import { lemlistSim, lemlistWebhook } from "@/integrations/testing/lemlist-sim";
 import { smartleadSim, smartleadWebhook } from "@/integrations/testing/smartlead-sim";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000e3";
@@ -32,7 +33,7 @@ let campaignNo = 0;
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-e2e-tools-"));
-  const port = 44_000 + Math.floor(Math.random() * 3_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

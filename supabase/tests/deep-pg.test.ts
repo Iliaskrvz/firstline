@@ -13,6 +13,7 @@ import type { WebReader } from "@/engine/firecrawl";
 import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const A = "00000000-0000-0000-0000-00000000dd01";
@@ -60,7 +61,7 @@ const deps = () => ({ store: new PgStore(pool), reader, llm: new FakeLLM(), conf
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-deep-"));
-  const port = 41_000 + Math.floor(Math.random() * 1_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

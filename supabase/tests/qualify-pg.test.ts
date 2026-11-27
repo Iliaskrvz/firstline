@@ -21,6 +21,7 @@ import { queueQualifyTest, runQueuedQualifyTest } from "@/engine/qualify-test-pg
 import { PgStore } from "@/engine/store-pg";
 import { qualificationSummary, writeAnyway } from "@/lib/qualify-pg";
 import type { TargetCustomer } from "@/lib/target-customer";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-4000-8000-0000000000af";
@@ -58,7 +59,7 @@ const FITS: TargetCustomer = { fits: "packaging design", excludes: "", strictnes
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-qualify-"));
-  const port = 46_000 + Math.floor(Math.random() * 2_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

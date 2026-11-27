@@ -14,6 +14,7 @@ import type { BatchWriter, LLM } from "@/engine/llm";
 import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000cc";
@@ -74,7 +75,7 @@ async function campaign(name: string, n: number) {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-eco-"));
-  const port = 44_000 + Math.floor(Math.random() * 4_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

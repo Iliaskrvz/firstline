@@ -9,6 +9,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { reserveForRun } from "@/billing/db";
 import { acceptInvite, activity, changeRole, invite, inviteByToken, logActivity, members, membershipsOf, removeMember, roleOf, TeamError, transferOwnership } from "@/teams/db";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const OWNER = "00000000-0000-0000-0000-00000000aa01";
@@ -39,7 +40,7 @@ const count = async (userId: string, sql: string, params: unknown[] = []) => asU
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-teams-"));
-  const port = 43_000 + Math.floor(Math.random() * 1_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startSending } from "@/sender/db";
 import { FakeMicrosoft } from "@/sender/microsoft-fake";
 import { alertDisconnected, connectOutlookInbox, disconnectOutlookInbox, outlookTick, REPLY_CHECK_MS, type OutlookDeps } from "@/sender/outlook";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-4000-8000-0000000000aa";
@@ -27,7 +28,7 @@ const advance = (ms: number) => (clock = new Date(clock.getTime() + ms));
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-outlook-"));
-  const port = 65_500 + Math.floor(Math.random() * 30);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

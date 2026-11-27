@@ -19,6 +19,7 @@ import type { WebReader } from "@/engine/firecrawl";
 import { FakeLLM } from "@/engine/llm-fake";
 import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000a9";
@@ -77,7 +78,7 @@ async function credits() {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-api-"));
-  const port = 40_000 + Math.floor(Math.random() * 3_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

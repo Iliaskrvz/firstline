@@ -10,6 +10,7 @@ import { jobContext, PRIORITY } from "@/engine/job-context";
 import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, PREVIEW_EXTRA, releaseWorkspaceSlot, workspaceLimit } from "@/engine/limiter-pg";
 import { concurrencyLevel } from "@/lib/concurrency";
 import { firecrawlBudget, llmBudget, newAlertLevel } from "@/billing/budgets";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-00000000bb01";
@@ -21,7 +22,7 @@ let ws: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-limits-"));
-  const port = 42_000 + Math.floor(Math.random() * 1_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

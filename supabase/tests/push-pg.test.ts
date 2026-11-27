@@ -28,6 +28,7 @@ import {
 } from "@/integrations/push-pg";
 import { instantlySim } from "@/integrations/testing/instantly-sim";
 import { ToolError, type SendingTool } from "@/integrations/types";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000f7";
@@ -78,7 +79,7 @@ const asPush = (r: { push: PushRow } | { error: string }) => {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-push-"));
-  const port = 56_000 + Math.floor(Math.random() * 4_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

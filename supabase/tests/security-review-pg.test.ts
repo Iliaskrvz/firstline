@@ -18,6 +18,7 @@ import { processLead } from "@/engine/pipeline";
 import { PgStore } from "@/engine/store-pg";
 import { isPublicUrlHost } from "@/lib/public-host";
 import { writeAnyway } from "@/lib/qualify-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-4000-8000-0000000000c1";
@@ -40,7 +41,7 @@ const deps = () => ({ store: new PgStore(pool), reader, llm: new FakeLLM(), conf
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-review-"));
-  const port = 48_000 + Math.floor(Math.random() * 2_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

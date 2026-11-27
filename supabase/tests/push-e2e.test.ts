@@ -17,6 +17,7 @@ import { defaultVariableMap } from "@/integrations/fields";
 import { InstantlyTool } from "@/integrations/instantly";
 import { createPush, pollIntegrations, pushItems, runPush, type PushDeps, type ToolFactory } from "@/integrations/push-pg";
 import { instantlySim, instantlyWebhook } from "@/integrations/testing/instantly-sim";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000e2";
@@ -30,7 +31,7 @@ let ws: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-e2e-"));
-  const port = 48_000 + Math.floor(Math.random() * 3_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

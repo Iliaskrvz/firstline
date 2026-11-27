@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DemoResult } from "@/engine/demo";
 import { admitDemo, cachedDemo, finishDemo } from "@/engine/demo-pg";
 import { admitContact, markContactNotified, purgeContacts, recentContacts } from "@/lib/contact";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 let server: EmbeddedPostgres;
@@ -17,7 +18,7 @@ let dir: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-contact-"));
-  const port = 65_000 + Math.floor(Math.random() * 500);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

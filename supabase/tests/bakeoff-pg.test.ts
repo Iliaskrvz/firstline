@@ -12,6 +12,7 @@ import { EN, NL, reader, scripted } from "@/engine/bakeoff.fixtures";
 import { blindTally, getBakeoff, listBakeoffs, queueBakeoff, runQueuedBakeoff, saveBlindPick } from "@/engine/bakeoff-pg";
 import { engineConfig } from "@/engine/config";
 import { saveTestSet } from "@/engine/lab-pg";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 let server: EmbeddedPostgres;
@@ -20,7 +21,7 @@ let dir: string;
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-bakeoff-"));
-  const port = 61_000 + Math.floor(Math.random() * 2_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

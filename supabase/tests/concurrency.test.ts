@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000cc";
@@ -56,7 +57,7 @@ async function inTx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-pg-"));
-  const port = 55_000 + Math.floor(Math.random() * 5_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();

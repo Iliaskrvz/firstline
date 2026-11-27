@@ -19,6 +19,7 @@ import {
   setInboxPaused,
   startSending,
 } from "@/sender/db";
+import { freePort } from "./free-port";
 
 const root = path.resolve(__dirname, "..");
 const USER = "00000000-0000-0000-0000-0000000000ee";
@@ -53,7 +54,7 @@ async function campaign(name: string, leads: [email: string, domain: string | nu
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "firstline-send-"));
-  const port = 52_000 + Math.floor(Math.random() * 4_000);
+  const port = await freePort();
   server = new EmbeddedPostgres({ databaseDir: dir, user: "postgres", password: "test", port, persistent: false, onLog: () => {} });
   await server.initialise();
   await server.start();
