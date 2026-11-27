@@ -17,6 +17,10 @@ import { firecrawlBudget, llmBudget } from "@/billing/budgets";
 import { createFirecrawl } from "@/engine/firecrawl";
 import { serverPool } from "@/server/db";
 import { SenderSwitch } from "./sender-switch";
+import { OwnUseSwitch } from "./own-use-switch";
+import { listLlmOverrides, ownUseSpendThisMonth } from "@/lib/own-use-pg";
+import { ownUseCapUsd } from "@/lib/own-use";
+import { splitTestStats } from "@/lib/split-test-pg";
 import { ConcurrencyField } from "./concurrency-field";
 import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
 
@@ -51,7 +55,7 @@ async function Admin() {
   const pool = serverPool();
   const fcKey = process.env.FIRECRAWL_API_KEY?.trim();
   const config = engineConfig();
-  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts, funnel, freeSkips, noFitCampaigns] = await Promise.all([
+  const [a, fcBudget, anBudget, refunds, breakdown, balance, demo, contacts, funnel, freeSkips, noFitCampaigns, ownOverrides, ownSpendUsd, splits] = await Promise.all([
     loadAdmin(pool),
     firecrawlBudget(pool, fcKey ? await createFirecrawl(fcKey).creditUsage!().catch(() => null) : null),
     llmBudget(pool, process.env, new Date(), config.llmProvider),
@@ -63,7 +67,13 @@ async function Admin() {
     loadFunnel(pool, 30),
     loadFreeSkips(pool, 30),
     loadNoFitCampaigns(pool),
+    listLlmOverrides(pool),
+    ownUseSpendThisMonth(pool),
+    splitTestStats(pool),
   ]);
+  const ownIds = new Set(ownOverrides.map((o) => o.workspace_id));
+  const ownCap = ownUseCapUsd();
+  const ownKey = !!process.env.ANTHROPIC_API_KEY?.trim();
   const demoToday = demo[0];
   const demoWeekUsd = demo.reduce((s, d) => s + d.costUsd, 0);
   const threshold = balanceThreshold();
@@ -71,6 +81,23 @@ async function Admin() {
   const flagged = a.workspaces.filter((w) => (w.personalShare ?? 0) > 0.5 && w.leads >= 200);
   return (
     <div className="space-y-6">
+      <Card className="space-y-2">
+        <h2 className="text-base font-semibold text-slate-900">Own use: real Claude for your own workspace</h2>
+        <p className="text-sm text-slate-700">
+          {ownOverrides.length ? `On for: ${ownOverrides.map((o) => o.name).join(", ")}.` : "Off for every workspace."} Everyone else stays on the server&apos;s provider ({config.llmProvider}
+          {config.llmProvider === "fake" ? ": test output" : ""}).
+        </p>
+        <p className="text-sm text-slate-700">
+          ANTHROPIC_API_KEY: {ownKey ? "set" : <strong className="text-rose-700">missing</strong>} · OWN_USE_MONTHLY_CAP_USD:{" "}
+          {ownCap == null ? <strong className="text-rose-700">not set (own use stays blocked)</strong> : `$${ownCap}`} · this month: ${ownSpendUsd.toFixed(2)}
+          {ownCap != null && ownSpendUsd >= ownCap ? <strong className="text-rose-700"> · cap reached, leads stop</strong> : ""}
+        </p>
+        <p className="text-xs text-slate-500">
+          That workspace&apos;s costs (AI and website reading) count as Lab/own use, never in the customer margin. Without a key or a cap, or with the cap reached, its leads stop
+          with the reason; they never get test output. Switch a workspace on in the list below.
+        </p>
+      </Card>
+
       <Card className="space-y-3">
         <h2 className="text-base font-semibold text-slate-900">Provider budgets this month</h2>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -233,7 +260,7 @@ async function Admin() {
                   <tr key={`${r.step}-${r.model}-${r.source}`}>
                     <td className="px-6 py-2 text-slate-900">{r.step}</td>
                     <td className="px-3 py-2 text-slate-600">{r.model}</td>
-                    <td className="px-3 py-2">{r.source === "lab" ? <Badge tone="amber">Lab</Badge> : <Badge>Customers</Badge>}</td>
+                    <td className="px-3 py-2">{r.source === "lab" ? <Badge tone="amber">Lab/own use</Badge> : r.source === "demo" ? <Badge tone="gray">Demo</Badge> : <Badge>Customers</Badge>}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{n(r.calls)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-600">
                       {n(Math.round(r.inputTokens))} / {n(Math.round(r.outputTokens))}
@@ -250,6 +277,53 @@ async function Admin() {
           Not a fit (free skips): {n(freeSkips.leads)} leads, ${freeSkips.costUsd.toFixed(freeSkips.costUsd < 1 ? 4 : 2)}
           <span className="text-xs text-slate-500"> · all costs of leads the fit check skipped (research, extraction and the check itself), already in the rows above</span>
         </p>
+      </Card>
+
+      <Card className="overflow-hidden p-0">
+        <div className="px-6 py-4">
+          <h2 className="text-base font-semibold text-slate-900">Split tests: plain copy vs FirstLine</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Per half: leads contacted, leads that replied, and replies you marked positive on the Replies page. Same inboxes, same schedule. Small numbers swing a lot: wait
+            for at least 100 contacted per half before reading much into a difference.
+          </p>
+        </div>
+        {splits.length === 0 ? (
+          <p className="px-6 pb-6 text-sm text-slate-500">No split tests yet. Turn one on in a campaign&apos;s Set up step (admins only).</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-6 py-2 font-medium">Campaign</th>
+                  <th className="px-3 py-2 font-medium">Half</th>
+                  <th className="px-3 py-2 text-right font-medium">Contacted</th>
+                  <th className="px-3 py-2 text-right font-medium">Replied</th>
+                  <th className="px-3 py-2 text-right font-medium">Reply rate</th>
+                  <th className="px-3 py-2 text-right font-medium">Positive</th>
+                  <th className="px-6 py-2 text-right font-medium">Positive rate</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {splits.flatMap((t) =>
+                  (["holdout", "firstline"] as const).map((half) => {
+                    const h = t[half];
+                    return (
+                      <tr key={`${t.campaignId}-${half}`}>
+                        <td className="px-6 py-2 text-slate-900">{half === "holdout" ? `${t.name} (${t.workspace})` : ""}</td>
+                        <td className="px-3 py-2">{half === "holdout" ? <Badge tone="gray">Plain copy</Badge> : <Badge tone="green">FirstLine</Badge>}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{n(h.contacted)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{n(h.replied)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{h.replyRate == null ? "–" : `${(h.replyRate * 100).toFixed(1)}%`}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{n(h.positive)}</td>
+                        <td className="px-6 py-2 text-right tabular-nums">{h.positiveRate == null ? "–" : `${(h.positiveRate * 100).toFixed(1)}%`}</td>
+                      </tr>
+                    );
+                  }),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
 
       {noFitCampaigns.length > 0 && (
@@ -353,6 +427,8 @@ async function Admin() {
                 <ConcurrencyField workspaceId={w.id} value={w.concurrencyLimit} automatic={concurrencyLevel(w.purchased)} max={MAX_WORKSPACE_CONCURRENCY} />
                 {w.senderDisabled && <Badge tone="red">sending off</Badge>}
                 <SenderSwitch workspaceId={w.id} disabled={w.senderDisabled} />
+                {ownIds.has(w.id) && <Badge tone="amber">own use: Claude</Badge>}
+                <OwnUseSwitch workspaceId={w.id} on={ownIds.has(w.id)} />
               </span>
             </li>
           ))}

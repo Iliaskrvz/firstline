@@ -26,9 +26,9 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
     pool.query(
       `with d as (select generate_series(current_date - 29, current_date, interval '1 day')::date as day)
        select to_char(d.day, 'YYYY-MM-DD') as day,
-              coalesce((select sum(amount) from public.credit_ledger x where x.type = 'capture' and x.created_at::date = d.day), 0)::int credits_used,
-              coalesce((select count(*) from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at::date = d.day), 0)::int emails,
-              coalesce((select sum(cost_usd) from public.usage_costs u where u.created_at::date = d.day and u.bakeoff_run_id is null and u.qualify_test_run_id is null and u.demo_run_id is null), 0)::float cost_usd
+              coalesce((select sum(amount) from public.credit_ledger x where x.type = 'capture' and x.created_at::date = d.day and x.workspace_id not in (select workspace_id from public.workspace_llm_overrides)), 0)::int credits_used,
+              coalesce((select count(*) from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at::date = d.day and g.workspace_id not in (select workspace_id from public.workspace_llm_overrides)), 0)::int emails,
+              coalesce((select sum(cost_usd) from public.usage_costs u where u.created_at::date = d.day and u.bakeoff_run_id is null and u.qualify_test_run_id is null and u.demo_run_id is null and not u.own_use), 0)::float cost_usd
          from d order by d.day desc`,
     ),
     pool.query(
@@ -53,10 +53,11 @@ export async function loadAdmin(pool: pg.Pool): Promise<{ perCreditEur: number; 
       `select (created_at > now() - interval '7 days') recent,
               coalesce(sum(cost_usd), 0)::float cost_usd,
               0 emails
-         from public.usage_costs where created_at > now() - interval '37 days' and bakeoff_run_id is null and qualify_test_run_id is null and demo_run_id is null group by 1
+         from public.usage_costs where created_at > now() - interval '37 days' and bakeoff_run_id is null and qualify_test_run_id is null and demo_run_id is null and not own_use group by 1
        union all
        select (g.created_at > now() - interval '7 days'), 0, count(*)::int
-         from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at > now() - interval '37 days' group by 1`,
+         from public.generations g where g.step_no = 1 and not g.is_preview and g.checks->>'status' = 'passed' and g.created_at > now() - interval '37 days'
+          and g.workspace_id not in (select workspace_id from public.workspace_llm_overrides) group by 1`,
     ),
   ]);
   const perCreditEur = revenuePerCreditEur(purchases);
@@ -117,6 +118,7 @@ export async function loadRefunds(pool: pg.Pool): Promise<RefundRow[]> {
   }));
 }
 
+/** "lab": Quality Lab, bake-offs, qualification tests and own use (the owner's workspace on Claude). */
 export type CostBreakdownRow = { step: string; model: string; source: "customers" | "lab" | "demo"; calls: number; inputTokens: number; outputTokens: number; costUsd: number; share: number };
 
 /**
@@ -125,7 +127,7 @@ export type CostBreakdownRow = { step: string; model: string; source: "customers
  */
 export async function loadCostBreakdown(pool: pg.Pool, days = 30): Promise<CostBreakdownRow[]> {
   const { rows } = await pool.query<{ step: string; model: string | null; lab: boolean; demo: boolean; calls: number; input_tokens: number; output_tokens: number; cost_usd: number }>(
-    `select step, model, (bakeoff_run_id is not null or qualify_test_run_id is not null) lab, (demo_run_id is not null) demo, count(*)::int calls,
+    `select step, model, (bakeoff_run_id is not null or qualify_test_run_id is not null or own_use) lab, (demo_run_id is not null) demo, count(*)::int calls,
             coalesce(sum(input_tokens), 0)::float input_tokens, coalesce(sum(output_tokens), 0)::float output_tokens, coalesce(sum(cost_usd), 0)::float cost_usd
        from public.usage_costs where created_at > now() - make_interval(days => $1)
       group by 1, 2, 3, 4 order by cost_usd desc`,

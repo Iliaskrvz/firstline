@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { contactNotification, parseContact } from "./contact";
 import { proofMode, visibleProof } from "./proof";
-import { OWN_OUTREACH } from "@/content/proof";
+import { FOUNDER, initials, OWN_OUTREACH } from "@/content/proof";
 
 describe("agencies contact form", () => {
   const ok = { name: " Ana  de Vries ", email: "Ana@Agency.example", company: "Agency", volume: "Under 2,000", message: "Line 1\r\nLine 2" };
@@ -57,5 +57,12 @@ describe("SHOW_PROOF", () => {
     expect(visibleProof([OWN_OUTREACH], "off")).toEqual([]);
     expect(visibleProof([OWN_OUTREACH], "on")).toEqual([]);
     expect(visibleProof([{ ...OWN_OUTREACH, placeholder: false }], "on")).toHaveLength(1);
+  });
+
+  it("founder line: hidden until real; initials for the avatar", () => {
+    expect(visibleProof([FOUNDER], "on")).toEqual([]);
+    expect(initials("Anna de Vries")).toBe("AV");
+    expect(initials("Tom")).toBe("T");
+    expect(initials("  ")).toBe("");
   });
 });

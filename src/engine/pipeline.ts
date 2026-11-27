@@ -14,6 +14,7 @@ import type { WebReader } from "./firecrawl";
 import { detectLanguage } from "./language";
 import { LLMInvalidOutputError, LLMRefusalError, LLMUnavailableError, type LLM } from "./llm";
 import { personalValues } from "./privacy";
+import { renderPlain, stripSlots } from "@/lib/split-test";
 import { decide, NO_FACTS_REASON, qualifyLead, skipDetail, targetActive, targetHash, unsure, type Qualification } from "./qualify";
 import type { Gate } from "./limiter";
 import { findPersonFacts } from "./deep";
@@ -168,7 +169,9 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
   // --- Lead qualification (Part B): only when the campaign describes its target customer and the
   // customer didn't press "write anyway" for this lead. ----------------------------------------
   const campaignTarget = job.campaign.target;
-  const target = !lead.qualify_override && targetActive(campaignTarget) ? campaignTarget : null;
+  // A split test compares FirstLine with the plain copy on the same leads, so the fit check is off
+  // there: skipping non-fits in one half only would make the two reply rates incomparable.
+  const target = !lead.qualify_override && !job.campaign.split && targetActive(campaignTarget) ? campaignTarget : null;
   let qualification: Qualification | null = null;
   /** Not a fit (or unsure on strict): no email, 0 credits, the reservation goes back. */
   const skipForFit = async (q: Qualification) => {
@@ -197,6 +200,26 @@ export async function processLead(leadId: string, deps: PipelineDeps, opts: { pr
     await store.setLeadStatus(lead.id, "fallback", { detail: FALLBACK_REASONS[reason], confidence: "low" });
     return { outcome: "fallback" as const, detail: FALLBACK_REASONS[reason], costUsd: totalCost(spent) };
   };
+
+  // --- Split test, holdout half: the plain copy, as written by the customer. No research, no AI,
+  // no credits. Personalised follow-up steps are sent without their [[slots]].
+  if (lead.split_variant === "holdout" && job.campaign.split) {
+    const plain = renderPlain(job.campaign.split, vars);
+    await store.saveGeneration({
+      lead_id: lead.id, workspace_id: lead.workspace_id, plan: null, slot_outputs: {}, full_email: plain.body, subject: plain.subject, facts_used: [],
+      skill_version: null, checks: { status: "holdout" }, judge_scores: {}, research: { status: "holdout" }, provider: "plain", is_preview: !!opts.preview, attempts: 0,
+    });
+    for (const step of job.followUps ?? []) {
+      const body = renderPlain({ plain_subject: "", plain_body: stripSlots(step.body) }, vars).body;
+      await store.saveGeneration({
+        lead_id: lead.id, workspace_id: lead.workspace_id, step_no: step.step_no, plan: null, slot_outputs: {}, full_email: body, subject: "", facts_used: [],
+        skill_version: null, checks: { status: "holdout" }, judge_scores: {}, research: {}, provider: "plain", is_preview: !!opts.preview, attempts: 0,
+      });
+    }
+    await settle(0);
+    await store.setLeadStatus(lead.id, "done", { detail: "Holdout: your plain copy (split test)", confidence: null });
+    return { outcome: "done", detail: "holdout", costUsd: 0 };
+  }
 
   await store.setLeadStatus(lead.id, "researching", { detail: null });
 

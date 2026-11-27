@@ -131,6 +131,19 @@ and fact extraction, before Deep research and writing, the `qualify` step decide
 - Lab: a qualification test from hand-labelled leads (`fixtures/qualify-testset-template.csv`), with accuracy, the false no_fit
   rate and the cost per lead. Hard budget $5; it starts only after an admin approves the spend on /admin/lab.
 
+### Own use and split tests (owner's own outreach)
+
+- **Own use:** on /admin an admin switches one workspace (the owner's) to real Claude while everyone else stays on
+  `LLM_PROVIDER`. Needs `ANTHROPIC_API_KEY` and `OWN_USE_MONTHLY_CAP_USD`; without either, or with the cap reached, that
+  workspace's leads stop with the reason (they never get test output). Its costs are flagged `own_use` and shown as
+  Lab/own use, outside the customer margin. The switch lives in the server-only `workspace_llm_overrides` table.
+- **Split test (admins, campaign page → Set up):** 50/50. When the run starts, half the leads become the holdout and get
+  the plain copy (the template without its `[[slots]]`, editable), free and without research or AI; the other half get
+  FirstLine. Same inboxes, same schedule. The fit check is off in split tests so both halves reach the same leads.
+- **Results:** /admin → "Split tests" shows per half the leads contacted, replied and marked positive. Mark replies as
+  Positive / Not positive on the Replies page (FirstLine never reads replies). Numbers come from outcome rows, so they
+  survive the 30-day lead deletion.
+
 ## Models and costs
 
 - **One file:** `src/config/models.ts` holds, per provider, the model per step, the price tables (DeepSeek peak/off-peak, Anthropic; checked against both pricing pages on 2026-11-13), DeepSeek's peak hours and holidays, and the bake-off candidates. No model names anywhere else.

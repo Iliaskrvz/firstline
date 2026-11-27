@@ -14,6 +14,9 @@ import { combine, staticCheck, summarise, type EmailReason } from "@/lib/email-c
 import { applyStaticChecks, excludeRisky, includeExcluded } from "@/lib/email-check-pg";
 import { endCampaign } from "@/billing/retention";
 import { writeAnyway } from "@/lib/qualify-pg";
+import { assignSplit, setSplitTest } from "@/lib/split-test-pg";
+import { stripSlots } from "@/lib/split-test";
+import { isAdmin } from "@/lib/admin";
 import { normaliseTarget, TargetCustomerSchema } from "@/lib/target-customer";
 import { hasErrors, parseTemplate } from "@/lib/template";
 import { enqueueLeads, queueConfigured } from "@/server/queue";
@@ -279,8 +282,10 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean, mo
   const pool = serverPool();
   // A stopped run can be started again: its skipped leads come back.
   await pool.query("update public.leads set status = 'queued', status_detail = null where campaign_id = $1 and status = 'skipped' and status_detail = 'Run stopped'", [campaignId]);
-  const { rows: leads } = await pool.query<{ id: string; status: string; domain: string | null }>(
-    "select id, status, domain from public.leads where campaign_id = $1 and workspace_id = $2 order by created_at",
+  // Split test (owner's own outreach): every lead gets its half before anything runs.
+  await assignSplit(pool, campaignId);
+  const { rows: leads } = await pool.query<{ id: string; status: string; domain: string | null; split_variant: string | null }>(
+    "select id, status, domain, split_variant from public.leads where campaign_id = $1 and workspace_id = $2 order by created_at",
     [campaignId, workspace.id],
   );
   if (!leads.length) return { error: "This campaign has no leads." };
@@ -294,7 +299,7 @@ export async function runCampaign(campaignId: string, sendFallbacks: boolean, mo
     .eq("kind", "personalised");
   // Deep reserves its extra credit only while Deep is switched on; it's charged only when used.
   const perLead = creditsPerLead({ deep: !!(campaign.depth as Depth | null)?.deep && deepEnabled() }) + (personalised ?? 0);
-  const reserved = await reserveForRun(pool, { workspaceId: workspace.id, leadIds: todo.filter((l) => l.domain).map((l) => l.id), perLead });
+  const reserved = await reserveForRun(pool, { workspaceId: workspace.id, leadIds: todo.filter((l) => l.domain && l.split_variant !== "holdout").map((l) => l.id), perLead });
   if (!reserved.ok) {
     return { error: `This run needs up to ${n(reserved.need)} credits and you have ${n(reserved.available)}. Buy credits first (Credits page).` };
   }
@@ -433,4 +438,32 @@ export async function endCampaignAction(campaignId: string): Promise<{ error: st
   revalidatePath(`/campaigns/${campaignId}`);
   revalidatePath("/campaigns");
   revalidatePath("/credits");
+}
+
+/**
+ * Admin only (owner's own outreach): a 50/50 split test. Half the leads get the plain copy (holdout),
+ * half get FirstLine, from the same inboxes on the same schedule. Only before the campaign runs.
+ */
+export async function updateSplitTest(campaignId: string, input: { enabled: boolean; plainSubject?: string; plainBody?: string }): Promise<{ error: string } | { ok: true }> {
+  if (!z.uuid().safeParse(campaignId).success) return { error: "Invalid campaign." };
+  const w = await requireWorkspace();
+  if (!isAdmin(w.user.email)) return { error: "Only an admin can set up a split test." };
+  if (!queueConfigured()) return { error: "Needs the database connection (DATABASE_URL)." };
+  const pool = serverPool();
+  const { rows } = await pool.query<{ subject: string; body: string }>(
+    "select t.subject, t.body from public.campaigns c join public.templates t on t.id = c.template_id where c.id = $1 and c.workspace_id = $2",
+    [campaignId, w.workspace.id],
+  );
+  if (input.enabled && !rows[0]) return { error: "Pick a template first: the plain copy starts from it." };
+  const plainBody = (input.plainBody ?? "").trim() || (rows[0] ? stripSlots(rows[0].body) : "");
+  if (input.enabled && plainBody.length < 20) return { error: "The plain copy is empty." };
+  if (plainBody.length > 10_000 || (input.plainSubject ?? "").length > 300) return { error: "The plain copy is too long." };
+  const r = await setSplitTest(pool, {
+    campaignId,
+    split: input.enabled ? { share: 0.5, plain_subject: (input.plainSubject ?? "").trim() || stripSlots(rows[0]?.subject ?? ""), plain_body: plainBody } : null,
+  });
+  if ("error" in r) return r;
+  await logCampaignAction(w, input.enabled ? "campaign.split_test_on" : "campaign.split_test_off", campaignId, {});
+  revalidatePath(`/campaigns/${campaignId}`);
+  return { ok: true };
 }

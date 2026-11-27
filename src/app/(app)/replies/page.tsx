@@ -5,6 +5,7 @@ import { Badge, Card, PageHeader, Skeleton, Stat } from "@/components/ui";
 import { requireWorkspace } from "@/lib/auth";
 import { formatDate, n } from "@/lib/format";
 import { RemoveButton } from "./remove-button";
+import { PositiveMark } from "./positive-mark";
 
 export const metadata: Metadata = { title: "Replies" };
 
@@ -21,14 +22,14 @@ export default function RepliesPage() {
   );
 }
 
-type Send = { id: string; lead_id: string; campaign_id: string; inbox_id: string | null; step_no: number; status: string; status_detail: string | null; gmail_thread_id: string | null; replied_at: string | null; bounced_at: string | null; sent_at: string | null };
+type Send = { id: string; lead_id: string; campaign_id: string; inbox_id: string | null; step_no: number; status: string; status_detail: string | null; gmail_thread_id: string | null; replied_at: string | null; bounced_at: string | null; sent_at: string | null; reply_positive: boolean | null };
 
 async function Replies() {
   const { supabase, workspace } = await requireWorkspace();
   const [{ data: sendRows }, { data: suppressed }, { data: inboxRows }, { data: campaignRows }] = await Promise.all([
     supabase
       .from("sends")
-      .select("id, lead_id, campaign_id, inbox_id, step_no, status, status_detail, gmail_thread_id, replied_at, bounced_at, sent_at")
+      .select("id, lead_id, campaign_id, inbox_id, step_no, status, status_detail, gmail_thread_id, replied_at, bounced_at, sent_at, reply_positive")
       .not("sent_at", "is", null)
       .order("sent_at", { ascending: false })
       .limit(5000),
@@ -98,7 +99,8 @@ async function Replies() {
                         <Badge tone={s.status === "replied" ? (s.status_detail ? "amber" : "green") : "red"}>{s.status_detail ?? (s.status === "replied" ? "Replied" : "Bounced")}</Badge>
                       </td>
                       <td className="px-6 py-2.5 text-slate-600">{formatDate((s.replied_at ?? s.bounced_at ?? s.sent_at)!)}</td>
-                      <td className="px-6 py-2.5 text-right">
+                      <td className="space-y-1 px-6 py-2.5 text-right">
+                        {s.status === "replied" && !s.status_detail && <PositiveMark sendId={s.id} value={s.reply_positive} />}
                         {s.gmail_thread_id && inbox && (
                           <a
                             className="text-xs font-medium text-brand-700 hover:underline"

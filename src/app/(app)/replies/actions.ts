@@ -16,3 +16,18 @@ export async function removeSuppression(entry: { email: string | null; domain: s
   if (error) return { error: error.message };
   revalidatePath("/replies");
 }
+
+/**
+ * Mark a reply as positive (interested), not positive, or unmarked. FirstLine never reads replies;
+ * you read them in your inbox and mark them here, so split tests can compare positive replies.
+ */
+export async function markReplyPositive(sendId: string, positive: boolean | null): Promise<{ error: string } | undefined> {
+  if (!z.uuid().safeParse(sendId).success || ![true, false, null].includes(positive)) return { error: "Invalid reply." };
+  const { workspace } = await requireWorkspace();
+  const { serverPool } = await import("@/server/db");
+  const { markReply } = await import("@/lib/split-test-pg");
+  const ok = await markReply(serverPool(), { workspaceId: workspace.id, sendId, positive });
+  if (!ok) return { error: "Reply not found." };
+  revalidatePath("/replies");
+  revalidatePath("/admin");
+}

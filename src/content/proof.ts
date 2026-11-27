@@ -36,6 +36,32 @@ export const CASE_STUDIES: CaseStudy[] = [
 ];
 
 /**
+ * The founder line near the end of the homepage (review C4). Hidden until placeholder is false and
+ * SHOW_PROOF is on; until then the homepage keeps its short team line. Without a photo an initials
+ * avatar is shown. Photo: a square image in public/proof/ (e.g. "/proof/founder.jpg").
+ */
+export type Founder = { placeholder: boolean; line: string; name: string; role: string; photo: string | null };
+
+export const FOUNDER: Founder = {
+  placeholder: true,
+  /** One or two sentences in your own words, e.g. about the outreach you run. */
+  line: "",
+  /** As you want it shown, e.g. "First Last". The avatar uses its initials. */
+  name: "",
+  role: "Founder of FirstLine",
+  photo: null,
+};
+
+/** "Anna de Vries" → "AV": first and last word, ignoring lowercase particles like "de" or "van". */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter((w) => w && w[0] === w[0].toUpperCase());
+  if (!words.length) return "";
+  const first = words[0][0];
+  const last = words.length > 1 ? words[words.length - 1][0] : "";
+  return (first + last).toUpperCase();
+}
+
+/**
  * Results from the owner's own outreach with FirstLine (owner's request 2026-11-26). Hidden until
  * SHOW_PROOF=1 AND placeholder is false. Fill in real numbers only: emails actually sent in the period,
  * and reply rates measured the same way before and after (e.g. replies / delivered emails).

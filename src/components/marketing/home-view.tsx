@@ -10,7 +10,8 @@ import { Check, Cite, Eyebrow, H2, MarketingShell, WindowDots } from "@/componen
 import { buttonClass } from "@/components/ui";
 import { COMPETITORS, checkedOnLabel } from "@/content/competitors";
 import type { HomeCopy } from "@/content/home";
-import { CASE_STUDIES, DEMO_VIDEO, OWN_OUTREACH } from "@/content/proof";
+import { CASE_STUDIES, DEMO_VIDEO, FOUNDER, OWN_OUTREACH } from "@/content/proof";
+import { FounderNote } from "./founder-note";
 import { OwnResultsCard } from "./own-results";
 import { refundOffer } from "@/content/refund";
 import { fmtEuro, fmtInt, type Locale } from "@/content/site";
@@ -236,6 +237,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
   const demo = demoMode();
   const cases = visibleProof(CASE_STUDIES);
   const own = visibleProof([OWN_OUTREACH]);
+  const founder = visibleProof([FOUNDER])[0];
   const signup = "/signup";
   // Section labels count up ([1], [2], …), skipping sections that are switched off.
   let section = 0;
@@ -601,7 +603,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
         </div>
         <div className="mx-auto mt-10 max-w-2xl space-y-2 text-center text-[15px] text-slate-700">
           <p>{t.honestLine}</p>
-          <p className="text-slate-600">{t.founderNote}</p>
+          {founder ? <FounderNote f={founder} /> : <p className="text-slate-600">{t.founderNote}</p>}
         </div>
       </section>
     </MarketingShell>

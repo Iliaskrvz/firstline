@@ -63,6 +63,8 @@ export type LeadJob = {
     person_facts?: Fact[] | null;
     /** "Write anyway": the customer overrode a no_fit / unsure verdict, so qualification is skipped. */
     qualify_override?: boolean;
+    /** Split test: "holdout" gets the plain copy (no research, no AI, no credits). */
+    split_variant?: "holdout" | "firstline" | null;
   };
   campaign: {
     id: string;
@@ -72,6 +74,8 @@ export type LeadJob = {
     mode?: "now" | "economy";
     /** Lead qualification (Part B); null or empty = off. */
     target?: import("./llm").TargetCustomer | null;
+    /** Split test (owner's own outreach): the plain copy the holdout half gets. */
+    split?: import("@/lib/split-test").SplitTest | null;
   };
   template: { id: string; subject: string; body: string; slots: Slot[]; style_rules: StyleRules; examples: unknown[] } | null;
   /** Personalised follow-up steps (2, 3, …), written right after step 1 from the same facts. */

@@ -9,7 +9,7 @@ import { updateTargetCustomer, writeLeadAnyway } from "../actions";
  * "Target customer": before writing, a fast AI model checks each company against this text. Not a fit
  * = no email, no credits. Empty = off.
  */
-export function TargetCustomerSetting({ campaignId, target, locked }: { campaignId: string; target: TargetCustomer | null; locked: boolean }) {
+export function TargetCustomerSetting({ campaignId, target, locked, splitOn = false }: { campaignId: string; target: TargetCustomer | null; locked: boolean; splitOn?: boolean }) {
   const [fits, setFits] = useState(target?.fits ?? "");
   const [excludes, setExcludes] = useState(target?.excludes ?? "");
   const [strictness, setStrictness] = useState<Strictness>(target?.strictness ?? "normal");
@@ -33,7 +33,7 @@ export function TargetCustomerSetting({ campaignId, target, locked }: { campaign
     <div>
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-medium text-slate-700">Target customer</div>
-        <span className={on ? "text-xs font-medium text-brand-700" : "text-xs text-slate-500"}>{on ? "Fit check on" : "Off"}</span>
+        <span className={on && !splitOn ? "text-xs font-medium text-brand-700" : "text-xs text-slate-500"}>{splitOn ? "Off during the split test" : on ? "Fit check on" : "Off"}</span>
       </div>
       <p className="mt-1 text-xs text-slate-500">
         Before writing, AI checks each company&apos;s website against this. Not a fit = no email and no credits. Leave empty to write to everyone.

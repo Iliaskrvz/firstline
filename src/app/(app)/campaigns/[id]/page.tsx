@@ -33,11 +33,14 @@ import { REASON_LABEL, type EmailReason } from "@/lib/email-check-labels";
 import { noFitWarning, VERDICT_LABEL, verdictCounts, type Verdict } from "@/lib/target-customer";
 import { TargetCustomerSetting, WriteAnywayButton } from "./target-customer";
 import { CampaignSteps } from "./campaign-steps";
+import { SplitTestSetting } from "./split-test-setting";
+import { stripSlots } from "@/lib/split-test";
+import { isAdmin } from "@/lib/admin";
 import { campaignSteps } from "@/lib/campaign-steps";
 
 export const metadata: Metadata = { title: "Campaign" };
 
-const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, email_status, email_reason, email_suggestion, qualify_verdict, qualify_reason, qualify_override, preview_rank";
+const LEAD_COLS = "id, email, first_name, last_name, company, title, linkedin_headline, website, domain, custom, status, status_detail, email_status, email_reason, email_suggestion, qualify_verdict, qualify_reason, qualify_override, preview_rank, split_variant";
 const FIT_FILTERS = ["fit", "no_fit", "unsure"] as const;
 const IN_FLIGHT = new Set(["queued", "researching", "writing"]);
 const SEND_TONE = { queued: "gray", paused: "amber", sent: "indigo", replied: "green", bounced: "red", stopped: "gray" } as const;
@@ -67,7 +70,8 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
   const fitParam = (await searchParams).fit;
   const fitFilter = FIT_FILTERS.find((f) => f === fitParam) ?? null;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const { supabase, workspace } = await requireWorkspace();
+  const { supabase, workspace, user } = await requireWorkspace();
+  const admin = isAdmin(user.email);
 
   const [
     { data: campaign },
@@ -91,7 +95,7 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("domain", "is", null),
     supabase.from("templates").select("id, name, subject, body").eq("workspace_id", workspace.id).eq("source", "app").order("updated_at", { ascending: false }),
     supabase.from("leads").select("id", { count: "exact", head: true }).eq("campaign_id", id).not("preview_rank", "is", null),
-    supabase.from("leads").select("id, status, status_detail, domain, qualify_verdict, qualify_override").eq("campaign_id", id).limit(10_000),
+    supabase.from("leads").select("id, status, status_detail, domain, qualify_verdict, qualify_override, split_variant").eq("campaign_id", id).limit(10_000),
     supabase.from("sends").select("id, lead_id, step_no, status, status_detail").eq("campaign_id", id).limit(50_000),
     supabase.from("inboxes").select("id, email, type, health").eq("workspace_id", workspace.id).order("created_at"),
     supabase.from("sequence_steps").select("step_no, delay_days, kind, template_body").eq("campaign_id", id).order("step_no"),
@@ -113,7 +117,7 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
 
   // Run + send state.
   const c2 = campaign as CampaignRow & { send_fallbacks: boolean; send_state: "sending" | "paused" | null; inbox_id: string | null; inbox_ids: string[] | null; opt_out_line: string | null };
-  const statuses = (allStatuses ?? []) as { id: string; status: string; status_detail: string | null; domain: string | null; qualify_verdict: Verdict | null; qualify_override: boolean }[];
+  const statuses = (allStatuses ?? []) as { id: string; status: string; status_detail: string | null; domain: string | null; qualify_verdict: Verdict | null; qualify_override: boolean; split_variant: "holdout" | "firstline" | null }[];
   // Lead qualification (Part B): counts, the free skips and the >50% warning (after 10 qualified).
   const fit = verdictCounts(statuses);
   const fitSkipped = statuses.filter((l) => l.status === "skipped" && !l.qualify_override && (l.qualify_verdict === "no_fit" || l.qualify_verdict === "unsure")).length;
@@ -147,7 +151,12 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
   const templateOk = !!parsed && parsed.slots.length > 0 && !parsed.issues.some((i) => i.level === "error");
   const written = (byStatus.done ?? 0) + (byStatus.fallback ?? 0);
   // Leads with a website that still need writing: the same count the Run step reserves for.
-  const toWrite = statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length;
+  // Holdout leads in a split test get the plain copy for free, so they don't count.
+  const toWriteNow = statuses.filter((l) => l.domain && l.split_variant !== "holdout" && (l.status === "queued" || l.status === "failed")).length;
+  // Before a split test runs, its leads aren't split yet: half of them will be the free holdout.
+  const splitOn = !!(c as CampaignRow & { split_test?: unknown }).split_test;
+  const splitPending = splitOn && !statuses.some((l) => l.split_variant);
+  const toWrite = splitPending ? Math.ceil(toWriteNow / 2) : toWriteNow;
   const stepState = campaignSteps({ templateOk, previewCount, written, remaining, inFlight, started: c.status === "running" || c.status === "done" });
 
   return (
@@ -237,26 +246,29 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
           state={stepState}
           notes={
             <div className="rounded-xl bg-brand-50 p-4 ring-1 ring-brand-100" data-notes="cost">
-              <div className="text-xs font-medium text-brand-700">{toWrite === researchable || toWrite === 0 ? "Estimated cost" : "Estimated cost of the leads not written yet"}</div>
+              <div className="text-xs font-medium text-brand-700">{toWriteNow === researchable || toWrite === 0 ? "Estimated cost" : "Estimated cost of the leads not written yet"}</div>
               <div className="mt-0.5 text-xl font-semibold text-brand-900">{toWrite === 0 && written > 0 ? "All leads written" : <>≤ {n(runCredits(toWrite, c.depth, steps.filter((s) => s.kind === "personalised").length))} credits</>}</div>
               <div className="mt-1 text-xs text-brand-800/80">The first 5 leads are a free preview.</div>
               {/* C7 (review 2026-11-26): the estimate is the worst case; free skips bring it down. */}
               <div className="mt-1 text-xs text-brand-800/80">
-                {c.target_customer
+                {c.target_customer && !splitOn
                   ? "Leads with a bad address, or that don't fit your target customer, cost nothing."
                   : "Leads with a bad address cost nothing."}
               </div>
+              {splitOn ? (
+                <div className="mt-1 text-xs font-medium text-amber-800">Split test: half the leads get your plain copy, free.</div>
+              ) : null}
             </div>
           }
           steps={{
             setup: {
               title: "Set up",
-              summary: template ? `Template: ${template.name} · ${c.writer === "lite" ? "Lite" : "Pro"} writer${c.target_customer ? " · fit check on" : ""}` : "Pick a template, the writer and who fits",
+              summary: template ? `Template: ${template.name} · ${c.writer === "lite" ? "Lite" : "Pro"} writer${splitOn ? " · split test 50/50" : c.target_customer ? " · fit check on" : ""}` : "Pick a template, the writer and who fits",
               body: (
                 <>
                   <CampaignSettings campaignId={c.id} templateId={c.template_id} templates={tpls.map((t) => ({ id: t.id, name: t.name }))} />
                   <WriterSetting campaignId={c.id} writer={c.writer} locked={c.status === "running"} />
-                  <TargetCustomerSetting campaignId={c.id} target={c.target_customer ?? null} locked={c.status === "running"} />
+                  <TargetCustomerSetting campaignId={c.id} target={c.target_customer ?? null} locked={c.status === "running"} splitOn={splitOn} />
                   <div>
                     <div className="text-sm font-medium text-slate-700">Research depth</div>
                     <div className="mt-2 space-y-2 text-sm">
@@ -266,6 +278,14 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
                       {deepEnabled() && <DeepSetting campaignId={c.id} deep={!!c.depth?.deep} locked={c.status === "running"} />}
                     </div>
                   </div>
+                  {admin && (
+                    <SplitTestSetting
+                      campaignId={c.id}
+                      split={(c as CampaignRow & { split_test?: { plain_subject: string; plain_body: string } | null }).split_test ?? null}
+                      defaultPlain={{ subject: template ? stripSlots(template.subject) : "", body: template ? stripSlots(template.body) : "" }}
+                      locked={c.status === "running" || c.status === "done" || statuses.some((l) => l.split_variant)}
+                    />
+                  )}
                   <div className="text-xs text-slate-500">
                     Variables in this list: {vars.map((v) => <code key={v} className="tok-var mr-1 inline-block">{`{{${v}}}`}</code>)}
                   </div>
@@ -315,7 +335,7 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
                     running={inFlight}
                     disabledReason={!templateOk ? "Pick a template with at least one valid slot first." : !queueConfigured() ? "Add DATABASE_URL to .env.local first." : null}
                     creditsNeeded={runCredits(
-                      statuses.filter((l) => l.domain && (l.status === "queued" || l.status === "failed")).length,
+                      toWrite,
                       c.depth,
                       steps.filter((s) => s.kind === "personalised").length,
                     )}
@@ -455,6 +475,9 @@ async function CampaignDetail({ params, searchParams }: { params: PageProps<"/ca
                       {l.status === "queued" && c.status !== "running" ? "not started" : l.status}
                     </Badge>
                     {l.status_detail && <div className="mt-0.5 text-xs text-slate-500">{l.status_detail}</div>}
+                    {(l as LeadRow & { split_variant?: string | null }).split_variant && (
+                      <div className="mt-0.5 text-xs text-amber-800">Split: {(l as LeadRow & { split_variant?: string | null }).split_variant === "holdout" ? "plain copy" : "FirstLine"}</div>
+                    )}
                     {l.qualify_verdict && !l.status_detail?.startsWith("Not a fit") && !l.status_detail?.startsWith("Unsure fit") && (
                       <div className={l.qualify_verdict === "unsure" ? "mt-0.5 text-xs text-amber-800" : "mt-0.5 text-xs text-slate-500"}>
                         {l.qualify_override ? "Written anyway · " : ""}

@@ -124,9 +124,13 @@ export class LLMInvalidOutputError extends LLMRefusalError {
 /** Stands in when LLM_PROVIDER=anthropic but no key is set: every AI step reports it clearly. */
 export class MissingKeyLLM implements LLM {
   readonly extractorId = "unavailable";
-  constructor(readonly provider: "anthropic" | "deepseek" = "anthropic") {}
+  /** reason: shown on the lead instead of "… key missing" (e.g. a spending cap that was reached). */
+  constructor(
+    readonly provider: "anthropic" | "deepseek" = "anthropic",
+    private reason?: string,
+  ) {}
   private fail(): never {
-    throw new LLMUnavailableError(this.provider === "deepseek" ? "DeepSeek key missing" : "Anthropic key missing");
+    throw new LLMUnavailableError(this.reason ?? (this.provider === "deepseek" ? "DeepSeek key missing" : "Anthropic key missing"));
   }
   async extractFacts(): Promise<never> {
     this.fail();

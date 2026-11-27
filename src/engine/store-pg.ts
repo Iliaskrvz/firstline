@@ -13,8 +13,8 @@ export class PgStore implements EngineStore {
   async loadLeadJob(leadId: string): Promise<LeadJob | null> {
     const { rows } = await this.pool.query(
       `select l.id, l.workspace_id, l.campaign_id, l.email, l.first_name, l.last_name, l.company, l.title,
-              l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.deep_status, l.person_facts, l.qualify_override,
-              c.writer, c.depth, c.status as c_status, c.mode as c_mode, c.target_customer,
+              l.linkedin_headline, l.website, l.domain, l.custom, l.status, l.deep_status, l.person_facts, l.qualify_override, l.split_variant,
+              c.writer, c.depth, c.status as c_status, c.mode as c_mode, c.target_customer, c.split_test,
               t.id as t_id, t.subject, t.body, t.slots, t.style_rules, t.examples
          from public.leads l
          join public.campaigns c on c.id = l.campaign_id
@@ -34,9 +34,9 @@ export class PgStore implements EngineStore {
         id: r.id, workspace_id: r.workspace_id, campaign_id: r.campaign_id, email: r.email, first_name: r.first_name,
         last_name: r.last_name, company: r.company, title: r.title, linkedin_headline: r.linkedin_headline,
         website: r.website, domain: r.domain, custom: r.custom ?? {}, status: r.status,
-        deep_status: r.deep_status ?? null, person_facts: r.person_facts ?? null, qualify_override: !!r.qualify_override,
+        deep_status: r.deep_status ?? null, person_facts: r.person_facts ?? null, qualify_override: !!r.qualify_override, split_variant: r.split_variant ?? null,
       },
-      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode, target: r.target_customer ?? null },
+      campaign: { id: r.campaign_id, writer: r.writer, depth: r.depth, status: r.c_status, mode: r.c_mode, target: r.target_customer ?? null, split: r.split_test ?? null },
       template: r.t_id
         ? { id: r.t_id, subject: r.subject, body: r.body, slots: r.slots, style_rules: r.style_rules ?? {}, examples: r.examples ?? [] }
         : null,

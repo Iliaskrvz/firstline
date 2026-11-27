@@ -15,7 +15,9 @@ import { chainGates, effectiveConcurrency } from "@/engine/limiter";
 import { acquireWorkspaceSlot, asSingleton, deferDelaySeconds, PgRateGate, PgSlotGate, pruneProviderWindows, releaseWorkspaceSlot, workerCapacity, workspaceLimit } from "@/engine/limiter-pg";
 import { jobContext, PRIORITY } from "@/engine/job-context";
 import { concurrencyLevel, MAX_WORKSPACE_CONCURRENCY } from "@/lib/concurrency";
-import { llmFactory, selectLLM } from "@/engine/llm";
+import { llmFactory, MissingKeyLLM, selectLLM, type LLM } from "@/engine/llm";
+import { ownUseCapUsd, ownUseDecision } from "@/lib/own-use";
+import { llmOverride, ownUseSpendThisMonth } from "@/lib/own-use-pg";
 import { processLead } from "@/engine/pipeline";
 import { upsertSkills, runQueuedEval } from "@/engine/lab-pg";
 import { isPublicUrlHost } from "@/lib/public-host";
@@ -67,6 +69,27 @@ async function main() {
   if (config.llmProvider !== "fake" && !llmPerMinute) log("LLM_RPM not set: no per-minute limit of ours on AI requests.");
   const llm = await selectLLM(config, { gate: llmGate });
   const llmFor = await llmFactory(config, { gate: llmGate });
+  // Own use (admin switch per workspace): the owner's workspace may use Claude while the rest of the
+  // server stays on its provider. It has its own config (Claude models per step) and provider gate.
+  const ownConfig = engineConfig({ ...process.env, LLM_PROVIDER: "anthropic" });
+  const ownLlm: LLM | null = ownConfig.anthropicApiKey
+    ? await selectLLM(ownConfig, { gate: new PgSlotGate(pool, "llm:anthropic", ownConfig.concurrency.llm) })
+    : null;
+  const ownCap = ownUseCapUsd();
+  const overrides = new Map<string, { value: "anthropic" | null; at: number }>();
+  let ownSpend = { usd: 0, at: 0 };
+  /** The AI and config for one lead: the server's, Claude (own use), or a clear stop (no key, no cap, cap reached). */
+  const aiFor = async (workspaceId: string): Promise<{ llm: LLM; config: typeof config }> => {
+    const hit = overrides.get(workspaceId);
+    const override = hit && Date.now() - hit.at < 30_000 ? hit.value : await llmOverride(pool, workspaceId);
+    overrides.set(workspaceId, { value: override, at: Date.now() });
+    if (!override) return { llm, config };
+    if (Date.now() - ownSpend.at > 30_000) ownSpend = { usd: await ownUseSpendThisMonth(pool), at: Date.now() };
+    const d = ownUseDecision({ override, hasKey: ownLlm !== null, capUsd: ownCap, spentUsd: ownSpend.usd });
+    if (d.use === "claude" && ownLlm) return { llm: ownLlm, config: ownConfig };
+    return { llm: new MissingKeyLLM("anthropic", d.use === "blocked" ? d.reason : undefined), config: ownConfig };
+  };
+  if (ownLlm) log(`Own use: Claude available for workspaces an admin switches on (cap: ${ownCap == null ? "NOT SET, so own use stays blocked" : `$${ownCap}/month`}).`);
   log(`AI provider: ${config.llmProvider}${config.llmProvider === "fake" ? " (test output, no AI used)" : ""}`);
   if (config.llmProvider === "deepseek" && !config.deepseekApiKey) {
     log("⚠ LLM_PROVIDER=deepseek but DEEPSEEK_API_KEY is missing: research runs, AI steps will show 'DeepSeek key missing'.");
@@ -394,8 +417,9 @@ async function main() {
         // (the pipeline then sees a settled lead). Cached DNS, so usually instant.
         await checkLeadEmails(pool, resolver, { leadIds: [leadId] }).catch((e) => log(`lead ${leadId}: email check failed, continuing:`, (e as Error).message));
         // Shared provider limits read this to share fairly and to let previews go first.
+        const ai = await aiFor(workspaceId);
         const res = await jobContext.run({ workspaceId, priority: preview ? PRIORITY.preview : PRIORITY.run }, () =>
-          processLead(leadId, { store, reader, llm, config, firecrawlGate }, { preview, force }),
+          processLead(leadId, { store, reader, llm: ai.llm, config: ai.config, firecrawlGate }, { preview, force }),
         );
         stats.jobsDone++;
         // Public API: the last lead of a job finishes the job and queues its webhook.
