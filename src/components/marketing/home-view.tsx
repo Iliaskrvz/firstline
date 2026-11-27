@@ -603,7 +603,7 @@ export function HomeView({ t, locale }: { t: HomeCopy; locale: Locale }) {
         </div>
         <div className="mx-auto mt-10 max-w-2xl space-y-2 text-center text-[15px] text-slate-700">
           <p>{t.honestLine}</p>
-          {founder ? <FounderNote f={founder} /> : <p className="text-slate-600">{t.founderNote}</p>}
+          {founder ? <FounderNote f={founder} locale={locale} /> : <p className="text-slate-600">{t.founderNote}</p>}
         </div>
       </section>
     </MarketingShell>

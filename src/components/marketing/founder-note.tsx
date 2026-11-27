@@ -2,8 +2,11 @@
 // visibleProof() lets it through (SHOW_PROOF on and placeholder: false).
 import Image from "next/image";
 import { initials, type Founder } from "@/content/proof";
+import type { Locale } from "@/content/site";
 
-export function FounderNote({ f }: { f: Founder }) {
+export function FounderNote({ f, locale }: { f: Founder; locale: Locale }) {
+  const line = locale === "nl" ? f.line_nl : f.line;
+  const role = locale === "nl" ? f.role_nl : f.role;
   return (
     <figure className="mx-auto flex max-w-xl items-center gap-4 text-left">
       {f.photo ? (
@@ -14,9 +17,9 @@ export function FounderNote({ f }: { f: Founder }) {
         </span>
       )}
       <div>
-        <blockquote className="text-[15px] leading-relaxed text-slate-800">{f.line}</blockquote>
+        <blockquote className="text-[15px] leading-relaxed text-slate-800">{line}</blockquote>
         <figcaption className="mt-1 text-sm text-slate-600">
-          {f.name} · {f.role}
+          {f.name} · {role}
         </figcaption>
       </div>
     </figure>
