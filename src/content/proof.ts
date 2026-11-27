@@ -43,7 +43,7 @@ export const CASE_STUDIES: CaseStudy[] = [
 export type Founder = { placeholder: boolean; line: string; line_nl: string; name: string; role: string; role_nl: string; photo: string | null };
 
 export const FOUNDER: Founder = {
-  placeholder: true,
+  placeholder: false,
   /**
    * Drafted 2026-11-27 at the owner's request. It only builds on what the site already says (the team
    * runs cold outreach every day) and on what the product does; no numbers or results.
@@ -51,8 +51,8 @@ export const FOUNDER: Founder = {
   line: "I run cold outreach every day. I built FirstLine to write the one line I never had time to research: a real fact from each lead's own website, with the page it came from.",
   line_nl:
     "Ik doe elke dag cold outreach. Ik bouwde FirstLine om de ene zin te schrijven waar ik nooit tijd voor had: een echt feit van de website van elke lead, met de pagina erbij.",
-  /** As you want it shown, e.g. "First Last". The avatar uses its initials. Still to confirm. */
-  name: "",
+  /** First name only (owner's choice 2026-11-27). The avatar uses its initial until the photo is in. */
+  name: "Ilias",
   role: "Founder of FirstLine",
   role_nl: "Oprichter van FirstLine",
   photo: null,

@@ -59,8 +59,9 @@ describe("SHOW_PROOF", () => {
     expect(visibleProof([{ ...OWN_OUTREACH, placeholder: false }], "on")).toHaveLength(1);
   });
 
-  it("founder line: hidden until real; initials for the avatar", () => {
-    expect(visibleProof([FOUNDER], "on")).toEqual([]);
+  it("founder line: published only with a line and a name; initials for the avatar", () => {
+    expect(visibleProof([FOUNDER], "off")).toEqual([]);
+    if (!FOUNDER.placeholder) expect(FOUNDER.line && FOUNDER.line_nl && FOUNDER.name).toBeTruthy();
     expect(initials("Anna de Vries")).toBe("AV");
     expect(initials("Tom")).toBe("T");
     expect(initials("  ")).toBe("");
