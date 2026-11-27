@@ -8,7 +8,7 @@ import path from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadAdmin, loadCostBreakdown } from "@/billing/admin-db";
-import { reserveForRun } from "@/billing/db";
+import { balance, grantCredits, reserveForRun } from "@/billing/db";
 import { engineConfig } from "@/engine/config";
 import type { WebReader } from "@/engine/firecrawl";
 import { FakeLLM } from "@/engine/llm-fake";
@@ -173,3 +173,19 @@ describe("split test", () => {
     expect(personalised.find((r) => r.split_variant === "holdout").p).toBe(false);
   });
 });
+
+describe("admin credit grant", () => {
+  it("adds credits once per request, as a bonus: never counted as bought or as revenue", async () => {
+    const before = await balance(pool, ownWs);
+    const purchasedBefore = (await pool.query("select purchased from public.workspace_balance where workspace_id = $1", [ownWs])).rows[0].purchased;
+    const revenueBefore = (await loadAdmin(pool)).perCreditEur;
+    expect(await grantCredits(pool, { workspaceId: ownWs, credits: 300, key: "grant:req-1", note: "Admin grant: own outreach test" })).toBe(true);
+    expect(await grantCredits(pool, { workspaceId: ownWs, credits: 300, key: "grant:req-1", note: "Admin grant: own outreach test" })).toBe(false); // double click
+    const after = await balance(pool, ownWs);
+    expect(after.available).toBe(before.available + 300);
+    expect((await pool.query("select purchased from public.workspace_balance where workspace_id = $1", [ownWs])).rows[0].purchased).toBe(purchasedBefore);
+    expect((await loadAdmin(pool)).perCreditEur).toBe(revenueBefore);
+    await expect(grantCredits(pool, { workspaceId: ownWs, credits: 50_000, key: "grant:req-2", note: "x" })).rejects.toThrow(/1 to 5000/);
+  });
+});
+

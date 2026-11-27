@@ -18,6 +18,7 @@ import { createFirecrawl } from "@/engine/firecrawl";
 import { serverPool } from "@/server/db";
 import { SenderSwitch } from "./sender-switch";
 import { OwnUseSwitch } from "./own-use-switch";
+import { GrantCredits } from "./grant-credits";
 import { listLlmOverrides, ownUseSpendThisMonth } from "@/lib/own-use-pg";
 import { ownUseCapUsd } from "@/lib/own-use";
 import { splitTestStats } from "@/lib/split-test-pg";
@@ -429,6 +430,7 @@ async function Admin() {
                 <SenderSwitch workspaceId={w.id} disabled={w.senderDisabled} />
                 {ownIds.has(w.id) && <Badge tone="amber">own use: Claude</Badge>}
                 <OwnUseSwitch workspaceId={w.id} on={ownIds.has(w.id)} />
+                <GrantCredits workspaceId={w.id} />
               </span>
             </li>
           ))}

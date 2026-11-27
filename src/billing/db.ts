@@ -84,6 +84,24 @@ export async function stopRun(pool: pg.Pool, workspaceId: string, campaignId: st
  * A paid purchase. Idempotent on `key` (e.g. "dodo:<payment id>"), so a repeated webhook adds
  * nothing. The key is stored in credit_ledger.stripe_event_id, the ledger's unique payment-reference column.
  */
+/** Most credits one admin grant may add (a typo like 50000 shouldn't go through). */
+export const MAX_GRANT = 5000;
+
+/**
+ * Admin grant: free credits for a workspace (e.g. the owner's own outreach test). Written as a "bonus"
+ * ledger row, like welcome credits, so it never counts as bought: no revenue in the margin, no higher
+ * concurrency tier. `key` makes a repeated click or retry add the credits only once.
+ */
+export async function grantCredits(pool: pg.Pool, input: { workspaceId: string; credits: number; key: string; note: string }): Promise<boolean> {
+  if (!Number.isInteger(input.credits) || input.credits < 1 || input.credits > MAX_GRANT) throw new Error(`A grant is 1 to ${MAX_GRANT} credits.`);
+  const { rowCount } = await pool.query(
+    `insert into public.credit_ledger (workspace_id, type, amount, note, stripe_event_id, kind)
+     values ($1, 'bonus', $2, $3, $4, 'standard') on conflict (stripe_event_id) do nothing`,
+    [input.workspaceId, input.credits, input.note, input.key],
+  );
+  return rowCount === 1;
+}
+
 export async function addPurchase(pool: pg.Pool, input: { workspaceId: string; credits: number; key: string; note: string; kind?: "standard" | "lite" }): Promise<boolean> {
   const { rows } = await pool.query("select public.add_purchase($1, $2, $3, $4, $5) added", [input.workspaceId, input.credits, input.key, input.note, input.kind ?? "standard"]);
   return rows[0].added;
